@@ -232,6 +232,14 @@ impl MainMenu {
         }
     }
 
+    /// Set selection directly by index
+    pub fn set_selection(&mut self, index: usize) {
+        let len = 6; // Number of menu items
+        if index < len {
+            self.selected_index = index;
+        }
+    }
+
     /// Get currently selected option
     pub fn get_selected(&self) -> MainMenuSelection {
         MainMenuSelection::from_index(self.selected_index).unwrap_or(MainMenuSelection::None)

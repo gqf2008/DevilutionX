@@ -1,0 +1,937 @@
+
+{
+  "type":"sprite_and_game_data",
+  "version":"2.0",
+  "description":"DevilutionX Sprite and Game Constants - Comprehensive",
+  "pixel_formats":
+  [
+    {
+      "name":"RGBA8888",
+      "bits_per_pixel":32,
+      "layout":"R8 G8 B8 A8",
+      "usage":"Standard 32-bit with alpha"
+    },
+    {
+      "name":"ARGB8888",
+      "bits_per_pixel":32,
+      "layout":"A8 R8 G8 B8",
+      "usage":"Alternative 32-bit layout"
+    },
+    {
+      "name":"ABGR8888",
+      "bits_per_pixel":32,
+      "layout":"A8 B8 G8 R8",
+      "usage":"SDL default on little-endian"
+    },
+    {
+      "name":"RGB888",
+      "bits_per_pixel":24,
+      "layout":"R8 G8 B8",
+      "usage":"24-bit no alpha"
+    },
+    {
+      "name":"RGB565",
+      "bits_per_pixel":16,
+      "layout":"R5 G6 B5",
+      "usage":"16-bit color"
+    },
+    {
+      "name":"PAL8",
+      "bits_per_pixel":8,
+      "layout":"Index8",
+      "usage":"8-bit palettized"
+    }
+  ],
+  "pcx_format":
+  {
+    "header_size":128,
+    "magic":10,
+    "version":5,
+    "encoding":1,
+    "palette_offset":-769,
+    "palette_marker":12,
+    "header_fields":
+    [
+      {
+        "name":"magic",
+        "offset":0,
+        "size":1,
+        "description":"Always 10 (0x0A)"
+      },
+      {
+        "name":"version",
+        "offset":1,
+        "size":1,
+        "description":"PCX version (5 = 3.0)"
+      },
+      {
+        "name":"encoding",
+        "offset":2,
+        "size":1,
+        "description":"1 = RLE"
+      },
+      {
+        "name":"bpp",
+        "offset":3,
+        "size":1,
+        "description":"Bits per pixel per plane"
+      },
+      {
+        "name":"xmin",
+        "offset":4,
+        "size":2,
+        "description":"Image bounds left"
+      },
+      {
+        "name":"ymin",
+        "offset":6,
+        "size":2,
+        "description":"Image bounds top"
+      },
+      {
+        "name":"xmax",
+        "offset":8,
+        "size":2,
+        "description":"Image bounds right"
+      },
+      {
+        "name":"ymax",
+        "offset":10,
+        "size":2,
+        "description":"Image bounds bottom"
+      },
+      {
+        "name":"hdpi",
+        "offset":12,
+        "size":2,
+        "description":"Horizontal DPI"
+      },
+      {
+        "name":"vdpi",
+        "offset":14,
+        "size":2,
+        "description":"Vertical DPI"
+      },
+      {
+        "name":"colormap",
+        "offset":16,
+        "size":48,
+        "description":"16-color palette"
+      },
+      {
+        "name":"reserved",
+        "offset":64,
+        "size":1,
+        "description":"Reserved byte"
+      },
+      {
+        "name":"nplanes",
+        "offset":65,
+        "size":1,
+        "description":"Number of color planes"
+      },
+      {
+        "name":"bytes_per_line",
+        "offset":66,
+        "size":2,
+        "description":"Bytes per scanline"
+      },
+      {
+        "name":"palette_info",
+        "offset":68,
+        "size":2,
+        "description":"Palette type"
+      }
+    ]
+  },
+  "clx_format":
+  {
+    "description":"DevilutionX native sprite format",
+    "structure":
+    ["uint32_t num_groups", "uint32_t frame_offsets[num_frames+1]", "for each frame: ClxFrame data"
+    ],
+    "pixel_commands":
+    [
+      {
+        "name":"transparent",
+        "byte_range_start":0,
+        "byte_range_end":127,
+        "meaning":"Skip N transparent pixels"
+      },
+      {
+        "name":"fill",
+        "byte_range_start":128,
+        "byte_range_end":190,
+        "meaning":"Fill N pixels with next byte color"
+      },
+      {
+        "name":"pixels",
+        "byte_range_start":191,
+        "byte_range_end":255,
+        "meaning":"Copy N raw pixel bytes"
+      }
+    ]
+  },
+  "ui_sprites":
+  [
+    {
+      "name":"focus_small",
+      "file":"ui_art/focus16.pcx",
+      "frames":8,
+      "width":16,
+      "height":16,
+      "usage":"Small menu focus indicator",
+      "transparent_index":250
+    },
+    {
+      "name":"focus_med",
+      "file":"ui_art/focus.pcx",
+      "frames":8,
+      "width":30,
+      "height":30,
+      "usage":"Medium menu focus indicator",
+      "transparent_index":250
+    },
+    {
+      "name":"focus_big",
+      "file":"ui_art/focus42.pcx",
+      "frames":8,
+      "width":42,
+      "height":42,
+      "usage":"Large menu focus indicator",
+      "transparent_index":250
+    },
+    {
+      "name":"logo",
+      "file":"ui_art/logo.pcx",
+      "frames":15,
+      "width":137,
+      "height":137,
+      "usage":"Animated main menu logo",
+      "transparent_index":250
+    },
+    {
+      "name":"smlogo",
+      "file":"ui_art/smlogo.pcx",
+      "frames":1,
+      "width":64,
+      "height":64,
+      "usage":"Small logo",
+      "transparent_index":250
+    },
+    {
+      "name":"cursor",
+      "file":"ui_art/cursor.pcx",
+      "frames":1,
+      "width":33,
+      "height":32,
+      "usage":"Mouse cursor",
+      "transparent_index":250
+    },
+    {
+      "name":"penta_big",
+      "file":"fonts/bigpentspn.clx",
+      "frames":8,
+      "width":48,
+      "height":48,
+      "usage":"Large pentagon cursor",
+      "transparent_index":250
+    },
+    {
+      "name":"penta_med",
+      "file":"fonts/medpentspn.clx",
+      "frames":8,
+      "width":32,
+      "height":32,
+      "usage":"Medium pentagon cursor",
+      "transparent_index":250
+    },
+    {
+      "name":"penta_small",
+      "file":"fonts/smlpentspn.clx",
+      "frames":8,
+      "width":16,
+      "height":16,
+      "usage":"Small pentagon cursor",
+      "transparent_index":250
+    },
+    {
+      "name":"mainmenu_bg",
+      "file":"ui_art/mainmenu.pcx",
+      "frames":1,
+      "width":640,
+      "height":480,
+      "usage":"Main menu background",
+      "transparent_index":250
+    },
+    {
+      "name":"selhero_bg",
+      "file":"ui_art/selhero.pcx",
+      "frames":1,
+      "width":640,
+      "height":480,
+      "usage":"Select hero background",
+      "transparent_index":250
+    },
+    {
+      "name":"selgame_bg",
+      "file":"ui_art/selgame.pcx",
+      "frames":1,
+      "width":640,
+      "height":480,
+      "usage":"Select game background",
+      "transparent_index":250
+    },
+    {
+      "name":"button_small",
+      "file":"ui_art/but_sml.pcx",
+      "frames":2,
+      "width":110,
+      "height":28,
+      "usage":"Small button (normal/pressed)",
+      "transparent_index":250
+    },
+    {
+      "name":"button_xsmall",
+      "file":"ui_art/but_xsm.pcx",
+      "frames":2,
+      "width":72,
+      "height":20,
+      "usage":"Extra small button",
+      "transparent_index":250
+    },
+    {
+      "name":"scrollbar_bg",
+      "file":"ui_art/scrollbar.pcx",
+      "frames":1,
+      "width":18,
+      "height":200,
+      "usage":"Scrollbar background",
+      "transparent_index":250
+    },
+    {
+      "name":"scrollbar_arrow",
+      "file":"ui_art/sb_arrow.pcx",
+      "frames":2,
+      "width":18,
+      "height":18,
+      "usage":"Scrollbar arrows (up/down)",
+      "transparent_index":250
+    },
+    {
+      "name":"scrollbar_thumb",
+      "file":"ui_art/sb_thumb.pcx",
+      "frames":1,
+      "width":14,
+      "height":20,
+      "usage":"Scrollbar thumb",
+      "transparent_index":250
+    },
+    {
+      "name":"progress_bg",
+      "file":"ui_art/prog_bg.pcx",
+      "frames":1,
+      "width":227,
+      "height":29,
+      "usage":"Progress bar background",
+      "transparent_index":250
+    },
+    {
+      "name":"progress_fill",
+      "file":"ui_art/prog_fil.pcx",
+      "frames":1,
+      "width":227,
+      "height":29,
+      "usage":"Progress bar fill",
+      "transparent_index":250
+    },
+    {
+      "name":"hero_portraits",
+      "file":"ui_art/heros.pcx",
+      "frames":6,
+      "width":72,
+      "height":96,
+      "usage":"Hero class portraits",
+      "transparent_index":250
+    },
+    {
+      "name":"panel_left",
+      "file":"ui_art/lpanel.pcx",
+      "frames":1,
+      "width":320,
+      "height":352,
+      "usage":"Left panel background",
+      "transparent_index":250
+    },
+    {
+      "name":"panel_right",
+      "file":"ui_art/rpanel.pcx",
+      "frames":1,
+      "width":320,
+      "height":352,
+      "usage":"Right panel background",
+      "transparent_index":250
+    },
+    {
+      "name":"spellbook",
+      "file":"ui_art/spellbk.pcx",
+      "frames":1,
+      "width":320,
+      "height":352,
+      "usage":"Spellbook panel",
+      "transparent_index":250
+    },
+    {
+      "name":"spellicons",
+      "file":"ui_art/spelli2.pcx",
+      "frames":52,
+      "width":56,
+      "height":56,
+      "usage":"Spell icons",
+      "transparent_index":250
+    }
+  ],
+  "hero_classes":
+  [
+    {
+      "name":"Warrior",
+      "base_str":30,
+      "base_mag":10,
+      "base_dex":20,
+      "base_vit":25,
+      "max_str":250,
+      "max_mag":50,
+      "max_dex":60,
+      "max_vit":100,
+      "base_life":70,
+      "base_mana":10
+    },
+    {
+      "name":"Rogue",
+      "base_str":20,
+      "base_mag":15,
+      "base_dex":30,
+      "base_vit":20,
+      "max_str":55,
+      "max_mag":70,
+      "max_dex":250,
+      "max_vit":80,
+      "base_life":45,
+      "base_mana":22
+    },
+    {
+      "name":"Sorcerer",
+      "base_str":15,
+      "base_mag":35,
+      "base_dex":15,
+      "base_vit":20,
+      "max_str":45,
+      "max_mag":250,
+      "max_dex":85,
+      "max_vit":80,
+      "base_life":30,
+      "base_mana":70
+    },
+    {
+      "name":"Monk",
+      "base_str":25,
+      "base_mag":15,
+      "base_dex":25,
+      "base_vit":20,
+      "max_str":150,
+      "max_mag":80,
+      "max_dex":150,
+      "max_vit":80,
+      "base_life":60,
+      "base_mana":22
+    },
+    {
+      "name":"Bard",
+      "base_str":20,
+      "base_mag":20,
+      "base_dex":25,
+      "base_vit":20,
+      "max_str":120,
+      "max_mag":120,
+      "max_dex":120,
+      "max_vit":100,
+      "base_life":55,
+      "base_mana":35
+    },
+    {
+      "name":"Barbarian",
+      "base_str":40,
+      "base_mag":0,
+      "base_dex":20,
+      "base_vit":25,
+      "max_str":255,
+      "max_mag":0,
+      "max_dex":55,
+      "max_vit":150,
+      "base_life":70,
+      "base_mana":0
+    }
+  ],
+  "spells":
+  [
+    {
+      "name":"Firebolt",
+      "id":1,
+      "magic_type":"Fire",
+      "min_level":1,
+      "base_mana":6
+    },
+    {
+      "name":"Healing",
+      "id":2,
+      "magic_type":"Magic",
+      "min_level":1,
+      "base_mana":5
+    },
+    {
+      "name":"Lightning",
+      "id":3,
+      "magic_type":"Lightning",
+      "min_level":4,
+      "base_mana":10
+    },
+    {
+      "name":"Flash",
+      "id":4,
+      "magic_type":"Lightning",
+      "min_level":5,
+      "base_mana":16
+    },
+    {
+      "name":"Identify",
+      "id":5,
+      "magic_type":"Magic",
+      "min_level":1,
+      "base_mana":13
+    },
+    {
+      "name":"Fire Wall",
+      "id":6,
+      "magic_type":"Fire",
+      "min_level":3,
+      "base_mana":28
+    },
+    {
+      "name":"Town Portal",
+      "id":7,
+      "magic_type":"Magic",
+      "min_level":3,
+      "base_mana":35
+    },
+    {
+      "name":"Stone Curse",
+      "id":8,
+      "magic_type":"Magic",
+      "min_level":6,
+      "base_mana":60
+    },
+    {
+      "name":"Infravision",
+      "id":9,
+      "magic_type":"Magic",
+      "min_level":1,
+      "base_mana":40
+    },
+    {
+      "name":"Phasing",
+      "id":10,
+      "magic_type":"Magic",
+      "min_level":7,
+      "base_mana":12
+    },
+    {
+      "name":"Mana Shield",
+      "id":11,
+      "magic_type":"Magic",
+      "min_level":6,
+      "base_mana":33
+    },
+    {
+      "name":"Fireball",
+      "id":12,
+      "magic_type":"Fire",
+      "min_level":8,
+      "base_mana":16
+    },
+    {
+      "name":"Guardian",
+      "id":13,
+      "magic_type":"Fire",
+      "min_level":9,
+      "base_mana":50
+    },
+    {
+      "name":"Chain Lightning",
+      "id":14,
+      "magic_type":"Lightning",
+      "min_level":8,
+      "base_mana":30
+    },
+    {
+      "name":"Flame Wave",
+      "id":15,
+      "magic_type":"Fire",
+      "min_level":9,
+      "base_mana":35
+    },
+    {
+      "name":"Nova",
+      "id":17,
+      "magic_type":"Magic",
+      "min_level":14,
+      "base_mana":60
+    },
+    {
+      "name":"Inferno",
+      "id":20,
+      "magic_type":"Fire",
+      "min_level":3,
+      "base_mana":11
+    },
+    {
+      "name":"Golem",
+      "id":21,
+      "magic_type":"Magic",
+      "min_level":8,
+      "base_mana":100
+    },
+    {
+      "name":"Teleport",
+      "id":23,
+      "magic_type":"Magic",
+      "min_level":14,
+      "base_mana":35
+    },
+    {
+      "name":"Apocalypse",
+      "id":24,
+      "magic_type":"Fire",
+      "min_level":19,
+      "base_mana":150
+    },
+    {
+      "name":"Elemental",
+      "id":29,
+      "magic_type":"Fire",
+      "min_level":8,
+      "base_mana":35
+    },
+    {
+      "name":"Charged Bolt",
+      "id":30,
+      "magic_type":"Lightning",
+      "min_level":1,
+      "base_mana":6
+    },
+    {
+      "name":"Holy Bolt",
+      "id":31,
+      "magic_type":"Magic",
+      "min_level":1,
+      "base_mana":7
+    },
+    {
+      "name":"Resurrect",
+      "id":32,
+      "magic_type":"Magic",
+      "min_level":1,
+      "base_mana":20
+    },
+    {
+      "name":"Telekinesis",
+      "id":33,
+      "magic_type":"Magic",
+      "min_level":2,
+      "base_mana":15
+    },
+    {
+      "name":"Blood Star",
+      "id":35,
+      "magic_type":"Magic",
+      "min_level":14,
+      "base_mana":25
+    },
+    {
+      "name":"Bone Spirit",
+      "id":36,
+      "magic_type":"Magic",
+      "min_level":9,
+      "base_mana":24
+    }
+  ],
+  "dungeon_levels":
+  [
+    {
+      "name":"Cathedral 1",
+      "level":1,
+      "min_monster_level":1,
+      "max_monster_level":2,
+      "tileset":"l1"
+    },
+    {
+      "name":"Cathedral 2",
+      "level":2,
+      "min_monster_level":2,
+      "max_monster_level":4,
+      "tileset":"l1"
+    },
+    {
+      "name":"Cathedral 3",
+      "level":3,
+      "min_monster_level":3,
+      "max_monster_level":5,
+      "tileset":"l1"
+    },
+    {
+      "name":"Cathedral 4",
+      "level":4,
+      "min_monster_level":4,
+      "max_monster_level":6,
+      "tileset":"l1"
+    },
+    {
+      "name":"Catacombs 1",
+      "level":5,
+      "min_monster_level":5,
+      "max_monster_level":8,
+      "tileset":"l2"
+    },
+    {
+      "name":"Catacombs 2",
+      "level":6,
+      "min_monster_level":6,
+      "max_monster_level":9,
+      "tileset":"l2"
+    },
+    {
+      "name":"Catacombs 3",
+      "level":7,
+      "min_monster_level":7,
+      "max_monster_level":10,
+      "tileset":"l2"
+    },
+    {
+      "name":"Catacombs 4",
+      "level":8,
+      "min_monster_level":8,
+      "max_monster_level":11,
+      "tileset":"l2"
+    },
+    {
+      "name":"Caves 1",
+      "level":9,
+      "min_monster_level":9,
+      "max_monster_level":12,
+      "tileset":"l3"
+    },
+    {
+      "name":"Caves 2",
+      "level":10,
+      "min_monster_level":10,
+      "max_monster_level":13,
+      "tileset":"l3"
+    },
+    {
+      "name":"Caves 3",
+      "level":11,
+      "min_monster_level":11,
+      "max_monster_level":14,
+      "tileset":"l3"
+    },
+    {
+      "name":"Caves 4",
+      "level":12,
+      "min_monster_level":12,
+      "max_monster_level":15,
+      "tileset":"l3"
+    },
+    {
+      "name":"Hell 1",
+      "level":13,
+      "min_monster_level":13,
+      "max_monster_level":16,
+      "tileset":"l4"
+    },
+    {
+      "name":"Hell 2",
+      "level":14,
+      "min_monster_level":14,
+      "max_monster_level":17,
+      "tileset":"l4"
+    },
+    {
+      "name":"Hell 3",
+      "level":15,
+      "min_monster_level":15,
+      "max_monster_level":18,
+      "tileset":"l4"
+    },
+    {
+      "name":"Hell 4",
+      "level":16,
+      "min_monster_level":16,
+      "max_monster_level":30,
+      "tileset":"l4"
+    }
+  ],
+  "item_types":
+  [
+    {
+      "name":"Gold",
+      "class_id":4,
+      "equip_location":"none"
+    },
+    {
+      "name":"Sword",
+      "class_id":1,
+      "equip_location":"one_hand"
+    },
+    {
+      "name":"Axe",
+      "class_id":1,
+      "equip_location":"one_hand"
+    },
+    {
+      "name":"Bow",
+      "class_id":1,
+      "equip_location":"two_hand"
+    },
+    {
+      "name":"Staff",
+      "class_id":1,
+      "equip_location":"two_hand"
+    },
+    {
+      "name":"Mace",
+      "class_id":1,
+      "equip_location":"one_hand"
+    },
+    {
+      "name":"Shield",
+      "class_id":2,
+      "equip_location":"one_hand"
+    },
+    {
+      "name":"Helm",
+      "class_id":2,
+      "equip_location":"head"
+    },
+    {
+      "name":"Light Armor",
+      "class_id":2,
+      "equip_location":"torso"
+    },
+    {
+      "name":"Medium Armor",
+      "class_id":2,
+      "equip_location":"torso"
+    },
+    {
+      "name":"Heavy Armor",
+      "class_id":2,
+      "equip_location":"torso"
+    },
+    {
+      "name":"Ring",
+      "class_id":3,
+      "equip_location":"ring"
+    },
+    {
+      "name":"Amulet",
+      "class_id":3,
+      "equip_location":"amulet"
+    },
+    {
+      "name":"Potion",
+      "class_id":3,
+      "equip_location":"belt"
+    },
+    {
+      "name":"Scroll",
+      "class_id":3,
+      "equip_location":"none"
+    },
+    {
+      "name":"Book",
+      "class_id":3,
+      "equip_location":"none"
+    },
+    {
+      "name":"Quest",
+      "class_id":5,
+      "equip_location":"none"
+    }
+  ],
+  "game_constants":
+  {
+    "TILE_WIDTH":64,
+    "TILE_HEIGHT":32,
+    "MAX_DUNGEON_SIZE":112,
+    "MAX_PLRS":4,
+    "MAX_MONSTERS":200,
+    "MAX_ITEMS":127,
+    "MAX_OBJECTS":127,
+    "MAX_MISSILES":125,
+    "MAXQUESTS":24,
+    "MAX_SPELLS":52,
+    "MAXBELTITEMS":8,
+    "MAXLIGHTS":32,
+    "MAXVISION":32,
+    "INVENTORY_WIDTH":10,
+    "INVENTORY_HEIGHT":4,
+    "GOLD_SMALL_LIMIT":1000,
+    "GOLD_MEDIUM_LIMIT":2500,
+    "GOLD_MAX_LIMIT":5000,
+    "MAX_PLAYER_LEVEL":50,
+    "NIGHTMARE_LEVEL_BONUS":16,
+    "HELL_LEVEL_BONUS":32
+  },
+  "mpq_archives":
+  [
+    {
+      "name":"diabdat.mpq",
+      "description":"Main Diablo game data",
+      "required":true
+    },
+    {
+      "name":"hellfire.mpq",
+      "description":"Hellfire expansion data",
+      "required":false
+    },
+    {
+      "name":"hfmonk.mpq",
+      "description":"Hellfire monk class",
+      "required":false
+    },
+    {
+      "name":"hfmusic.mpq",
+      "description":"Hellfire music",
+      "required":false
+    },
+    {
+      "name":"hfvoice.mpq",
+      "description":"Hellfire voice",
+      "required":false
+    },
+    {
+      "name":"spawn.mpq",
+      "description":"Shareware content",
+      "required":false
+    },
+    {
+      "name":"devilutionx.mpq",
+      "description":"DevilutionX assets",
+      "required":true
+    },
+    {
+      "name":"fonts.mpq",
+      "description":"Font assets",
+      "required":true
+    }
+  ]
+}

@@ -42,6 +42,27 @@ use utils::{load_options as load_options_into_global, options as global_options,
 const SCREEN_WIDTH: u32 = 640;
 const SCREEN_HEIGHT: u32 = 480;
 
+/// Convert window pixel coordinates to logical coordinates (640x480)
+/// SDL2's mouse_state() returns window coordinates, not logical coordinates
+fn window_to_logical(canvas: &sdl2::render::Canvas<sdl2::video::Window>, x: i32, y: i32) -> (i32, i32) {
+    let (window_w, window_h) = canvas.window().size();
+    let logical_w = SCREEN_WIDTH as f32;
+    let logical_h = SCREEN_HEIGHT as f32;
+
+    // Calculate scale and offset (letterboxing)
+    let scale_x = window_w as f32 / logical_w;
+    let scale_y = window_h as f32 / logical_h;
+    let scale = scale_x.min(scale_y);
+
+    let offset_x = (window_w as f32 - logical_w * scale) / 2.0;
+    let offset_y = (window_h as f32 - logical_h * scale) / 2.0;
+
+    let lx = ((x as f32 - offset_x) / scale) as i32;
+    let ly = ((y as f32 - offset_y) / scale) as i32;
+
+    (lx.clamp(0, SCREEN_WIDTH as i32 - 1), ly.clamp(0, SCREEN_HEIGHT as i32 - 1))
+}
+
 /// Minimal command-line flags parsed at startup (C++: DiabloParseFlags)
 #[derive(Default, Debug, Clone)]
 struct CmdFlags {
@@ -463,6 +484,8 @@ fn options_file_path() -> PathBuf {
 
 /// Load options from disk or create defaults when missing
 fn load_or_init_options(path: &Path) -> Result<(), String> {
+    println!("[Options] Config path: {}", path.display());
+
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
             fs::create_dir_all(parent).map_err(|e| format!("Failed to create config dir: {}", e))?;
@@ -470,8 +493,14 @@ fn load_or_init_options(path: &Path) -> Result<(), String> {
     }
 
     if path.exists() {
-        load_options_into_global(path).map_err(|e| e.to_string())?
+        println!("[Options] Loading existing config file");
+        load_options_into_global(path).map_err(|e| e.to_string())?;
+        // Print loaded values for debugging
+        let opts = global_options();
+        println!("[Options] Loaded: {}x{}, fullscreen={}",
+            opts.graphics.width, opts.graphics.height, opts.graphics.fullscreen);
     } else {
+        println!("[Options] Config file not found, creating defaults");
         save_options_from_global(path).map_err(|e| e.to_string())?;
     }
 
@@ -538,7 +567,7 @@ struct UiArtImage {
 impl UiArtImage {
     fn to_texture<'a>(&self, creator: &'a TextureCreator<WindowContext>) -> Result<Texture<'a>, String> {
         let mut tex = creator
-            .create_texture_streaming(sdl2::pixels::PixelFormatEnum::RGBA32, self.width, self.height)
+            .create_texture_streaming(sdl2::pixels::PixelFormatEnum::ABGR8888, self.width, self.height)
             .map_err(|e| format!("创建纹理失败: {}", e))?;
 
         tex.update(None, &self.rgba, (self.width * 4) as usize)
@@ -670,6 +699,18 @@ fn load_ui_assets(res: &mut UiResources, mpq: &mut MpqAssetManager) {
     assets.focus_small = load_pcx_strip(mpq, "ui_art\\focus16.pcx", 8, Some(250));
     assets.focus_med = load_pcx_strip(mpq, "ui_art\\focus.pcx", 8, Some(250));
     assets.focus_big = load_pcx_strip(mpq, "ui_art\\focus42.pcx", 8, Some(250));
+
+    // Debug: print actual frame sizes loaded
+    if let Some(f) = assets.focus_med.first() {
+        let expected_size = (f.width * f.height * 4) as usize;
+        println!("[UiAssets] focus.pcx frame size: {}x{}, {} frames loaded, rgba_len={} (expected={})",
+            f.width, f.height, assets.focus_med.len(), f.rgba.len(), expected_size);
+    }
+    if let Some(f) = assets.focus_big.first() {
+        let expected_size = (f.width * f.height * 4) as usize;
+        println!("[UiAssets] focus42.pcx frame size: {}x{}, {} frames loaded, rgba_len={} (expected={})",
+            f.width, f.height, assets.focus_big.len(), f.rgba.len(), expected_size);
+    }
 
     println!(
         "[UiAssets] mainmenu={} title={} logo={} cursor={} focus16={} focus={} focus42={}",
@@ -895,7 +936,7 @@ fn net_init_single_player() -> bool {
     // For single player, this sets up the loopback provider and initializes
     // game state without actual networking
     println!("[NetInit] Initializing single-player (loopback provider)");
-    
+
     // In single player, we always succeed
     // TODO: Initialize game info, delta sync, and player messaging
     true
@@ -1019,9 +1060,14 @@ fn diablo_init(ctx: &mut DiabloContext) -> Result<(), String> {
 fn diablo_splash(ctx: &mut DiabloContext, flags: &CmdFlags, is_hellfire: bool, options_path: &Path, event_pump: &mut sdl2::EventPump) -> Result<(), String> {
     println!("[DiabloSplash] Showing splash...");
 
-    let opts = global_options();
-    let splash_pref = opts.startup.splash;
-    let intro_pref = if is_hellfire { opts.startup.hellfire_intro } else { opts.startup.diablo_intro };
+    // Read options and release the lock immediately to avoid deadlock
+    let (splash_pref, intro_pref) = {
+        let opts = global_options();
+        let splash = opts.startup.splash;
+        let intro = if is_hellfire { opts.startup.hellfire_intro } else { opts.startup.diablo_intro };
+        (splash, intro)
+    };
+    println!("[DiabloSplash] splash_pref={:?} intro_pref={:?}", splash_pref, intro_pref);
 
     let mut player = MoviePlayer::new();
     let play_flags = MovieFlags { user_can_close: true, loop_movie: false, in_game: false };
@@ -1031,10 +1077,14 @@ fn diablo_splash(ctx: &mut DiabloContext, flags: &CmdFlags, is_hellfire: bool, o
         if ctx.mpq_manager.has_file(logo) {
             println!("  Playing movie: {}", logo);
             let _ = player.play(logo, play_flags);
+            // NOTE: MoviePlayer::play() is currently a stub that doesn't actually play video
+            println!("  Movie play returned (stub)");
         } else {
             println!("  Movie missing: {}", logo);
         }
     }
+
+    println!("[DiabloSplash] After logo movie check");
 
     if !matches!(intro_pref, StartUpIntro::Off) {
         let intro_path = if is_hellfire { "gendata\\Hellfire.smk" } else { "gendata\\diablo1.smk" };
@@ -1046,21 +1096,31 @@ fn diablo_splash(ctx: &mut DiabloContext, flags: &CmdFlags, is_hellfire: bool, o
         }
 
         if matches!(intro_pref, StartUpIntro::Once) {
-            let mut opts_mut = utils::options::options_mut();
-            if is_hellfire {
-                opts_mut.startup.hellfire_intro = StartUpIntro::Off;
-            } else {
-                opts_mut.startup.diablo_intro = StartUpIntro::Off;
-            }
+            println!("  Updating intro pref to Off and saving...");
+            // Update option in a separate scope to release the write lock before saving
+            {
+                let mut opts_mut = utils::options::options_mut();
+                if is_hellfire {
+                    opts_mut.startup.hellfire_intro = StartUpIntro::Off;
+                } else {
+                    opts_mut.startup.diablo_intro = StartUpIntro::Off;
+                }
+            } // Write lock released here
 
             if !flags.demo_mode {
+                // Now safe to call save_options which needs a read lock
                 save_options_from_global(options_path).map_err(|e| e.to_string())?;
+                println!("  Options saved");
             }
         }
     }
 
+    println!("[DiabloSplash] Before title screen check, splash_pref={:?}", splash_pref);
+
     if matches!(splash_pref, StartUpSplash::LogoAndTitleDialog | StartUpSplash::TitleDialog) {
+        println!("  Entering title screen loop...");
         let assets = snapshot_ui_assets();
+        println!("  title_bg={} logo={}", assets.title_bg.is_some(), assets.logo.is_some());
         let timeout = Duration::from_secs(7);
         let start = Instant::now();
         let mut fade_ctx = UiContext::new();
@@ -1068,7 +1128,8 @@ fn diablo_splash(ctx: &mut DiabloContext, flags: &CmdFlags, is_hellfire: bool, o
 
         'title_loop: loop {
             let mouse = event_pump.mouse_state();
-            let mouse_pos = (mouse.x(), mouse.y());
+            // Convert window coordinates to logical 640x480 coordinates
+            let mouse_pos = window_to_logical(ctx.window.canvas_mut(), mouse.x(), mouse.y());
             let now_ms = start.elapsed().as_millis() as u32;
             let _ = fade_ctx.update_fade(now_ms);
             let fade = fade_ctx.fade_value.min(255) as u8;
@@ -1179,7 +1240,7 @@ fn render_main_menu(
     font: &mut PixelFont,
     menu: &MainMenu,
     assets: &UiAssetsSnapshot,
-    base_time: Instant,
+    _base_time: Instant,
     fade: u8,
     mouse_pos: (i32, i32),
 ) -> Result<(), String> {
@@ -1222,23 +1283,46 @@ fn render_main_menu(
     let item_w: i32 = 510;
     let item_h: i32 = 43;
     let text_v_offset = (item_h - font.line_height()) / 2;
-    let frame_idx = if !assets.focus_med.is_empty() {
-        ((base_time.elapsed().as_millis() / 100) as usize) % assets.focus_med.len()
-    } else {
-        0
-    };
+
+    // C++: PentSpn2Spin() => GetAnimationFrame(8, 50) => (SDL_GetTicks() / 50) % 8
+    // C++ GetAnimationFrame(frames, fps=60) => (SDL_GetTicks() / 60) % frames
+    let ticks = unsafe { sdl2::sys::SDL_GetTicks() };
+    let frame_idx = ((ticks / 60) as usize) % 8;
+
+    // DEBUG: 验证动画帧是否在变化
+    static LAST_FRAME_DEBUG: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(999);
+    let prev_frame = LAST_FRAME_DEBUG.swap(frame_idx, std::sync::atomic::Ordering::Relaxed);
+    if prev_frame != frame_idx && prev_frame != 999 {
+        eprintln!("[DEBUG] Focus frame: {} -> {} (ticks={}, delta={}ms)",
+            prev_frame, frame_idx, ticks, 60);
+    }
 
     for (i, text) in menu_texts.iter().enumerate() {
         let item_y = list_y + i as i32 * item_h;
-        let text_x = list_x + (item_w - font.text_width(text)) / 2;
+        // 文本水平居中于 640 像素宽度
+        let text_width = font.text_width(text);
+        let text_x = ui_x + (640 - text_width) / 2;
         let text_y = item_y + text_v_offset;
 
         if i == menu.selected_index() {
-            // Focus frame if available
-            if let Some(focus) = assets.focus_med.get(frame_idx) {
-                let fx = list_x + (item_w - focus.width as i32) / 2;
+            // C++ GetListSelectorSprites: item_h >= 42 用 focus_big, >= 30 用 focus_med, 否则 focus_small
+            let focus_sprites = if item_h >= 42 {
+                &assets.focus_big
+            } else if item_h >= 30 {
+                &assets.focus_med
+            } else {
+                &assets.focus_small
+            };
+
+            if let Some(focus) = focus_sprites.get(frame_idx) {
+                // C++ DrawSelector: y = rect.y + (rect.h - sprite.height()) / 2
                 let fy = item_y + (item_h - focus.height as i32) / 2;
-                render_ui_image(canvas, &creator, focus, fx, fy, fade)?;
+                // C++ DrawSelector: x = rect.x (左侧), x = rect.x + rect.w - sprite.width() (右侧)
+                let fx_left = list_x;
+                let fx_right = list_x + item_w - focus.width as i32;
+
+                render_ui_image(canvas, &creator, focus, fx_left, fy, fade)?;
+                render_ui_image(canvas, &creator, focus, fx_right, fy, fade)?;
             } else {
                 canvas.set_draw_color(Color::RGB(60, 40, 80));
                 let _ = canvas.fill_rect(Rect::new(list_x, item_y, item_w as u32, item_h as u32));
@@ -1297,7 +1381,7 @@ fn render_selhero(
     font: &mut PixelFont,
     assets: &UiAssetsSnapshot,
     selection: usize,
-    start_time: Instant,
+    _start_time: Instant,
     fade: u8,
     options: &[(&str, bool)],
     mouse_pos: (i32, i32),
@@ -1321,11 +1405,9 @@ fn render_selhero(
         render_ui_image(canvas, &creator, logo, x, ui_y + 40, fade)?;
     }
 
-    let frame_idx = if !assets.focus_big.is_empty() {
-        ((start_time.elapsed().as_millis() / 100) as usize) % assets.focus_big.len()
-    } else {
-        0
-    };
+    // C++ GetAnimationFrame(frames, fps=60) => (SDL_GetTicks() / 60) % frames
+    let ticks = unsafe { sdl2::sys::SDL_GetTicks() };
+    let frame_idx = ((ticks / 60) as usize) % 8;
 
     let list_x = ui_x + 265;
     let item_w: i32 = 320;
@@ -1336,14 +1418,30 @@ fn render_selhero(
 
     for (i, (text, selectable)) in options.iter().enumerate() {
         let item_y = start_y + i as i32 * item_h;
-        let text_x = list_x + (item_w - font.text_width(text)) / 2;
+        // 文本水平居中
+        let text_width = font.text_width(text);
+        let text_x = list_x + (item_w - text_width) / 2;
         let text_y = item_y + text_v_offset;
 
         if i == selection {
-            if let Some(focus) = assets.focus_big.get(frame_idx) {
-                let fx = list_x + (item_w - focus.width as i32) / 2;
+            // C++ GetListSelectorSprites: 根据 item_h 选择合适的 focus 大小
+            let focus_sprites = if item_h >= 42 {
+                &assets.focus_big
+            } else if item_h >= 30 {
+                &assets.focus_med
+            } else {
+                &assets.focus_small
+            };
+
+            if let Some(focus) = focus_sprites.get(frame_idx) {
+                // C++ DrawSelector: y = rect.y + (rect.h - sprite.height()) / 2
                 let fy = item_y + (item_h - focus.height as i32) / 2;
-                render_ui_image(canvas, &creator, focus, fx, fy, fade)?;
+                // C++ DrawSelector: x = rect.x (左侧), x = rect.x + rect.w - sprite.width() (右侧)
+                let fx_left = list_x;
+                let fx_right = list_x + item_w - focus.width as i32;
+
+                render_ui_image(canvas, &creator, focus, fx_left, fy, fade)?;
+                render_ui_image(canvas, &creator, focus, fx_right, fy, fade)?;
             } else {
                 canvas.set_draw_color(Color::RGB(50, 30, 70));
                 let _ = canvas.fill_rect(Rect::new(list_x, item_y, item_w as u32, item_h as u32));
@@ -1418,6 +1516,31 @@ fn mainmenu_loop(ctx: &mut DiabloContext, event_pump: &mut sdl2::EventPump, flag
     Ok(())
 }
 
+/// Helper: Check if a point is inside a menu item rectangle
+/// Returns Some(index) if inside a menu item, None otherwise
+fn hit_test_menu_item(mouse_x: i32, mouse_y: i32, menu_item_count: usize) -> Option<usize> {
+    let (ui_x, ui_y) = ui_origin();
+    let list_x = ui_x + 64;
+    let list_y = ui_y + 192;
+    let item_w: i32 = 510;
+    let item_h: i32 = 43;
+
+    // Check if mouse is within the horizontal bounds of the menu
+    if mouse_x < list_x || mouse_x >= list_x + item_w {
+        return None;
+    }
+
+    // Check if mouse is within vertical bounds of any item
+    for i in 0..menu_item_count {
+        let item_y = list_y + i as i32 * item_h;
+        if mouse_y >= item_y && mouse_y < item_y + item_h {
+            return Some(i);
+        }
+    }
+
+    None
+}
+
 /// UiMainMenuDialog - blocking menu dialog (C++: DiabloUI/mainmenu.cpp line 108)
 fn ui_main_menu_dialog(
     name: &str,
@@ -1434,6 +1557,7 @@ fn ui_main_menu_dialog(
     println!("[UiMainMenuDialog] Showing main menu...");
 
     let mut last_input = Instant::now();
+    let menu_item_count = 6usize;  // Single, Multi, Support, Settings, Credits, Exit
 
     let result = 'dialog_loop: loop {
         // Poll events
@@ -1459,6 +1583,31 @@ fn ui_main_menu_dialog(
                         _ => {}
                     }
                 },
+                // Mouse button up triggers selection (like C++ HandleMouseEventList)
+                Event::MouseButtonUp { mouse_btn: sdl2::mouse::MouseButton::Left, x, y, .. } => {
+                    last_input = Instant::now();
+                    // SDL2 with logical_size: event coords are already logical coords
+                    // Only mouse_state() needs conversion
+                    println!("[DEBUG] MouseButtonUp event: x={}, y={}", x, y);
+                    if let Some(idx) = hit_test_menu_item(x, y, menu_item_count) {
+                        // Only select if it matches the current selection (like C++ double-click behavior)
+                        // For simplicity, we select on single click
+                        if let Some(selection) = MainMenuSelection::from_index(idx) {
+                            println!("[UiMainMenuDialog] Mouse clicked item {} => {:?}", idx, selection);
+                            break 'dialog_loop selection;
+                        }
+                    }
+                },
+                // Mouse motion updates hover selection
+                Event::MouseMotion { x, y, .. } => {
+                    // SDL2 with logical_size: event coords are already logical coords
+                    if let Some(idx) = hit_test_menu_item(x, y, menu_item_count) {
+                        // Update selection on hover (C++ UiFocus behavior)
+                        if main_menu.selected_index() != idx {
+                            main_menu.set_selection(idx);
+                        }
+                    }
+                },
                 _ => {}
             }
         }
@@ -1472,7 +1621,8 @@ fn ui_main_menu_dialog(
 
         // Render (C++: UiClearScreen + UiPollAndRender)
         let mouse = event_pump.mouse_state();
-        let mouse_pos = (mouse.x(), mouse.y());
+        // Convert window coordinates to logical 640x480 coordinates
+        let mouse_pos = window_to_logical(ctx.window.canvas_mut(), mouse.x(), mouse.y());
         let now_ms = start_time.elapsed().as_millis() as u32;
         let _ = fade_ctx.update_fade(now_ms);
         let fade = fade_ctx.fade_value.min(255) as u8;
@@ -1589,7 +1739,8 @@ fn select_hero_dialog(ctx: &mut DiabloContext, event_pump: &mut sdl2::EventPump)
             .collect();
 
         let mouse = event_pump.mouse_state();
-        let mouse_pos = (mouse.x(), mouse.y());
+        // Convert window coordinates to logical 640x480 coordinates
+        let mouse_pos = window_to_logical(ctx.window.canvas_mut(), mouse.x(), mouse.y());
         let now_ms = start_time.elapsed().as_millis() as u32;
         let _ = fade_ctx.update_fade(now_ms);
         let fade = fade_ctx.fade_value.min(255) as u8;

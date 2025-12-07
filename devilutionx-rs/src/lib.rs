@@ -3,6 +3,7 @@
 //! A Rust port of DevilutionX - the Diablo 1 engine.
 //!
 //! This crate provides:
+//! - C FFI bindings to C++ core (`ffi::*`)
 //! - MPQ archive reading (`engine::mpq`)
 //! - CLX sprite rendering (`engine::clx`)
 //! - Game data structures (`game::*`)
@@ -14,6 +15,7 @@
 pub mod controls;
 pub mod data;
 pub mod engine;
+pub mod ffi;
 pub mod game;
 pub mod levels;
 pub mod net;
