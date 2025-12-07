@@ -1,0 +1,73 @@
+[package]
+name = "devilutionx-rs"
+version = "0.1.0"
+edition = "2021"
+authors = ["DevilutionX-RS Contributors"]
+description = "Rust port of DevilutionX - Diablo 1 engine"
+license = "Unlicense"
+repository = "https://github.com/diasurgical/DevilutionX"
+
+[dependencies]
+# SDL2 with bundled feature - 基础 SDL2
+sdl2 = { version = "0.38.0", features = ["bundled"] }
+
+# Font rendering - Rust 原生字体渲染方案
+fontdue = "0.9"           # 快速字体光栅化
+ab_glyph = "0.2"          # 字形处理
+
+# Utilities
+byteorder = "1.5"         # Endianness handling
+bitflags = "2.10.0"       # Bit flags
+thiserror = "2.0.17"      # Error handling
+anyhow = "1.0"            # Error context
+log = "0.4"               # Logging facade
+env_logger = "0.11"       # Logging implementation
+rand = "0.9"              # Random number generation (用于地图生成等)
+
+# Serialization (for save files)
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+bincode = "2.0.1"
+
+# Directory paths
+dirs = "5.0"
+
+# Synchronization
+parking_lot = "0.12"      # High-performance locks
+
+# Async runtime (for networking)
+tokio = { version = "1.35", features = ["full"], optional = true }
+
+# Compression (for MPQ)
+flate2 = "1.0"
+bzip2 = "0.6.1"           # BZip2 decompression for MPQ
+
+[dev-dependencies]
+criterion = "0.8.0"       # Benchmarking
+
+[features]
+default = ["network"]
+network = ["tokio"]
+no-network = []
+demo_mode = []
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
+[profile.dev]
+opt-level = 1           # Some optimization for playability during development
+
+[lib]
+name = "devilutionx_rs"
+path = "src/lib.rs"
+
+[[bin]]
+name = "devilutionx"
+path = "src/main.rs"
+
+[[example]]
+name = "test_mpq"
+path = "examples/test_mpq.rs"
