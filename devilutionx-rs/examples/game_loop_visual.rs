@@ -39,7 +39,7 @@ fn main() -> Result<(), String> {
     );
 
     // 创建游戏状态
-    let mut game_state = GameState::new(player, true);
+    let mut game_state = GameState::new(player, true, 12345);
     let mut rng = StdRng::seed_from_u64(12345);
 
     // 初始化 SDL2

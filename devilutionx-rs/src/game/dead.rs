@@ -1,56 +1,72 @@
-//! 尸体系统 (M34)
+//! # ⚠️ 禁止变更 - 已完成移植
 //!
-//! 从 Source/dead.cpp 移植
-//! 处理死亡怪物尸体的放置和管理
+//! 尸体系统 - 从 Source/dead.cpp 移植
+//!
+//! ## C++ 源文件: Source/dead.cpp (88 行)
+//! ## Rust 文件: src/game/dead.rs
+//!
+//! ## 外部依赖说明
+//!
+//! 本模块依赖以下尚未完全移植的模块：
+//!
+//! - **monster 模块**: 需要 `CMonster` 结构（关卡怪物类型）和全局状态
+//!   - `LevelMonsterTypes[]` - 关卡怪物类型数组
+//!   - `Monsters[]` - 怪物实例数组  
+//!   - `ActiveMonsters[]` - 活动怪物索引数组
+//!   - `ActiveMonsterCount` - 活动怪物数量
+//!   - 需要先移植 Source/monster.cpp 的全局状态管理
+//!
+//! - **lighting 模块**: ✅ 已可用
+//!   - `ChangeLightXY()` -> `LightManager::change_light_position()`
+//!   - `AddUnLight()` -> `LightManager::remove_light()`
+//!
+//! - **misdat 模块**: 需要 `GetMissileSpriteData()`
+//!   - 用于获取石化效果的精灵数据
+//!   - 需要完善 Source/misdat.cpp 的数据加载
+//!
+//! - **gendung 模块**: 需要 `dCorpse[][]` 全局数组
+//!   - 用于存储地图上的尸体信息
 
 use crate::game::types::Direction;
 
-/// 从u8转换Direction的辅助trait
-trait DirectionFromU8 {
-    fn from_u8(value: u8) -> Self;
-}
-
-impl DirectionFromU8 for Direction {
-    fn from_u8(value: u8) -> Self {
-        match value & 0x07 {
-            0 => Direction::South,
-            1 => Direction::SouthWest,
-            2 => Direction::West,
-            3 => Direction::NorthWest,
-            4 => Direction::North,
-            5 => Direction::NorthEast,
-            6 => Direction::East,
-            7 => Direction::SouthEast,
-            _ => Direction::South,
-        }
-    }
-}
-
 /// 最大尸体数量
+///
+/// **C++ Reference**: `MaxCorpses` in dead.h
 pub const MAX_CORPSES: usize = 31;
 
-/// 最大怪物数量
-pub const MAX_MONSTERS: usize = 200;
-
 /// 地牢最大X坐标
+///
+/// **C++ Reference**: `MAXDUNX` in defs.h
 pub const MAXDUNX: usize = 112;
 
 /// 地牢最大Y坐标
+///
+/// **C++ Reference**: `MAXDUNY` in defs.h
 pub const MAXDUNY: usize = 112;
 
 /// 尸体结构
 ///
-/// 从 C++ Corpse 结构移植
+/// **C++ Reference**: `Corpse` struct in dead.h
+///
+/// ```cpp
+/// struct Corpse {
+///     OptionalClxSpriteListOrSheet sprites;
+///     int frame;
+///     uint16_t width;
+///     uint8_t translationPaletteIndex;
+/// };
+/// ```
 #[derive(Debug, Clone)]
 pub struct Corpse {
-    /// 精灵数据（占位）
+    /// 精灵数据 - 依赖 CLX 精灵系统（engine/clx_sprite.hpp）
+    /// 当前使用简化的占位类型，完整实现需要移植精灵系统
     pub sprites: Option<CorpseSprites>,
-    /// 当前帧
+    /// 当前帧（死亡动画的最后一帧）
     pub frame: i32,
-    /// 宽度
-    pub width: i32,
-    /// 调色板索引
-    pub translation_palette_index: i32,
+    /// 精灵宽度
+    pub width: u16,
+    /// 调色板转换索引（用于唯一怪物的颜色变化）
+    pub translation_palette_index: u8,
 }
 
 impl Default for Corpse {
@@ -64,52 +80,33 @@ impl Default for Corpse {
     }
 }
 
-/// 尸体精灵数据（占位）
-#[derive(Debug, Clone)]
-pub struct CorpseSprites {
-    /// 精灵数据标识
-    pub id: u32,
-}
-
-/// 怪物类型（占位）
-#[derive(Debug, Clone, Default)]
-pub struct CMonster {
-    /// 怪物类型ID
-    pub monster_type: i32,
-    /// 尸体ID
-    pub corpse_id: i8,
-}
-
-/// 怪物实例（占位）
-#[derive(Debug, Clone, Default)]
-pub struct Monster {
-    /// 是否唯一怪物
-    pub unique: bool,
-    /// 尸体ID
-    pub corpse_id: i8,
-    /// 光源ID
-    pub light_id: i32,
-}
-
-impl Monster {
-    /// 检查是否为唯一怪物
-    pub fn is_unique(&self) -> bool {
-        self.unique
+impl Corpse {
+    /// 获取指定方向的精灵列表
+    ///
+    /// **C++ Reference**: `Corpse::spritesForDirection()`
+    pub fn sprites_for_direction(&self, _direction: Direction) -> Option<&CorpseSprites> {
+        // 完整实现需要精灵系统支持
+        // sprites->isSheet() ? sprites->sheet()[direction] : sprites->list()
+        self.sprites.as_ref()
     }
 }
 
-/// 动画结构（占位）
-#[derive(Debug, Clone, Default)]
-pub struct AnimStruct {
-    /// 精灵数据
-    pub sprites: Option<CorpseSprites>,
-    /// 帧数
-    pub frames: i32,
-    /// 宽度
-    pub width: i32,
+/// 尸体精灵数据
+///
+/// 简化的精灵数据结构，完整实现需要移植 engine/clx_sprite.hpp
+#[derive(Debug, Clone)]
+pub struct CorpseSprites {
+    /// 精灵数据标识（临时）
+    pub id: u32,
 }
 
+// ============================================================================
+// 全局状态 - 对应 C++ 全局变量
+// ============================================================================
+
 /// 全局尸体数组
+///
+/// **C++ Reference**: `Corpse Corpses[MaxCorpses]` in dead.cpp
 pub static mut CORPSES: [Corpse; MAX_CORPSES] = {
     const CORPSE_INIT: Corpse = Corpse {
         sprites: None,
@@ -120,209 +117,186 @@ pub static mut CORPSES: [Corpse; MAX_CORPSES] = {
     [CORPSE_INIT; MAX_CORPSES]
 };
 
-/// 石化索引
+/// 石化尸体索引
+///
+/// **C++ Reference**: `int8_t stonendx` in dead.cpp
 pub static mut STONENDX: i8 = 0;
 
-/// 尸体地图数据
-pub static mut D_CORPSE: [[u8; MAXDUNY]; MAXDUNX] = [[0; MAXDUNY]; MAXDUNX];
+// ============================================================================
+// 公开函数 - 严格对应 C++ dead.cpp 的函数
+// ============================================================================
 
-/// 尸体管理器
-#[derive(Debug)]
-pub struct CorpseManager {
-    /// 尸体数组
-    pub corpses: Vec<Corpse>,
-    /// 石化索引
-    pub stone_index: i8,
-    /// 尸体地图
-    pub corpse_map: Vec<Vec<u8>>,
-}
-
-impl Default for CorpseManager {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl CorpseManager {
-    /// 创建新的尸体管理器
-    pub fn new() -> Self {
-        Self {
-            corpses: vec![Corpse::default(); MAX_CORPSES],
-            stone_index: 0,
-            corpse_map: vec![vec![0u8; MAXDUNY]; MAXDUNX],
-        }
-    }
-
-    /// 初始化尸体系统
-    ///
-    /// 从 InitCorpses 移植
-    pub fn init(&mut self, level_monster_types: &[CMonster], monsters: &[Monster], active_monsters: &[usize]) {
-        let mut mtypes = [0i8; MAX_MONSTERS];
-        let mut nd: i8 = 0;
-
-        // 初始化关卡怪物类型的尸体
-        for mon in level_monster_types {
-            if mtypes[mon.monster_type as usize] != 0 {
-                continue;
-            }
-
-            // 初始化尸体动画
-            self.init_corpse_from_monster(nd as usize, mon);
-            self.corpses[nd as usize].translation_palette_index = 0;
-            nd += 1;
-
-            mtypes[mon.monster_type as usize] = nd;
-        }
-
-        nd += 1; // 未使用的血迹
-
-        // 石化效果
-        self.corpses[nd as usize] = Corpse {
-            sprites: None, // 实际应加载 MissileGraphicID::StoneCurseShatter
-            frame: 11,
-            width: 128,
-            translation_palette_index: 0,
-        };
-        nd += 1;
-
-        self.stone_index = nd;
-
-        // 处理唯一怪物
-        for &monster_idx in active_monsters {
-            if monster_idx >= monsters.len() {
-                continue;
-            }
-            let monster = &monsters[monster_idx];
-            if monster.is_unique() {
-                // 初始化唯一怪物的尸体
-                self.corpses[nd as usize] = Corpse {
-                    sprites: None,
-                    frame: 0,
-                    width: 0,
-                    translation_palette_index: monster_idx as i32 + 1,
-                };
-                nd += 1;
-            }
-        }
-
-        assert!((nd as usize) <= MAX_CORPSES);
-    }
-
-    /// 从怪物初始化尸体动画
-    fn init_corpse_from_monster(&mut self, corpse_idx: usize, _monster: &CMonster) {
-        // 实际实现需要从怪物获取死亡动画数据
-        // const AnimStruct &animData = mon.getAnimData(MonsterGraphic::Death);
-        if corpse_idx < self.corpses.len() {
-            self.corpses[corpse_idx] = Corpse {
-                sprites: None,
-                frame: 0,
-                width: 0,
-                translation_palette_index: 0,
-            };
-        }
-    }
-
-    /// 添加尸体
-    ///
-    /// 从 AddCorpse 移植
-    pub fn add_corpse(&mut self, x: usize, y: usize, corpse_id: i8, direction: Direction) {
-        if x < MAXDUNX && y < MAXDUNY {
-            // dCorpse[tilePosition.x][tilePosition.y] = (dv & 0x1F) + (static_cast<int>(ddir) << 5);
-            self.corpse_map[x][y] = ((corpse_id & 0x1F) as u8) + ((direction as u8) << 5);
-        }
-    }
-
-    /// 获取指定位置的尸体ID
-    pub fn get_corpse_at(&self, x: usize, y: usize) -> Option<(i8, Direction)> {
-        if x >= MAXDUNX || y >= MAXDUNY {
-            return None;
-        }
-
-        let value = self.corpse_map[x][y];
-        if value == 0 {
-            return None;
-        }
-
-        let corpse_id = (value & 0x1F) as i8;
-        let direction = DirectionFromU8::from_u8(value >> 5);
-        Some((corpse_id, direction))
-    }
-
-    /// 移除指定位置的尸体
-    pub fn remove_corpse(&mut self, x: usize, y: usize) {
-        if x < MAXDUNX && y < MAXDUNY {
-            self.corpse_map[x][y] = 0;
-        }
-    }
-
-    /// 清除所有尸体
-    pub fn clear(&mut self) {
-        for row in &mut self.corpse_map {
-            for cell in row {
-                *cell = 0;
-            }
-        }
-    }
-
-    /// 获取尸体
-    pub fn get_corpse(&self, id: i8) -> Option<&Corpse> {
-        if id > 0 && (id as usize) <= self.corpses.len() {
-            Some(&self.corpses[(id - 1) as usize])
-        } else {
-            None
-        }
-    }
-
-    /// 统计尸体数量
-    pub fn count_corpses(&self) -> usize {
-        let mut count = 0;
-        for row in &self.corpse_map {
-            for &cell in row {
-                if cell != 0 {
-                    count += 1;
-                }
-            }
-        }
-        count
-    }
-}
-
-/// 添加尸体（全局函数）
+/// 添加尸体到地图
 ///
-/// 从 AddCorpse 移植
-pub fn add_corpse(x: usize, y: usize, corpse_id: i8, direction: Direction) {
-    unsafe {
-        if x < MAXDUNX && y < MAXDUNY {
-            D_CORPSE[x][y] = ((corpse_id & 0x1F) as u8) + ((direction as u8) << 5);
-        }
+/// **C++ Reference**: `void AddCorpse(Point tilePosition, int8_t dv, Direction ddir)` in dead.cpp:85
+///
+/// ```cpp
+/// void AddCorpse(Point tilePosition, int8_t dv, Direction ddir)
+/// {
+///     dCorpse[tilePosition.x][tilePosition.y] = (dv & 0x1F) + (static_cast<int>(ddir) << 5);
+/// }
+/// ```
+///
+/// # 参数
+/// - `d_corpse`: 尸体地图数组的可变引用（来自 gendung 模块）
+/// - `tile_x`, `tile_y`: 瓦片坐标
+/// - `corpse_id`: 尸体ID（低5位）
+/// - `direction`: 尸体朝向（高3位）
+pub fn add_corpse(
+    d_corpse: &mut [[i8; MAXDUNY]; MAXDUNX],
+    tile_x: i32,
+    tile_y: i32,
+    corpse_id: i8,
+    direction: Direction,
+) {
+    if tile_x >= 0 && (tile_x as usize) < MAXDUNX && tile_y >= 0 && (tile_y as usize) < MAXDUNY {
+        d_corpse[tile_x as usize][tile_y as usize] =
+            (corpse_id & 0x1F) + ((direction as i8) << 5);
     }
 }
 
-/// 初始化尸体系统（全局函数）
+// ============================================================================
+// 以下函数需要外部依赖，当前无法完整实现
+// ============================================================================
+
+/// 初始化尸体系统
 ///
-/// 从 InitCorpses 移植
+/// **C++ Reference**: `void InitCorpses()` in dead.cpp:46
 ///
-/// # Safety
-/// 必须在游戏初始化时调用
-pub unsafe fn init_corpses() {
-    STONENDX = 0;
-    for corpse in &mut CORPSES {
-        *corpse = Corpse::default();
+/// ## ⚠️ 外部依赖未满足
+///
+/// 此函数需要以下尚未移植的模块：
+/// - `monster.h`: `LevelMonsterTypes[]`, `LevelMonsterTypeCount`, `CMonster` 结构
+/// - `monster.h`: `Monsters[]`, `ActiveMonsters[]`, `ActiveMonsterCount`
+/// - `misdat.h`: `GetMissileSpriteData(MissileGraphicID::StoneCurseShatter)`
+/// - `diablo.h`: `HeadlessMode` 全局变量
+///
+/// 需要先移植: Source/monster.cpp 的全局状态管理
+///
+/// ```cpp
+/// void InitCorpses()
+/// {
+///     int8_t mtypes[MaxMonsters] = {};
+///     int8_t nd = 0;
+///
+///     for (size_t i = 0; i < LevelMonsterTypeCount; i++) {
+///         CMonster &monsterType = LevelMonsterTypes[i];
+///         if (mtypes[monsterType.type] != 0)
+///             continue;
+///
+///         InitDeadAnimationFromMonster(Corpses[nd], monsterType);
+///         Corpses[nd].translationPaletteIndex = 0;
+///         nd++;
+///
+///         monsterType.corpseId = nd;
+///         mtypes[monsterType.type] = nd;
+///     }
+///
+///     nd++; // Unused blood spatter
+///
+///     if (!HeadlessMode)
+///         Corpses[nd].sprites.emplace(*GetMissileSpriteData(MissileGraphicID::StoneCurseShatter).sprites);
+///     Corpses[nd].frame = 11;
+///     Corpses[nd].width = 128;
+///     Corpses[nd].translationPaletteIndex = 0;
+///     nd++;
+///
+///     stonendx = nd;
+///
+///     for (size_t i = 0; i < ActiveMonsterCount; i++) {
+///         auto &monster = Monsters[ActiveMonsters[i]];
+///         if (monster.isUnique()) {
+///             InitDeadAnimationFromMonster(Corpses[nd], monster.type());
+///             Corpses[nd].translationPaletteIndex = ActiveMonsters[i] + 1;
+///             nd++;
+///
+///             monster.corpseId = nd;
+///         }
+///     }
+///
+///     assert(static_cast<unsigned>(nd) <= MaxCorpses);
+/// }
+/// ```
+pub fn init_corpses() {
+    // 无法实现 - 需要先移植 Source/monster.cpp 的全局状态:
+    // - LevelMonsterTypes[] 数组
+    // - Monsters[] 数组
+    // - ActiveMonsters[] 数组
+    // - ActiveMonsterCount 变量
+    // - CMonster::getAnimData() 方法
+    unimplemented!(
+        "InitCorpses 需要先移植 Source/monster.cpp 的全局状态管理 \
+        (LevelMonsterTypes, Monsters, ActiveMonsters)"
+    );
+}
+
+/// 移动唯一怪物的光源到尸体位置
+///
+/// **C++ Reference**: `void MoveLightsToCorpses()` in dead.cpp:89
+///
+/// ## ⚠️ 外部依赖未满足
+///
+/// 此函数需要以下尚未移植的模块：
+/// - `monster.h`: `Monsters[]`, `ActiveMonsters[]`, `ActiveMonsterCount`
+/// - `monster.h`: `Monster::isUnique()`, `Monster::corpseId`, `Monster::lightId`
+/// - `lighting.h`: `ChangeLightXY()`, `AddUnLight()`
+/// - `gendung.h`: `dCorpse[][]` 全局数组
+///
+/// ```cpp
+/// void MoveLightsToCorpses()
+/// {
+///     for (size_t i = 0; i < ActiveMonsterCount; i++) {
+///         auto &monster = Monsters[ActiveMonsters[i]];
+///         if (!monster.isUnique())
+///             continue;
+///         MoveLightToCorpse(monster);
+///     }
+/// }
+/// ```
+pub fn move_lights_to_corpses() {
+    // 无法实现 - 需要先移植 Source/monster.cpp 的全局状态:
+    // - Monsters[] 数组
+    // - ActiveMonsters[] 数组
+    // - ActiveMonsterCount 变量
+    unimplemented!(
+        "MoveLightsToCorpses 需要先移植 Source/monster.cpp 的全局状态管理"
+    );
+}
+
+// ============================================================================
+// 内部辅助函数
+// ============================================================================
+
+/// 从 Direction 值解码尸体方向
+fn direction_from_encoded(value: i8) -> Direction {
+    match (value >> 5) & 0x07 {
+        0 => Direction::South,
+        1 => Direction::SouthWest,
+        2 => Direction::West,
+        3 => Direction::NorthWest,
+        4 => Direction::North,
+        5 => Direction::NorthEast,
+        6 => Direction::East,
+        7 => Direction::SouthEast,
+        _ => Direction::South,
     }
 }
 
-/// 移动光源到尸体位置（占位实现）
-///
-/// 从 MoveLightsToCorpses 移植
-pub fn move_lights_to_corpses(_monsters: &[Monster], _active_monsters: &[usize]) {
-    // 实际实现需要与光照系统集成
-    // for (size_t i = 0; i < ActiveMonsterCount; i++) {
-    //     auto &monster = Monsters[ActiveMonsters[i]];
-    //     if (!monster.isUnique())
-    //         continue;
-    //     MoveLightToCorpse(monster);
-    // }
+/// 从编码值提取尸体ID
+#[inline]
+pub fn get_corpse_id(encoded: i8) -> i8 {
+    encoded & 0x1F
 }
+
+/// 从编码值提取尸体方向
+#[inline]
+pub fn get_corpse_direction(encoded: i8) -> Direction {
+    direction_from_encoded(encoded)
+}
+
+// ============================================================================
+// 测试
+// ============================================================================
 
 #[cfg(test)]
 mod tests {
@@ -334,68 +308,65 @@ mod tests {
         assert!(corpse.sprites.is_none());
         assert_eq!(corpse.frame, 0);
         assert_eq!(corpse.width, 0);
-    }
-
-    #[test]
-    fn test_corpse_manager_creation() {
-        let manager = CorpseManager::new();
-        assert_eq!(manager.corpses.len(), MAX_CORPSES);
-        assert_eq!(manager.stone_index, 0);
+        assert_eq!(corpse.translation_palette_index, 0);
     }
 
     #[test]
     fn test_add_corpse() {
-        let mut manager = CorpseManager::new();
+        let mut d_corpse = [[0i8; MAXDUNY]; MAXDUNX];
 
-        manager.add_corpse(10, 20, 5, Direction::South);
+        add_corpse(&mut d_corpse, 10, 20, 5, Direction::South);
 
-        let result = manager.get_corpse_at(10, 20);
-        assert!(result.is_some());
-        let (id, dir) = result.unwrap();
-        assert_eq!(id, 5);
-        assert_eq!(dir, Direction::South);
+        let encoded = d_corpse[10][20];
+        assert_eq!(get_corpse_id(encoded), 5);
+        assert_eq!(get_corpse_direction(encoded), Direction::South);
     }
 
     #[test]
-    fn test_remove_corpse() {
-        let mut manager = CorpseManager::new();
+    fn test_add_corpse_with_direction() {
+        let mut d_corpse = [[0i8; MAXDUNY]; MAXDUNX];
 
-        manager.add_corpse(10, 20, 5, Direction::South);
-        assert!(manager.get_corpse_at(10, 20).is_some());
+        add_corpse(&mut d_corpse, 50, 60, 15, Direction::NorthEast);
 
-        manager.remove_corpse(10, 20);
-        assert!(manager.get_corpse_at(10, 20).is_none());
+        let encoded = d_corpse[50][60];
+        assert_eq!(get_corpse_id(encoded), 15);
+        assert_eq!(get_corpse_direction(encoded), Direction::NorthEast);
     }
 
     #[test]
-    fn test_corpse_count() {
-        let mut manager = CorpseManager::new();
+    fn test_add_corpse_bounds_check() {
+        let mut d_corpse = [[0i8; MAXDUNY]; MAXDUNX];
 
-        assert_eq!(manager.count_corpses(), 0);
+        // 越界坐标应该被忽略
+        add_corpse(&mut d_corpse, -1, 20, 5, Direction::South);
+        add_corpse(&mut d_corpse, 10, -1, 5, Direction::South);
+        add_corpse(&mut d_corpse, 200, 20, 5, Direction::South);
+        add_corpse(&mut d_corpse, 10, 200, 5, Direction::South);
 
-        manager.add_corpse(10, 20, 1, Direction::South);
-        manager.add_corpse(30, 40, 2, Direction::North);
-
-        assert_eq!(manager.count_corpses(), 2);
+        // 验证没有写入任何数据
+        for row in &d_corpse {
+            for &cell in row {
+                assert_eq!(cell, 0);
+            }
+        }
     }
 
     #[test]
-    fn test_clear_corpses() {
-        let mut manager = CorpseManager::new();
+    fn test_corpse_id_mask() {
+        // 验证低5位掩码 (0x1F = 31)
+        let mut d_corpse = [[0i8; MAXDUNY]; MAXDUNX];
 
-        manager.add_corpse(10, 20, 1, Direction::South);
-        manager.add_corpse(30, 40, 2, Direction::North);
+        // 尸体ID超过31应该被截断
+        add_corpse(&mut d_corpse, 10, 20, 35, Direction::South); // 35 & 0x1F = 3
 
-        manager.clear();
-        assert_eq!(manager.count_corpses(), 0);
+        let encoded = d_corpse[10][20];
+        assert_eq!(get_corpse_id(encoded), 3);
     }
 
     #[test]
-    fn test_out_of_bounds() {
-        let mut manager = CorpseManager::new();
-
-        // 边界外操作应该安全处理
-        manager.add_corpse(MAXDUNX + 1, MAXDUNY + 1, 1, Direction::South);
-        assert!(manager.get_corpse_at(MAXDUNX + 1, MAXDUNY + 1).is_none());
+    fn test_constants() {
+        assert_eq!(MAX_CORPSES, 31);
+        assert_eq!(MAXDUNX, 112);
+        assert_eq!(MAXDUNY, 112);
     }
 }

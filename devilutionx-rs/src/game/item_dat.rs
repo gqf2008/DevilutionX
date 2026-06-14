@@ -682,7 +682,7 @@ pub enum UniqueBaseItem {
 // Item Data Structures
 //=============================================================================
 
-use crate::game::data::spelldat::SpellID;
+use crate::game::spelldat::SpellID;
 
 /// Item data - exact match of ItemData struct
 #[derive(Debug, Clone)]

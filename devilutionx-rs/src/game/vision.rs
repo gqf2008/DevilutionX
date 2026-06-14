@@ -1,10 +1,13 @@
-//! Vision System - Exact C++ Port (M43)
+//! 视野系统
 //!
-//! This module provides exact port of DevilutionX vision/line-of-sight functionality.
+//! 对应 C++: Source/vision.cpp, Source/vision.hpp
 //!
-//! ## C++ References
-//! - Source/vision.cpp: Vision ray casting implementation
-//! - Source/vision.hpp: Vision interface
+//! ## 依赖关系 (Dependencies)
+//!
+//! C++ 依赖: engine/displacement.hpp, engine/point.hpp (已移植)
+//! Rust 依赖: crate::game::types::Point
+//!
+//! ## 禁止变更 - 已完成移植
 //!
 //! ## Key Features
 //! - Ray-based visibility calculation

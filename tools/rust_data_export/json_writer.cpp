@@ -105,6 +105,7 @@ void JsonWriter::WriteKey(const std::string& key)
 
 void JsonWriter::WriteString(const std::string& value)
 {
+    WriteCommaIfNeeded();
     file_ << "\"";
     // 转义特殊字符
     for (char c : value) {
@@ -123,24 +124,28 @@ void JsonWriter::WriteString(const std::string& value)
 
 void JsonWriter::WriteInt(int64_t value)
 {
+    WriteCommaIfNeeded();
     file_ << value;
     needComma_ = true;
 }
 
 void JsonWriter::WriteUInt(uint64_t value)
 {
+    WriteCommaIfNeeded();
     file_ << value;
     needComma_ = true;
 }
 
 void JsonWriter::WriteFloat(double value)
 {
+    WriteCommaIfNeeded();
     file_ << value;
     needComma_ = true;
 }
 
 void JsonWriter::WriteBool(bool value)
 {
+    WriteCommaIfNeeded();
     file_ << (value ? "true" : "false");
     needComma_ = true;
 }

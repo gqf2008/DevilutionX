@@ -2487,9 +2487,15 @@ where
         return None; // No movement
     }
 
-    // Calculate increment velocity (C++ uses (32 << 16) / denominator)
-    let inc_x = (velocity.x * (32 << 16)) / denominator;
-    let inc_y = (velocity.y * (32 << 16)) / denominator;
+    // Calculate increment velocity.
+    // **C++**: denominator is a `float`, so `(32 << 16) / denominator` is a float
+    // and `velocity * float` is computed in float then truncated to int via the
+    // implicit float->int conversion when assigning to the Displacement. Doing the
+    // integer product `velocity * (32 << 16)` first would overflow i32 for real
+    // missile speeds, so we mirror the float math here.
+    let factor = (32 << 16) as f32 / denominator as f32;
+    let inc_x = (velocity.x as f32 * factor) as i32;
+    let inc_y = (velocity.y as f32 * factor) as i32;
 
     // Start from aligned position
     let mut traveled_x = (start.x << 16);
@@ -2501,11 +2507,19 @@ where
         traveled_x += inc_x;
         traveled_y += inc_y;
 
-        // Convert to tile coordinates
+        // Convert to tile coordinates via screenToMissile()
+        // **C++** `DisplacementOf::screenToMissile()` (Source/engine/displacement.hpp):
+        //   xNumerator = 2*deltaY + deltaX;  yNumerator = 2*deltaY - deltaX;
+        //   x = (xNumerator + (xNumerator>=0?32:-32)) / 64
+        //   y = (yNumerator + (yNumerator>=0?32:-32)) / 64
         let pixels_x = traveled_x >> 16;
         let pixels_y = traveled_y >> 16;
-        let tile_x = (pixels_x - pixels_y) / 64;
-        let tile_y = (pixels_x + pixels_y) / 64;
+        let x_num = 2 * pixels_y + pixels_x;
+        let y_num = 2 * pixels_y - pixels_x;
+        let x_off: i32 = if x_num >= 0 { 32 } else { -32 };
+        let y_off: i32 = if y_num >= 0 { 32 } else { -32 };
+        let tile_x = (x_num + x_off) / 64;
+        let tile_y = (y_num + y_off) / 64;
         let current_tile = Point::new(start.x + tile_x, start.y + tile_y);
 
         // Check if we've reached or passed the destination
@@ -6204,7 +6218,9 @@ mod tests {
     #[test]
     fn test_monster_m_hit_basic() {
         let mut monster_hp = 100 << 6; // 100 HP in fixed point
-        let mut rng = rand::rng();
+        // Seeded RNG so the hit roll is deterministic (hit chance ~28%, clamped).
+        use rand::SeedableRng;
+        let mut rng = rand::rngs::StdRng::seed_from_u64(2);
 
         let (hit, damage, killed) = monster_m_hit(
             10, // player_level
@@ -6264,7 +6280,9 @@ mod tests {
     #[test]
     fn test_monster_m_hit_bone_spirit() {
         let mut monster_hp = 300 << 6; // 300 HP
-        let mut rng = rand::rng();
+        // Seeded RNG so the hit roll is deterministic (hit chance 58%).
+        use rand::SeedableRng;
+        let mut rng = rand::rngs::StdRng::seed_from_u64(2);
 
         let (hit, damage, _killed) = monster_m_hit(
             15, 80, 70, 20, 0, 100, 0, false,
@@ -6292,7 +6310,9 @@ mod tests {
     #[test]
     fn test_monster_m_hit_with_resistance() {
         let mut monster_hp = 100 << 6;
-        let mut rng = rand::rng();
+        // Seeded RNG so the hit roll is deterministic (hit chance 68%).
+        use rand::SeedableRng;
+        let mut rng = rand::rngs::StdRng::seed_from_u64(2);
 
         let (hit, damage, _killed) = monster_m_hit(
             10, 80, 70, 20, 10, 100, 5, false,
@@ -6317,7 +6337,9 @@ mod tests {
     #[test]
     fn test_monster_m_hit_kill() {
         let mut monster_hp = 10 << 6; // Low HP
-        let mut rng = rand::rng();
+        // Seeded RNG so the hit roll is deterministic (hit chance 60%).
+        use rand::SeedableRng;
+        let mut rng = rand::rngs::StdRng::seed_from_u64(2);
 
         let (hit, damage, killed) = monster_m_hit(
             15, 90, 80, 30, 20, 150, 10, true, // Strong player (rogue)
@@ -6341,7 +6363,9 @@ mod tests {
     #[test]
     fn test_plr2plr_m_hit_basic() {
         let mut target_hp = 100 << 6;
-        let mut rng = rand::rng();
+        // Seeded RNG so the hit roll is deterministic (hit chance ~36%).
+        use rand::SeedableRng;
+        let mut rng = rand::rngs::StdRng::seed_from_u64(2);
 
         let (hit, damage, blocked) = plr2plr_m_hit(
             10, 50, 40, 10, 100, 5, false, // Attacker stats
@@ -6410,7 +6434,9 @@ mod tests {
     #[test]
     fn test_plr2plr_m_hit_with_resistance() {
         let mut target_hp = 100 << 6;
-        let mut rng = rand::rng();
+        // Seeded RNG so the hit roll is deterministic (hit chance 37%).
+        use rand::SeedableRng;
+        let mut rng = rand::rngs::StdRng::seed_from_u64(2);
 
         let (hit, damage, _blocked) = plr2plr_m_hit(
             10, 50, 60, 10, 100, 5, false,
@@ -6462,7 +6488,9 @@ mod tests {
     #[test]
     fn test_plr2plr_m_hit_spell_half_damage() {
         let mut target_hp = 100 << 6;
-        let mut rng = rand::rng();
+        // Seeded RNG so the hit roll is deterministic (hit chance ~28%).
+        use rand::SeedableRng;
+        let mut rng = rand::rngs::StdRng::seed_from_u64(2);
 
         let (hit, damage, _blocked) = plr2plr_m_hit(
             15, 50, 70, 10, 100, 5, false,
@@ -6488,7 +6516,9 @@ mod tests {
     #[test]
     fn test_plr2plr_m_hit_bone_spirit_pvp() {
         let mut target_hp = 200 << 6;
-        let mut rng = rand::rng();
+        // Seeded RNG so the hit roll is deterministic (hit chance ~38%).
+        use rand::SeedableRng;
+        let mut rng = rand::rngs::StdRng::seed_from_u64(2);
 
         let (hit, damage, _blocked) = plr2plr_m_hit(
             15, 50, 80, 10, 100, 5, false,
@@ -6504,12 +6534,12 @@ mod tests {
         );
 
         assert!(hit);
-        // Bone Spirit does 1/3 of target HP
+        // Bone Spirit does 1/3 of target HP, then (non-arrow PvP) halves it:
         // Initial: 200 << 6 = 12800
-        // Damage: 12800 / 3 = 4266
-        // Final: 12800 - 4266 ≈ 8534 ≈ 133 << 6
+        // dam = 12800 / 3 = 4266, then /2 = 2133
+        // Final: 12800 - 2133 ≈ 10667
         assert!(damage > 0);
-        let expected_hp = (200 << 6) * 2 / 3;
+        let expected_hp = (200 << 6) - ((200 << 6) / 3) / 2;
         assert!((target_hp - expected_hp).abs() < (10 << 6));
     }
 
@@ -6710,17 +6740,22 @@ mod tests {
 
     #[test]
     fn test_check_intermediate_tiles_blocked() {
-        // Obstacle in the middle
+        // Obstacle on the missile's interpolated iso path.
+        // check_intermediate_tiles walks the iso tiles the missile actually
+        // traverses (screenToMissile mapping), so the blocker must be placed on
+        // a sampled tile, not an assumed grid-diagonal tile. With start=(50,50)
+        // and velocity (192<<16, 192<<16), the first sampled iso tile is (53,51).
         let start = Point::new(50, 50);
         let end = Point::new(53, 53);
         let velocity = Point::new(192 << 16, 192 << 16);
+        let blocked_tile = Point::new(53, 51);
 
         let blocked = check_intermediate_tiles(start, end, velocity, |tile| {
-            tile != Point::new(51, 51) // Block tile (51, 51)
+            tile != blocked_tile
         });
 
         assert!(blocked.is_some());
-        assert_eq!(blocked.unwrap(), Point::new(51, 51));
+        assert_eq!(blocked.unwrap(), blocked_tile);
     }
 
     #[test]
@@ -6893,4 +6928,3 @@ mod tests {
         assert_eq!(missile.position.tile, Point::new(50, 50));
     }
 }
-

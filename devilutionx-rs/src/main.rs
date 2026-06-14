@@ -864,7 +864,7 @@ fn load_missile_data() {
 }
 
 fn load_monster_data() {
-    use game::monster_dat::{get_monster_data, MonsterId, NUM_DEFAULT_MTYPES};
+    use game::monstdat::{get_monster_data, MonsterId, NUM_DEFAULT_MTYPES};
 
     let zombie = get_monster_data(MonsterId::ZombieN);
     let butcher = get_monster_data(MonsterId::Butcher);

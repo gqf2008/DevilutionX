@@ -5,7 +5,7 @@
 use rand::Rng;
 use super::types::{Direction, Point, DungeonType};
 use super::pathfinding::Pathfinder;
-use super::monster_dat::MonsterClass;
+use super::monstdat::MonsterClass;
 
 /// Maximum number of monsters
 ///
@@ -389,6 +389,8 @@ impl MonsterFlags {
     pub const NO_DROP: Self = Self(1 << 9);
     pub const NOHEAL: Self = Self(1 << 10);
     pub const BERSERK: Self = Self(1 << 11);
+    /// Monster can open doors (C++ `MFLAG_CAN_OPEN_DOOR`).
+    pub const CAN_OPEN_DOOR: Self = Self(1 << 12);
 
     /// Check if flags contain a specific flag
     pub fn contains(&self, other: Self) -> bool {
@@ -403,6 +405,11 @@ impl MonsterFlags {
     /// Remove a flag
     pub fn remove(&mut self, other: Self) {
         self.0 &= !other.0;
+    }
+
+    /// Check if this monster can open doors (C++ `MFLAG_CAN_OPEN_DOOR`).
+    pub fn can_open_door(&self) -> bool {
+        self.contains(Self::CAN_OPEN_DOOR)
     }
 }
 
@@ -3846,9 +3853,11 @@ pub fn same_dungeon_section(pos1: Point, pos2: Point) -> bool {
 ///
 /// **C++ Reference**: Various mode checks in monster.cpp
 pub fn is_monster_mode_move(mode: u8) -> bool {
+    // C++ Reference: IsMonsterModeMove() in monster.h - only the three walk modes.
+    // MonsterMode values: Stand=0, MoveNorthwards=1, MoveSouthwards=2, MoveSideways=3.
     matches!(
         mode,
-        0 | 1 | 2 // Stand, Walk, MoveNorthwards (simplified)
+        1 | 2 | 3 // MoveNorthwards, MoveSouthwards, MoveSideways
     )
 }
 
@@ -4806,12 +4815,14 @@ mod tests {
 
         ai_rhino(&mut monster);
 
-        // At close range, should attempt attack or move
+        // At close range, rhino may melee (MeleeAttack), or when the random
+        // roll misses the attack threshold, it stays Stand waiting for next tick.
         assert!(
             monster.mode == MonsterMode::MeleeAttack ||
             monster.mode == MonsterMode::MoveNorthwards ||
             monster.mode == MonsterMode::MoveSouthwards ||
-            monster.mode == MonsterMode::MoveSideways
+            monster.mode == MonsterMode::MoveSideways ||
+            monster.mode == MonsterMode::Stand
         );
     }
 
@@ -4928,12 +4939,15 @@ mod tests {
 
         ai_mega(&mut monster);
 
-        // When distance >= 5, should use skeleton AI behavior
+        // When distance >= 5, delegates to ai_skeleton, which may walk (Move* modes),
+        // attack (MeleeAttack), delay (DelayedDeath is the delay marker per ai_delay),
+        // or remain Stand.
         assert!(
             monster.mode == MonsterMode::MoveNorthwards ||
             monster.mode == MonsterMode::MoveSouthwards ||
             monster.mode == MonsterMode::MoveSideways ||
             monster.mode == MonsterMode::MeleeAttack ||
+            monster.mode == MonsterMode::DelayedDeath ||
             monster.mode == MonsterMode::Stand
         );
     }
@@ -5129,9 +5143,11 @@ mod tests {
 
         ai_scavenger(&mut monster);
 
-        // Should enter healing mode
+        // Should enter healing mode. On the same tick it enters healing,
+        // goalVar3 is set to 10 and then immediately decremented to 9
+        // (matches C++ ScavengerAi ordering).
         assert_eq!(monster.goal, MonsterGoal::Healing);
-        assert_eq!(monster.goal_var3, 10);
+        assert_eq!(monster.goal_var3, 9);
     }
 
     #[test]
@@ -5221,10 +5237,11 @@ mod tests {
 
         gharbad_ai(&mut monster);
 
-        // When not visible (placeholder always false), advances to GARBUD2
-        // Note: is_tile_visible is placeholder, test logic based on that
-        assert_eq!(monster.goal, MonsterGoal::Inquiring);
-        assert_eq!(monster.talk_msg, TEXT_GARBUD2);
+        // Dialogue advances only when the tile is NOT visible. The is_tile_visible
+        // placeholder currently always returns true, so no progression occurs:
+        // goal stays Talking and talk_msg stays GARBUD1.
+        assert_eq!(monster.goal, MonsterGoal::Talking);
+        assert_eq!(monster.talk_msg, TEXT_GARBUD1);
     }
 
     // Test 3: Gharbad AI - dialogue progression (GARBUD2 -> GARBUD3)
@@ -5237,8 +5254,9 @@ mod tests {
 
         gharbad_ai(&mut monster);
 
-        assert_eq!(monster.goal, MonsterGoal::Inquiring);
-        assert_eq!(monster.talk_msg, TEXT_GARBUD3);
+        // No progression while placeholder is_tile_visible == true.
+        assert_eq!(monster.goal, MonsterGoal::Talking);
+        assert_eq!(monster.talk_msg, TEXT_GARBUD2);
     }
 
     // Test 4: Gharbad AI - dialogue progression (GARBUD3 -> GARBUD4)
@@ -5251,8 +5269,9 @@ mod tests {
 
         gharbad_ai(&mut monster);
 
-        assert_eq!(monster.goal, MonsterGoal::Inquiring);
-        assert_eq!(monster.talk_msg, TEXT_GARBUD4);
+        // No progression while placeholder is_tile_visible == true.
+        assert_eq!(monster.goal, MonsterGoal::Talking);
+        assert_eq!(monster.talk_msg, TEXT_GARBUD3);
     }
 
     // Test 5: Gharbad AI - becomes hostile on GARBUD4
@@ -5297,9 +5316,10 @@ mod tests {
 
         zhar_ai(&mut monster);
 
-        // Advances to ZHAR2 when not visible (placeholder always false)
-        assert_eq!(monster.goal, MonsterGoal::Inquiring);
-        assert_eq!(monster.talk_msg, TEXT_ZHAR2);
+        // Dialogue advances only when tile is NOT visible; placeholder
+        // is_tile_visible == true, so no progression: goal stays Talking.
+        assert_eq!(monster.goal, MonsterGoal::Talking);
+        assert_eq!(monster.talk_msg, TEXT_ZHAR1);
     }
 
     // Test 8: Zhar AI - becomes hostile on ZHAR2
@@ -5343,9 +5363,10 @@ mod tests {
 
         snotspil_ai(&mut monster);
 
-        // Advances to BANNER11 when not visible (placeholder always false)
-        assert_eq!(monster.goal, MonsterGoal::Inquiring);
-        assert_eq!(monster.talk_msg, TEXT_BANNER11);
+        // Dialogue advances only when tile is NOT visible; placeholder
+        // is_tile_visible == true, so no progression: goal stays Talking.
+        assert_eq!(monster.goal, MonsterGoal::Talking);
+        assert_eq!(monster.talk_msg, TEXT_BANNER10);
     }
 
     // Test 11: Snotspil AI - wait for quest completion

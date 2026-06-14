@@ -5,6 +5,8 @@ pub mod types;
 pub mod core;
 pub mod player;
 pub mod monster;
+pub mod monster_exact; // Adapter: re-exports + MonsterManager (consolidation shim)
+pub mod monster_object_interaction; // Monster ⟷ door/blocking interaction
 pub mod items;
 pub mod spells;
 pub mod world;
@@ -21,15 +23,18 @@ pub mod inventory;     // Inventory System (M10 Day 93+)
 pub mod input;         // Input system (M80)
 pub mod playable_demo; // Playable demo (M80)
 
+// C++ aligned data modules (Source/*.cpp)
+pub mod spelldat;      // ✅ Source/spelldat.cpp
+pub mod objdat;        // ✅ Source/objdat.cpp
+
 // Exact data ports from C++ headers
 pub mod data;          // Static game data tables (NEW!)
 pub mod player_dat;
 pub mod item_dat;
-pub mod monster_dat;
+pub mod monstdat;      // ✅ Source/monstdat.cpp/h
 pub mod combat_system;
 pub mod player_new;    // Exact Player struct port
 pub mod item_new;      // Exact Item struct port
-pub mod monster_new;   // Exact Monster struct port
 pub mod level_new;     // Exact Level/Dungeon system port
 pub mod item_affix;    // Exact item affix/prefix/suffix system port
 pub mod quest_new;     // Exact quest system port
@@ -37,9 +42,7 @@ pub mod objects_new;   // Exact object system port
 pub mod objects;       // Object system (Day 10-11)
 pub mod player_exact;  // Exact Player system port (Day 19-25)
 pub mod shrine_effects; // Shrine effects with Player integration (Day 26-30)
-pub mod monster_exact; // Exact Monster system port (Day 31-35)
 pub mod combat_integration; // Monster ⟷ Player combat (Day 36)
-pub mod monster_object_interaction; // Monster ⟷ Object interaction (Day 37)
 pub mod game_state; // Unified GameState manager (Day 38-39)
 pub mod missiles; // Missile/Projectile system (Day 41)
 pub mod items_processing; // Items Processing system (Day 42-43)

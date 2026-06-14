@@ -5,7 +5,7 @@
 //!
 //! Reference: Source/objects.cpp, Source/objects.h
 
-use crate::game::data::objdat::{ObjectId, SelectionRegion};
+use crate::game::objdat::{ObjectId, SelectionRegion};
 use crate::game::types::Point;
 use crate::game::player_exact::{Player, CharacterAttribute, HeroClass};
 use crate::game::shrine_effects;

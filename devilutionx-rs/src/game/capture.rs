@@ -249,7 +249,9 @@ mod tests {
         let base = PathBuf::from("/tmp");
         let path = generate_screenshot_filename(&base, ScreenshotFormat::PNG);
 
-        assert!(path.to_string_lossy().starts_with("/tmp/Screenshot from "));
+        // Platform-agnostic: path lives under `base` (avoids `/` vs `\` mismatch on Windows).
+        assert!(path.starts_with(&base), "path should be under base dir: {path:?}");
+        assert!(path.to_string_lossy().contains("Screenshot from "));
         assert!(path.to_string_lossy().ends_with(".png"));
     }
 

@@ -637,7 +637,7 @@ impl DialoguePlayer for Player {
 
 use rand::Rng;
 use super::monster::{Monster, MonsterMode};
-use super::monster_dat::MonsterClass;
+use super::monstdat::MonsterClass;
 use super::item_dat::ItemType;
 
 /// Weapon damage bonus against monster types

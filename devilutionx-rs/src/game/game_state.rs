@@ -221,11 +221,11 @@ impl GameState {
     /// **C++ Reference**: `Source/monster.cpp:4143-4149`
     fn regenerate_monster_hp(&mut self, monster_id: usize) {
         if let Some(monster) = self.monster_manager.get_monster_mut(monster_id) {
-            if monster.hit_points < monster.max_hit_points && monster.hit_points > 0 {
+            if monster.hp < monster.max_hp && monster.hp > 0 {
                 // Simplified: regenerate based on intelligence (as proxy for level)
                 let regen = ((monster.intelligence as i32) / 2).max(1);
                 let regen_64x = regen << 6;
-                monster.hit_points = (monster.hit_points + regen_64x).min(monster.max_hit_points);
+                monster.hp = (monster.hp + regen_64x).min(monster.max_hp);
             }
         }
     }
@@ -245,8 +245,8 @@ impl GameState {
         // Get monster position (need to clone to avoid borrow checker issues)
         let (monster_pos, can_attack) = {
             if let Some(monster) = self.monster_manager.get_monster(monster_id) {
-                let dist = walking_distance(monster.position, self.player.position);
-                (monster.position, dist <= 1)
+                let dist = walking_distance(monster.position(), self.player.position);
+                (monster.position(), dist <= 1)
             } else {
                 return;
             }
@@ -272,7 +272,7 @@ impl GameState {
 
         for monster_id in monster_ids {
             if let Some(monster) = self.monster_manager.get_monster_mut(monster_id) {
-                let dist = walking_distance(player_pos, monster.position);
+                let dist = walking_distance(player_pos, monster.position());
 
                 if dist <= 1 {
                     // Player attacks this monster

@@ -35,6 +35,7 @@ pub mod circle;
 pub mod ticks;
 pub mod path;
 pub mod load_clx;
+pub mod demo_reader; // .dmo demo parser — Tier 0 of timedemo e2e harness
 
 // Render submodules - ported from Source/engine/render/
 pub mod primitive_render;

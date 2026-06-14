@@ -1523,8 +1523,10 @@ mod tests {
         // Start smith dialogue
         manager.start_dialogue(TalkId::Smith, &player);
 
-        // Select "Buy" option (index 2: Sell, Repair disabled, Buy is 3rd available)
-        let result = manager.select_option(2, &player);
+        // Select "Buy" option. Smith options are [Sell, Repair, Buy, PremiumBuy],
+        // but Repair is unavailable for the default player so it is filtered out,
+        // leaving [Sell, Buy, PremiumBuy] — Buy is at index 1.
+        let result = manager.select_option(1, &player);
         assert!(result.is_ok());
         assert_eq!(manager.current_dialogue, Some(TalkId::SmithBuy));
     }

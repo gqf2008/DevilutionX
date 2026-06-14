@@ -401,8 +401,8 @@ impl LightManager {
             for offset_x in 0..8 {
                 for y in 0..16 {
                     for x in 0..16 {
-                        let a = (8 * x - offset_x) as i32;
-                        let b = (8 * y - offset_y) as i32;
+                        let a = 8 * x as i32 - offset_x as i32;
+                        let b = 8 * y as i32 - offset_y as i32;
                         let distance = ((a * a + b * b) as f32).sqrt() as u8;
                         self.light_cone_interpolations[offset_x][offset_y][x][y] = distance;
                     }

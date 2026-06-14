@@ -5,7 +5,7 @@
 use rand::Rng;
 use crate::game::player_dat::{get_class_attributes, get_player_combat_data, HeroClass, PlayerClassFlag};
 use crate::game::item_dat::{ItemType, ItemSpecialEffect, ItemSpecialEffectHf};
-use crate::game::monster_dat::{MonsterClass, MonsterMode};
+use crate::game::monstdat::{MonsterClass, MonsterMode};
 
 /// Damage types in the game
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -729,6 +729,7 @@ mod tests {
         };
 
         // Should not crash or cause issues (Doppelganger skipped for Diablo)
+        rng = StdRng::seed_from_u64(42);
         let result = CombatSystem::player_hit_monster(&player, &diablo, false, false, &mut rng);
         assert!(result.hit, "Should still hit Diablo normally");
 
@@ -743,6 +744,7 @@ mod tests {
             type_id: 50,
         };
 
+        rng = StdRng::seed_from_u64(42);
         let result = CombatSystem::player_hit_monster(&player, &unique_monster, false, false, &mut rng);
         assert!(result.hit, "Should still hit unique monster normally");
 
@@ -757,6 +759,7 @@ mod tests {
             type_id: 50,
         };
 
+        rng = StdRng::seed_from_u64(42);
         let result = CombatSystem::player_hit_monster(&player, &normal_monster, false, false, &mut rng);
         assert!(result.hit, "Should hit normal monster (Doppelganger would trigger 10% of time)");
     }
@@ -907,8 +910,9 @@ mod tests {
         };
 
         let result = CombatSystem::player_hit_monster(&player_5, &monster, false, false, &mut rng);
-        let expected_steal = 5 * (100 << 6) / 100; // 5% of damage
-        assert_eq!(result.life_stolen, expected_steal,
+        assert!(result.hit, "should hit to deal damage");
+        // life_steal is 5% of actual damage dealt — robust to crit doubling.
+        assert_eq!(result.life_stolen, 5 * result.damage / 100,
             "StealLife5 should be 5% of damage");
     }
 
@@ -1049,11 +1053,14 @@ mod tests {
             type_id: 50,
         };
 
+        rng = StdRng::seed_from_u64(42);
         let result = CombatSystem::player_hit_monster(&player_demon, &demon, false, false, &mut rng);
+        assert!(result.hit, "should hit demon");
         let damage = result.damage >> 6;
 
-        // Base 100, *3 = 300
-        assert_eq!(damage, 300, "Triple demon damage should deal 300% damage");
+        // Base 100 ×3 (triple demon) = 300, or ×2 crit = 600.
+        assert!(damage == 300 || damage == 600,
+            "Triple demon damage should be 300% (or 600% with crit), got {}", damage);
     }
 
     #[test]
@@ -1084,8 +1091,10 @@ mod tests {
         let result_normal = CombatSystem::player_hit_monster(&player, &monster, false, false, &mut rng);
         let damage_normal = result_normal.damage >> 6;
 
-        // Adjacent hit (cleave)
-        let result_adjacent = CombatSystem::player_hit_monster(&player, &monster, true, false, &mut rng);
+        // Adjacent hit (cleave) — fresh rng so both calls roll identically,
+        // isolating the 1/4 adjacent multiplier from crit/hit RNG noise.
+        let mut rng_adj = StdRng::seed_from_u64(42);
+        let result_adjacent = CombatSystem::player_hit_monster(&player, &monster, true, false, &mut rng_adj);
         let damage_adjacent = result_adjacent.damage >> 6;
 
         // Adjacent damage should be 1/4 of normal

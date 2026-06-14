@@ -76,7 +76,7 @@ pub fn monster_attack_player(
     rng: &mut impl Rng,
 ) -> AttackResult {
     // 1. Distance check (C++ line 1174)
-    let distance = walking_distance(monster.position, player.position);
+    let distance = walking_distance(monster.position(), player.position);
     if distance >= 2 {
         return AttackResult::Miss; // Too far away
     }
@@ -208,10 +208,10 @@ pub fn player_attack_monster(
 
     // 7. Convert to 64x fixed-point and apply (C++ line 625)
     let damage_64x = damage << 6;
-    monster.modify_hp(-damage_64x);
+    monster.hp -= damage_64x;
 
     // 8. Check for death (C++ line 669)
-    if monster.hit_points <= 0 {
+    if monster.hp <= 0 {
         monster.mode = MonsterMode::Death;
         return AttackResult::Kill { damage };
     }
@@ -250,7 +250,7 @@ fn calculate_player_to_hit(player: &Player, monster: &Monster) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::game::monster_dat::{get_monster_data, MonsterAIID, MonsterId};
+    use crate::game::monster::MonsterType;
     use rand::rngs::StdRng;
     use rand::SeedableRng;
 
@@ -277,8 +277,7 @@ mod tests {
 
     #[test]
     fn test_monster_attack_player_distance_check() {
-        let data = get_monster_data(MonsterId::ZombieN);
-        let monster = Monster::new(data, Point::new(10, 10), MonsterAIID::Zombie, 0);
+        let monster = Monster::new(1, MonsterType::Zombie, 10, 10, 0);
 
         let mut player = Player::new();
         player.position = Point::new(20, 20); // Too far away
@@ -292,8 +291,7 @@ mod tests {
 
     #[test]
     fn test_monster_attack_player_within_range() {
-        let data = get_monster_data(MonsterId::ZombieN);
-        let mut monster = Monster::new(data, Point::new(10, 10), MonsterAIID::Zombie, 0);
+        let mut monster = Monster::new(1, MonsterType::Zombie, 10, 10, 0);
         monster.intelligence = 5;
 
         let mut player = Player::new();
@@ -312,10 +310,9 @@ mod tests {
 
     #[test]
     fn test_player_attack_monster_kill() {
-        let data = get_monster_data(MonsterId::ZombieN);
-        let mut monster = Monster::new(data, Point::new(10, 10), MonsterAIID::Zombie, 0);
-        monster.hit_points = 10 * 64;
-        monster.max_hit_points = 10 * 64;
+        let mut monster = Monster::new(1, MonsterType::Zombie, 10, 10, 0);
+        monster.hp = 10 * 64;
+        monster.max_hp = 10 * 64;
 
         let mut player = Player::new();
         player._p_level = 10;
@@ -332,7 +329,7 @@ mod tests {
 
         if let AttackResult::Kill { damage } = result {
             assert!(damage >= 10);
-            assert!(monster.hit_points <= 0);
+            assert!(monster.hp <= 0);
             assert_eq!(monster.mode, MonsterMode::Death);
         }
     }

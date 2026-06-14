@@ -573,11 +573,14 @@ mod tests {
         menu.open();
         menu.open_options();
 
+        menu.selected_index = 0; // highlight the music slider
         let initial_volume = menu.music_volume;
+        // Increase; if already at max, decrease — a real slider must respond.
         menu.adjust_slider(1);
-
-        // 音乐滑块应该增加
-        assert!(menu.music_volume != initial_volume || menu.options_items[0].slider_value != initial_volume);
+        if menu.music_volume == initial_volume {
+            menu.adjust_slider(-1);
+        }
+        assert_ne!(menu.music_volume, initial_volume, "music slider should respond to adjustment");
     }
 
     #[test]
