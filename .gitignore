@@ -472,3 +472,11 @@ uwp-project/Assets/ui_art
 /devilutionx-rs/.cargo
 /devilutionx-rs/zerotier
 /build_export
+
+# devilutionx-rs dev test/log outputs
+devilutionx-rs/test_results.txt
+devilutionx-rs/check_output*.txt
+devilutionx-rs/check_output_entry.txt
+devilutionx-rs/game_output.txt
+devilutionx-rs/run_log.txt
+devilutionx-rs/test_output*.txt
