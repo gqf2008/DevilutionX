@@ -13,45 +13,71 @@ use rand::Rng;
 // Affix item type flags - what item types an affix can apply to
 // ============================================================================
 
+/// Affix item-type category flags.
+///
+/// This mirrors the C++ `AffixItemType` enum exactly (see `Source/itemdat.h:609`):
+/// a 6-bit coarse category set stored per-affix in `item_prefixes.tsv` /
+/// `item_suffixes.tsv` (columns: Misc, Bow, Staff, Weapon, Shield, Armor) and
+/// used as the single search mask in `GetItemBonus()` (`Source/items.cpp:1309`).
+///
+/// The constants below are kept bit-identical to C++ so that the data tables
+/// (which are written in terms of `ALL_WEAPONS`, `ALL_ARMOR`, `BOW`, `STAFF`,
+/// `SHIELD`, `JEWELRY`) compile to the same bitmask C++ loads from the TSV.
+/// `JEWELRY` and `HELM` are kept as named aliases for back-compat with the
+/// `items.rs` search-mask construction (rings/amulets and helms map to Misc /
+/// Armor respectively in C++).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct AffixItemType(pub u32);
 
 impl AffixItemType {
+    // --- Core 6-bit coarse categories (bit-identical to C++ enum) ---
     pub const NONE: Self = Self(0);
+    /// Misc (rings, amulets, jewelry) — C++ `AffixItemType::Misc = 1 << 0`.
     pub const MISC: Self = Self(1 << 0);
+    /// Bow — C++ `AffixItemType::Bow = 1 << 1`.
     pub const BOW: Self = Self(1 << 1);
+    /// Staff — C++ `AffixItemType::Staff = 1 << 2`.
     pub const STAFF: Self = Self(1 << 2);
-    pub const SWORD: Self = Self(1 << 3);
-    pub const AXE: Self = Self(1 << 4);
-    pub const MACE: Self = Self(1 << 5);
-    pub const SHIELD: Self = Self(1 << 6);
-    pub const HELM: Self = Self(1 << 7);
-    pub const LIGHT_ARMOR: Self = Self(1 << 8);
-    pub const MEDIUM_ARMOR: Self = Self(1 << 9);
-    pub const HEAVY_ARMOR: Self = Self(1 << 10);
-    pub const JEWELRY: Self = Self(1 << 11);
+    /// Weapon (sword / axe / mace) — C++ `AffixItemType::Weapon = 1 << 3`.
+    pub const WEAPON: Self = Self(1 << 3);
+    /// Shield — C++ `AffixItemType::Shield = 1 << 4`.
+    pub const SHIELD: Self = Self(1 << 4);
+    /// Armor (light / medium / heavy / helm) — C++ `AffixItemType::Armor = 1 << 5`.
+    pub const ARMOR: Self = Self(1 << 5);
 
-    // Combined types
-    pub const ALL_WEAPONS: Self = Self(Self::SWORD.0 | Self::AXE.0 | Self::MACE.0 | Self::BOW.0 | Self::STAFF.0);
-    pub const ALL_ARMOR: Self = Self(Self::LIGHT_ARMOR.0 | Self::MEDIUM_ARMOR.0 | Self::HEAVY_ARMOR.0);
+    // --- Aliases used by data tables and external callers ---
+    /// All weapons. Matches C++ coarse `Weapon` bit (a single category).
+    pub const ALL_WEAPONS: Self = Self::WEAPON;
+    /// All armor (light/medium/heavy/helm). Matches C++ coarse `Armor` bit.
+    pub const ALL_ARMOR: Self = Self::ARMOR;
+    /// Jewelry alias. Rings/amulets use the `Misc` category in C++.
+    pub const JEWELRY: Self = Self::MISC;
+    /// Helm alias. Helms use the `Armor` category in C++.
+    pub const HELM: Self = Self::ARMOR;
 
+    /// Returns true if `self` and `other` share any category bit.
+    /// Matches C++ `HasAnyOf` / `(affix.PLIType & flgs) != AffixItemType::None`.
     pub fn contains(&self, other: Self) -> bool {
         (self.0 & other.0) != 0
     }
 
+    /// Map a concrete `ItemType` to its coarse affix category.
+    ///
+    /// This mirrors the `switch (item._itype)` in `Source/items.cpp:2283`
+    /// (sword/axe/mace → Weapon, bow → Bow, shield → Shield,
+    ///  light/medium/heavy armor and helm → Armor, staff → Staff,
+    ///  ring/amulet → Misc).
     pub fn from_item_type(item_type: ItemType) -> Self {
         match item_type {
-            ItemType::Sword => Self::SWORD,
-            ItemType::Axe => Self::AXE,
-            ItemType::Mace => Self::MACE,
+            ItemType::Sword | ItemType::Axe | ItemType::Mace => Self::WEAPON,
             ItemType::Bow => Self::BOW,
             ItemType::Staff => Self::STAFF,
             ItemType::Shield => Self::SHIELD,
-            ItemType::Helm => Self::HELM,
-            ItemType::LightArmor => Self::LIGHT_ARMOR,
-            ItemType::MediumArmor => Self::MEDIUM_ARMOR,
-            ItemType::HeavyArmor => Self::HEAVY_ARMOR,
-            ItemType::Ring | ItemType::Amulet => Self::JEWELRY,
+            ItemType::Helm
+            | ItemType::LightArmor
+            | ItemType::MediumArmor
+            | ItemType::HeavyArmor => Self::ARMOR,
+            ItemType::Ring | ItemType::Amulet => Self::MISC,
             _ => Self::MISC,
         }
     }
@@ -3171,32 +3197,39 @@ mod tests {
 
     #[test]
     fn test_affix_item_type_flags() {
-        // Test individual flags
-        assert_eq!(AffixItemType::SWORD.0, 1 << 3);
-        assert_eq!(AffixItemType::AXE.0, 1 << 4);
+        // Core 6-bit coarse categories — bit-identical to C++ enum (Source/itemdat.h:609)
+        assert_eq!(AffixItemType::MISC.0, 1 << 0);
         assert_eq!(AffixItemType::BOW.0, 1 << 1);
+        assert_eq!(AffixItemType::STAFF.0, 1 << 2);
+        assert_eq!(AffixItemType::WEAPON.0, 1 << 3);
+        assert_eq!(AffixItemType::SHIELD.0, 1 << 4);
+        assert_eq!(AffixItemType::ARMOR.0, 1 << 5);
 
-        // Test combined flags
-        let all_weapons = AffixItemType::ALL_WEAPONS;
-        assert!(all_weapons.contains(AffixItemType::SWORD));
-        assert!(all_weapons.contains(AffixItemType::AXE));
-        assert!(all_weapons.contains(AffixItemType::BOW));
-        assert!(!all_weapons.contains(AffixItemType::SHIELD));
+        // Aliases
+        assert_eq!(AffixItemType::ALL_WEAPONS, AffixItemType::WEAPON);
+        assert_eq!(AffixItemType::ALL_ARMOR, AffixItemType::ARMOR);
+        assert_eq!(AffixItemType::JEWELRY, AffixItemType::MISC);
+        assert_eq!(AffixItemType::HELM, AffixItemType::ARMOR);
 
-        let all_armor = AffixItemType::ALL_ARMOR;
-        assert!(all_armor.contains(AffixItemType::LIGHT_ARMOR));
-        assert!(all_armor.contains(AffixItemType::MEDIUM_ARMOR));
-        assert!(all_armor.contains(AffixItemType::HEAVY_ARMOR));
-        assert!(!all_armor.contains(AffixItemType::SWORD));
+        // A weapon affix matches a weapon search mask but not a shield/armor one
+        assert!(AffixItemType::ALL_WEAPONS.contains(AffixItemType::WEAPON));
+        assert!(!AffixItemType::ALL_WEAPONS.contains(AffixItemType::SHIELD));
+        assert!(AffixItemType::ALL_ARMOR.contains(AffixItemType::HELM));
     }
 
     #[test]
     fn test_from_item_type() {
-        assert_eq!(AffixItemType::from_item_type(ItemType::Sword), AffixItemType::SWORD);
+        // Mirrors C++ Source/items.cpp:2283 switch
+        assert_eq!(AffixItemType::from_item_type(ItemType::Sword), AffixItemType::WEAPON);
+        assert_eq!(AffixItemType::from_item_type(ItemType::Axe), AffixItemType::WEAPON);
+        assert_eq!(AffixItemType::from_item_type(ItemType::Mace), AffixItemType::WEAPON);
         assert_eq!(AffixItemType::from_item_type(ItemType::Bow), AffixItemType::BOW);
+        assert_eq!(AffixItemType::from_item_type(ItemType::Staff), AffixItemType::STAFF);
         assert_eq!(AffixItemType::from_item_type(ItemType::Shield), AffixItemType::SHIELD);
-        assert_eq!(AffixItemType::from_item_type(ItemType::Ring), AffixItemType::JEWELRY);
-        assert_eq!(AffixItemType::from_item_type(ItemType::Amulet), AffixItemType::JEWELRY);
+        assert_eq!(AffixItemType::from_item_type(ItemType::Helm), AffixItemType::ARMOR);
+        assert_eq!(AffixItemType::from_item_type(ItemType::LightArmor), AffixItemType::ARMOR);
+        assert_eq!(AffixItemType::from_item_type(ItemType::Ring), AffixItemType::MISC);
+        assert_eq!(AffixItemType::from_item_type(ItemType::Amulet), AffixItemType::MISC);
     }
 
     #[test]
@@ -3220,8 +3253,11 @@ mod tests {
         assert_eq!(tin.power.param1, 6);
         assert_eq!(tin.power.param2, 10);
         assert_eq!(tin.min_level, 3);
-        assert!(tin.item_types.contains(AffixItemType::SWORD));
+        // TSV itemTypes = "Weapon,Bow,Misc" => affix matches weapon/bow/jewelry searches
+        assert!(tin.item_types.contains(AffixItemType::WEAPON));
         assert!(tin.item_types.contains(AffixItemType::BOW));
+        assert!(tin.item_types.contains(AffixItemType::JEWELRY));
+        assert!(!tin.item_types.contains(AffixItemType::SHIELD));
         assert!(!tin.is_good);
 
         // Test "Gold" prefix - high-level to-hit
@@ -3254,7 +3290,9 @@ mod tests {
         assert_eq!(fine.power.effect_type, ItemEffectType::ArmorPercent);
         assert_eq!(fine.power.param1, 20);
         assert_eq!(fine.power.param2, 30);
-        assert!(fine.item_types.contains(AffixItemType::LIGHT_ARMOR));
+        // TSV itemTypes = "Armor,Shield"
+        assert!(fine.item_types.contains(AffixItemType::ALL_ARMOR));
+        assert!(fine.item_types.contains(AffixItemType::HELM)); // helms are Armor
         assert!(fine.item_types.contains(AffixItemType::SHIELD));
 
         let godly = ITEM_PREFIXES.iter().find(|a| a.name == "Godly").unwrap();
@@ -3406,22 +3444,28 @@ mod tests {
 
     #[test]
     fn test_affix_item_type_coverage() {
-        // Verify weapon prefixes apply to all weapons
+        // Verify weapon prefixes (ToHit/Damage) apply to the Weapon category
         for prefix in ITEM_PREFIXES.iter() {
             if prefix.power.effect_type == ItemEffectType::ToHit
                 || prefix.power.effect_type == ItemEffectType::Damage
             {
-                assert!(prefix.item_types.contains(AffixItemType::SWORD)
-                    || prefix.item_types.contains(AffixItemType::AXE)
-                    || prefix.item_types.contains(AffixItemType::ALL_WEAPONS));
+                assert!(
+                    prefix.item_types.contains(AffixItemType::ALL_WEAPONS),
+                    "Prefix {} ({:?}) should apply to weapons",
+                    prefix.name,
+                    prefix.power.effect_type
+                );
             }
         }
 
-        // Verify armor prefixes apply to armor
+        // Verify armor prefixes apply to the Armor category
         for prefix in ITEM_PREFIXES.iter() {
             if prefix.power.effect_type == ItemEffectType::ArmorPercent {
-                assert!(prefix.item_types.contains(AffixItemType::LIGHT_ARMOR)
-                    || prefix.item_types.contains(AffixItemType::ALL_ARMOR));
+                assert!(
+                    prefix.item_types.contains(AffixItemType::ALL_ARMOR),
+                    "Prefix {} should apply to armor",
+                    prefix.name
+                );
             }
         }
     }
@@ -3736,5 +3780,192 @@ mod tests {
             assert!(suffix.chance > 0, "Chance should be positive");
             assert!(suffix.item_types.0 != 0, "Should apply to at least one item type");
         }
+    }
+
+    // ========================================================================
+    // TSV-authoritative alignment tests (assets/txtdata/items/item_*.tsv)
+    //
+    // These lock the Rust data tables to the exact row counts and spot-checked
+    // field values of the C++ runtime data source. If the TSV ever changes,
+    // update both the table and these constants together.
+    // ========================================================================
+
+    /// C++ `item_prefixes.tsv` has 83 records (header excluded).
+    #[test]
+    fn test_tsv_prefix_count_exact() {
+        assert_eq!(ITEM_PREFIXES.len(), 83, "must match item_prefixes.tsv");
+    }
+
+    /// C++ `item_suffixes.tsv` has 95 records (header excluded).
+    #[test]
+    fn test_tsv_suffix_count_exact() {
+        assert_eq!(ITEM_SUFFIXES.len(), 95, "must match item_suffixes.tsv");
+    }
+
+    /// Spot-check several well-known prefixes against the TSV values.
+    #[test]
+    fn test_known_prefixes_match_cpp() {
+        // King's: TOHIT_DAMP 151-175, minLvl 28, Weapon,Staff, Any, chance 2, useful, 24100..35000 x38
+        let kings = ITEM_PREFIXES.iter().find(|a| a.name == "King's").unwrap();
+        assert_eq!(kings.power.effect_type, ItemEffectType::ToHitDamage);
+        assert_eq!(kings.power.param1, 151);
+        assert_eq!(kings.power.param2, 175);
+        assert_eq!(kings.min_level, 28);
+        assert_eq!(kings.alignment, GoodOrEvil::Any);
+        assert!(kings.is_good);
+        assert_eq!(kings.chance, 2);
+        assert_eq!((kings.min_val, kings.max_val, kings.mult_val), (24100, 35000, 38));
+        // King's itemTypes = "Weapon,Staff"
+        assert!(kings.item_types.contains(AffixItemType::WEAPON));
+        assert!(kings.item_types.contains(AffixItemType::STAFF));
+        assert!(!kings.item_types.contains(AffixItemType::BOW));
+        assert!(!kings.item_types.contains(AffixItemType::ARMOR));
+
+        // Silver: TOHIT 16-20, minLvl 9, Good alignment
+        let silver = ITEM_PREFIXES.iter().find(|a| a.name == "Silver").unwrap();
+        assert_eq!(silver.power.param1, 16);
+        assert_eq!(silver.power.param2, 20);
+        assert_eq!(silver.min_level, 9);
+        assert_eq!(silver.alignment, GoodOrEvil::Good);
+
+        // Ruby: FIRERES 51-60, minLvl 26, multVal 5
+        let ruby = ITEM_PREFIXES.iter().find(|a| a.name == "Ruby").unwrap();
+        assert_eq!(ruby.power.effect_type, ItemEffectType::FireRes);
+        assert_eq!(ruby.power.param1, 51);
+        assert_eq!(ruby.power.param2, 60);
+        assert_eq!(ruby.mult_val, 5);
+
+        // Wyrm's: MANA 61-80, Staff only (no jewelry), minLvl 35
+        let wyrm = ITEM_PREFIXES.iter().find(|a| a.name == "Wyrm's").unwrap();
+        assert_eq!(wyrm.power.effect_type, ItemEffectType::Mana);
+        assert!(wyrm.item_types.contains(AffixItemType::STAFF));
+        assert!(!wyrm.item_types.contains(AffixItemType::JEWELRY));
+        assert_eq!(wyrm.min_level, 35);
+
+        // Godly: ACP 171-200, minLvl 60, Armor,Shield, Good
+        let godly = ITEM_PREFIXES.iter().find(|a| a.name == "Godly").unwrap();
+        assert_eq!(godly.power.effect_type, ItemEffectType::ArmorPercent);
+        assert_eq!((godly.power.param1, godly.power.param2), (171, 200));
+        assert_eq!(godly.alignment, GoodOrEvil::Good);
+        assert!(godly.item_types.contains(AffixItemType::ARMOR));
+        assert!(godly.item_types.contains(AffixItemType::SHIELD));
+    }
+
+    /// Spot-check several well-known suffixes against the TSV values.
+    #[test]
+    fn test_known_suffixes_match_cpp() {
+        // carnage: DAMMOD 13-16, minLvl 35, Weapon only
+        let carnage = ITEM_SUFFIXES.iter().find(|a| a.name == "carnage").unwrap();
+        assert_eq!(carnage.power.effect_type, ItemEffectType::DamMod);
+        assert_eq!((carnage.power.param1, carnage.power.param2), (13, 16));
+        assert_eq!(carnage.min_level, 35);
+        assert!(carnage.item_types.contains(AffixItemType::WEAPON));
+        assert!(!carnage.item_types.contains(AffixItemType::BOW));
+
+        // the wolf: LIFE 30-40, minLvl 15, Armor,Shield,Misc (jewelry)
+        let wolf = ITEM_SUFFIXES.iter().find(|a| a.name == "the wolf").unwrap();
+        assert_eq!(wolf.power.effect_type, ItemEffectType::Life);
+        assert_eq!((wolf.power.param1, wolf.power.param2), (30, 40));
+        assert_eq!(wolf.min_level, 15);
+        assert!(wolf.item_types.contains(AffixItemType::ARMOR));
+        assert!(wolf.item_types.contains(AffixItemType::SHIELD));
+        assert!(wolf.item_types.contains(AffixItemType::JEWELRY));
+
+        // the whale: LIFE 81-100, minLvl 60, Armor only
+        let whale = ITEM_SUFFIXES.iter().find(|a| a.name == "the whale").unwrap();
+        assert_eq!((whale.power.param1, whale.power.param2), (81, 100));
+        assert_eq!(whale.min_level, 60);
+        assert!(whale.item_types.contains(AffixItemType::ARMOR));
+        assert!(!whale.item_types.contains(AffixItemType::SHIELD));
+
+        // the zodiac: ATTRIBS 16-20, minLvl 30, Misc (jewelry) only
+        let zodiac = ITEM_SUFFIXES.iter().find(|a| a.name == "the zodiac").unwrap();
+        assert_eq!(zodiac.power.effect_type, ItemEffectType::Attribs);
+        assert_eq!((zodiac.power.param1, zodiac.power.param2), (16, 20));
+        assert_eq!(zodiac.min_level, 30);
+        assert!(zodiac.item_types.contains(AffixItemType::JEWELRY));
+        assert!(!zodiac.item_types.contains(AffixItemType::ARMOR));
+
+        // the ages: INDESTRUCTIBLE, minLvl 25, Armor,Shield,Weapon
+        let ages = ITEM_SUFFIXES.iter().find(|a| a.name == "the ages").unwrap();
+        assert_eq!(ages.power.effect_type, ItemEffectType::Indestructible);
+        assert_eq!(ages.min_level, 25);
+        assert!(ages.item_types.contains(AffixItemType::ARMOR));
+        assert!(ages.item_types.contains(AffixItemType::SHIELD));
+        assert!(ages.item_types.contains(AffixItemType::WEAPON));
+
+        // corruption: NOMANA, minLvl 5, Evil, negative value -1000
+        let corruption = ITEM_SUFFIXES.iter().find(|a| a.name == "corruption").unwrap();
+        assert_eq!(corruption.power.effect_type, ItemEffectType::NoMana);
+        assert_eq!(corruption.alignment, GoodOrEvil::Evil);
+        assert!(!corruption.is_good);
+        assert_eq!((corruption.min_val, corruption.max_val), (-1000, -1000));
+
+        // the bear: KNOCKBACK, Weapon,Staff,Bow, Evil (good-aligned cursed)
+        let bear = ITEM_SUFFIXES.iter().find(|a| a.name == "the bear").unwrap();
+        assert_eq!(bear.power.effect_type, ItemEffectType::Knockback);
+        assert_eq!(bear.alignment, GoodOrEvil::Evil);
+        assert!(bear.is_good);
+        assert!(bear.item_types.contains(AffixItemType::WEAPON));
+        assert!(bear.item_types.contains(AffixItemType::STAFF));
+        assert!(bear.item_types.contains(AffixItemType::BOW));
+
+        // blocking: FASTBLOCK, minLvl 5, Shield only
+        let blocking = ITEM_SUFFIXES.iter().find(|a| a.name == "blocking").unwrap();
+        assert_eq!(blocking.power.effect_type, ItemEffectType::FastBlock);
+        assert_eq!(blocking.min_level, 5);
+        assert!(blocking.item_types.contains(AffixItemType::SHIELD));
+    }
+
+    /// Verify the coarse bitmask identity matches C++ for every affix:
+    /// the bitmask must be expressible purely in the 6 coarse bits.
+    #[test]
+    fn test_all_affixes_use_only_coarse_bits() {
+        const COARSE_MASK: u32 =
+            AffixItemType::MISC.0
+            | AffixItemType::BOW.0
+            | AffixItemType::STAFF.0
+            | AffixItemType::WEAPON.0
+            | AffixItemType::SHIELD.0
+            | AffixItemType::ARMOR.0;
+        for p in ITEM_PREFIXES.iter() {
+            assert_eq!(
+                p.item_types.0 & !COARSE_MASK,
+                0,
+                "Prefix {} uses non-coarse bits: 0x{:x}",
+                p.name,
+                p.item_types.0
+            );
+            assert_ne!(p.item_types.0, 0, "Prefix {} has empty item type", p.name);
+        }
+        for s in ITEM_SUFFIXES.iter() {
+            assert_eq!(
+                s.item_types.0 & !COARSE_MASK,
+                0,
+                "Suffix {} uses non-coarse bits: 0x{:x}",
+                s.name,
+                s.item_types.0
+            );
+            assert_ne!(s.item_types.0, 0, "Suffix {} has empty item type", s.name);
+        }
+    }
+
+    /// Verify helm/jewelry search masks match the right affixes (regression
+    /// for the coarse-model fix: previously helms matched nothing).
+    #[test]
+    fn test_helm_and_jewelry_search_masks() {
+        // A weapon-only prefix must NOT match a helm search (HELM == ARMOR).
+        let kings = ITEM_PREFIXES.iter().find(|a| a.name == "King's").unwrap();
+        assert!(!kings.item_types.contains(AffixItemType::HELM));
+
+        // An Armor/Shield prefix (Godly) MUST match a helm search.
+        let godly = ITEM_PREFIXES.iter().find(|a| a.name == "Godly").unwrap();
+        assert!(godly.item_types.contains(AffixItemType::HELM));
+
+        // A Misc/jewelry-suffix (the zodiac) MUST match a jewelry search.
+        let zodiac = ITEM_SUFFIXES.iter().find(|a| a.name == "the zodiac").unwrap();
+        assert!(zodiac.item_types.contains(AffixItemType::JEWELRY));
+        // And must NOT match a weapon search.
+        assert!(!zodiac.item_types.contains(AffixItemType::WEAPON));
     }
 }
