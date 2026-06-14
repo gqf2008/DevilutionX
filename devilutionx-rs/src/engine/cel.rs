@@ -28,11 +28,13 @@ impl CelDecoder {
     }
     
     /// Get width of transparent run
-    /// 
+    ///
     /// C++ Reference: GetCelTransparentWidth(control)
     #[inline]
     const fn get_transparent_width(control: u8) -> u8 {
-        (-(control as i8)) as u8
+        // Width = 256 - control for control >= 0x80 (1..=128). Use wrapping
+        // negation so 0x80 -> 128 without the i8 negation overflow panic.
+        control.wrapping_neg()
     }
     
     /// Decode CEL data to sprite list (all frames same width)
@@ -306,7 +308,9 @@ mod tests {
         
         data.clear();
         CelDecoder::append_transparent_run(200, &mut data);
-        assert_eq!(data, vec![0x7F, 0x7F, 46]);
+        // CLX transparent encoding: chunks of <= 0x7F summing to the width.
+        // 200 = 127 + 73.
+        assert_eq!(data, vec![0x7F, 73]);
     }
 
     #[test]

@@ -1339,10 +1339,11 @@ mod tests {
         assert_eq!(screen_pos.x, center.x);
         assert_eq!(screen_pos.y, center.y);
 
-        // Tile to the northeast should be right and up
+        // +x tile projects right and down (Diablo isometric: +x is screen-SE,
+        // not NE). A true NE tile would be (+x, -y).
         let screen_pos = manager.tile_to_screen(11, 10, 10, 10);
         assert!(screen_pos.x > center.x);
-        assert!(screen_pos.y < center.y);
+        assert!(screen_pos.y > center.y);
     }
 
     #[test]

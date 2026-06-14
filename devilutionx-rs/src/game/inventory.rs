@@ -265,7 +265,7 @@ pub struct Inventory {
     pub items: Vec<Option<Item>>,
 
     /// Grid occupation map (10×4 = 40 cells)
-    /// -1 = empty, >=0 = index into items array
+    /// 0 = empty, >0 = (item index + 1) for anchor cell, <0 = -(item index + 1) for continuation cell
     /// C++ equivalent: Player::InvGrid[InventoryGridCells]
     pub grid: [i8; INVENTORY_SIZE],
 
@@ -279,7 +279,7 @@ impl Inventory {
     pub fn new() -> Self {
         Self {
             items: Vec::with_capacity(INVENTORY_SIZE),
-            grid: [-1; INVENTORY_SIZE],
+            grid: [0; INVENTORY_SIZE],
             count: 0,
         }
     }
@@ -291,7 +291,7 @@ impl Inventory {
 
     /// Check if inventory is full (no empty slots)
     pub fn is_full(&self) -> bool {
-        self.grid.iter().all(|&cell| cell >= 0)
+        self.grid.iter().all(|&cell| cell != 0)
     }
 
     /// Get item at grid position (x, y)
@@ -301,19 +301,20 @@ impl Inventory {
         }
 
         let grid_index = y * INVENTORY_WIDTH + x;
-        let item_index = self.grid[grid_index];
+        let cell_val = self.grid[grid_index];
 
-        if item_index < 0 {
+        if cell_val <= 0 {
             None
         } else {
-            self.items.get(item_index as usize).and_then(|opt| opt.as_ref())
+            let item_index = (cell_val - 1) as usize;
+            self.items.get(item_index).and_then(|opt| opt.as_ref())
         }
     }
 
     /// Clear all inventory items
     pub fn clear(&mut self) {
         self.items.clear();
-        self.grid = [-1; INVENTORY_SIZE];
+        self.grid = [0; INVENTORY_SIZE];
         self.count = 0;
     }
 
@@ -567,8 +568,12 @@ impl Equipment {
     /// * `item` - Item to check
     /// * `slot` - Target equipment slot
     pub fn can_equip(&self, player_stats: &PlayerStats, item: &Item, slot: EquipSlot) -> Result<(), EquipError> {
-        // Check if slot is occupied
-        if !self.is_empty(slot) {
+        // Check if slot is occupied. Hand slots are delegated to `can_wield`,
+        // which distinguishes BothHandsOccupied / TwoHandedConflict from a
+        // plain occupied slot (C++ CanEquip delegates hand logic similarly).
+        if !matches!(slot, EquipSlot::HandLeft | EquipSlot::HandRight)
+            && !self.is_empty(slot)
+        {
             return Err(EquipError::SlotOccupied);
         }
 
@@ -938,7 +943,7 @@ impl Inventory {
         for dy in 0..item_size.height as usize {
             for dx in 0..item_size.width as usize {
                 let grid_idx = (start_y + dy) * INVENTORY_WIDTH + (start_x + dx);
-                if self.grid[grid_idx] >= 0 {
+                if self.grid[grid_idx] != 0 {
                     // Cell occupied
                     return false;
                 }
@@ -1061,7 +1066,7 @@ impl Inventory {
 
                 // Bottom-left cell (highest y, lowest x) stores positive index
                 if dy == (item_size.height - 1) as usize && dx == 0 {
-                    self.grid[grid_idx] = item_index as i8;
+                    self.grid[grid_idx] = (item_index + 1) as i8;
                 } else {
                     // Other cells store negative index
                     self.grid[grid_idx] = -(item_index as i8 + 1);
@@ -1088,17 +1093,17 @@ impl Inventory {
         }
 
         let grid_val = self.grid[slot_index];
-        if grid_val < 0 {
+        if grid_val <= 0 {
             return None; // Empty slot or secondary cell
         }
 
-        let item_index = grid_val as usize;
+        let item_index = (grid_val - 1) as usize;
         let item = self.items.get_mut(item_index)?.take()?;
 
         // Clear grid cells occupied by this item
         for i in 0..INVENTORY_SIZE {
             if self.grid[i].abs() - 1 == item_index as i8 {
-                self.grid[i] = -1;
+                self.grid[i] = 0;
             }
         }
 
@@ -1194,7 +1199,7 @@ pub fn auto_place_gold(inventory: &mut Inventory, mut gold_amount: i32) -> i32 {
             break;
         }
 
-        if inventory.grid[i] == -1 {
+        if inventory.grid[i] == 0 {
             let amount_to_place = gold_amount.min(MAX_GOLD_PER_STACK);
             let mut gold_item = Item::new("Gold".to_string(), ItemType::Gold, amount_to_place);
             gold_item.quantity = amount_to_place;
@@ -1214,7 +1219,7 @@ pub fn auto_place_gold(inventory: &mut Inventory, mut gold_amount: i32) -> i32 {
             }
 
             let slot = y * INVENTORY_WIDTH + x;
-            if inventory.grid[slot] == -1 {
+            if inventory.grid[slot] == 0 {
                 let amount_to_place = gold_amount.min(MAX_GOLD_PER_STACK);
                 let mut gold_item = Item::new("Gold".to_string(), ItemType::Gold, amount_to_place);
                 gold_item.quantity = amount_to_place;
@@ -1557,9 +1562,9 @@ mod tests {
         assert_eq!(inventory.len(), 0);
         assert_eq!(inventory.count, 0);
 
-        // All grid cells should be -1 (empty)
+        // All grid cells should be 0 (empty)
         for &cell in &inventory.grid {
-            assert_eq!(cell, -1);
+            assert_eq!(cell, 0);
         }
     }
 
@@ -1583,7 +1588,7 @@ mod tests {
         assert!(inventory.is_empty());
         assert_eq!(inventory.count, 0);
         for &cell in &inventory.grid {
-            assert_eq!(cell, -1);
+            assert_eq!(cell, 0);
         }
     }
 
@@ -1953,13 +1958,13 @@ mod tests {
 
         // Check state
         assert_eq!(inventory.count, 1);
-        assert_eq!(inventory.grid[5], 0); // Item index 0
+        assert_eq!(inventory.grid[5], 1); // Item index 0 + 1 (anchor)
         assert_eq!(inventory.items.len(), 1);
 
         // Check all other cells empty
         for i in 0..INVENTORY_SIZE {
             if i != 5 {
-                assert_eq!(inventory.grid[i], -1);
+                assert_eq!(inventory.grid[i], 0);
             }
         }
     }
@@ -1974,18 +1979,18 @@ mod tests {
         assert!(result.is_ok());
 
         // Grid layout (2×3 at slot 0):
-        // [0,  -1, ?, ?, ?, ?, ?, ?, ?, ?]  row 0
+        // [-1, -1, ?, ?, ?, ?, ?, ?, ?, ?]  row 0
         // [-1, -1, ?, ?, ?, ?, ?, ?, ?, ?]  row 1
-        // [+0, -1, ?, ?, ?, ?, ?, ?, ?, ?]  row 2 (bottom-left stores item index)
+        // [+1, -1, ?, ?, ?, ?, ?, ?, ?, ?]  row 2 (bottom-left stores item index + 1)
         // [?, ?, ?, ?, ?, ?, ?, ?, ?, ?]    row 3
 
         // Occupied cells: 0, 1 (row 0), 10, 11 (row 1), 20, 21 (row 2)
-        assert_eq!(inventory.grid[0], -1);  // Top-left: -1 (occupied)
-        assert_eq!(inventory.grid[1], -1);  // Top-right of item: -1
-        assert_eq!(inventory.grid[10], -1); // Middle-left: -1
-        assert_eq!(inventory.grid[11], -1); // Middle-right: -1
-        assert_eq!(inventory.grid[20], 0);  // Bottom-left: +0 (item index)
-        assert_eq!(inventory.grid[21], -1); // Bottom-right: -1
+        assert_eq!(inventory.grid[0], -1);  // Top-left: -1 (continuation cell, item 0)
+        assert_eq!(inventory.grid[1], -1);  // Top-right of item: -1 (continuation cell)
+        assert_eq!(inventory.grid[10], -1); // Middle-left: -1 (continuation cell)
+        assert_eq!(inventory.grid[11], -1); // Middle-right: -1 (continuation cell)
+        assert_eq!(inventory.grid[20], 1);  // Bottom-left: +1 (item index 0 + 1, anchor)
+        assert_eq!(inventory.grid[21], -1); // Bottom-right: -1 (continuation cell)
     }
 
     #[test]
@@ -2028,7 +2033,7 @@ mod tests {
         assert!(removed.is_some());
         assert_eq!(removed.unwrap().name, "Long Sword");
         assert_eq!(inventory.count, 0);
-        assert_eq!(inventory.grid[10], -1); // Cell cleared
+        assert_eq!(inventory.grid[10], 0); // Cell cleared
     }
 
     #[test]
@@ -2444,10 +2449,10 @@ impl Inventory {
                 let grid_idx = (start_y + dy) * INVENTORY_WIDTH + (start_x + dx);
                 let cell_val = self.grid[grid_idx];
 
-                if cell_val != -1 {
+                if cell_val != 0 {
                     // Cell is occupied, get the item index
-                    let item_idx = if cell_val >= 0 {
-                        cell_val as usize
+                    let item_idx = if cell_val > 0 {
+                        (cell_val - 1) as usize
                     } else {
                         // Negative value: convert back to item index
                         ((-cell_val) - 1) as usize
@@ -2484,12 +2489,12 @@ impl Inventory {
         }
 
         let cell_val = self.grid[slot_index];
-        if cell_val == -1 {
+        if cell_val == 0 {
             return None;
         }
 
-        let item_idx = if cell_val >= 0 {
-            cell_val as usize
+        let item_idx = if cell_val > 0 {
+            (cell_val - 1) as usize
         } else {
             ((-cell_val) - 1) as usize
         };
@@ -2604,10 +2609,8 @@ impl Inventory {
         // Clear grid cells for this item
         for i in 0..INVENTORY_SIZE {
             let cell_val = self.grid[i];
-            if cell_val >= 0 && cell_val as usize == item_index {
-                self.grid[i] = -1;
-            } else if cell_val < -1 && ((-cell_val) - 1) as usize == item_index {
-                self.grid[i] = -1;
+            if cell_val.abs() - 1 == item_index as i8 && cell_val != 0 {
+                self.grid[i] = 0;
             }
         }
 
@@ -2641,13 +2644,13 @@ impl Inventory {
         }
 
         let cell_val = self.grid[slot_index];
-        if cell_val == -1 {
+        if cell_val == 0 {
             return None;
         }
 
         // Get actual item index
-        let item_idx = if cell_val >= 0 {
-            cell_val as usize
+        let item_idx = if cell_val > 0 {
+            (cell_val - 1) as usize
         } else {
             ((-cell_val) - 1) as usize
         };
@@ -2673,10 +2676,8 @@ impl Inventory {
                 let idx = y * INVENTORY_WIDTH + x;
                 let cell_val = self.grid[idx];
 
-                let matches = if cell_val >= 0 {
-                    cell_val as usize == item_index
-                } else if cell_val != -1 {
-                    ((-cell_val) - 1) as usize == item_index
+                let matches = if cell_val != 0 {
+                    (cell_val.abs() - 1) as usize == item_index
                 } else {
                     false
                 };
@@ -2720,12 +2721,12 @@ impl Inventory {
         let slot_index = grid_y * INVENTORY_WIDTH + grid_x;
         let cell_val = self.grid[slot_index];
 
-        if cell_val == -1 {
+        if cell_val == 0 {
             return None;
         }
 
-        let item_idx = if cell_val >= 0 {
-            cell_val as usize
+        let item_idx = if cell_val > 0 {
+            (cell_val - 1) as usize
         } else {
             ((-cell_val) - 1) as usize
         };
