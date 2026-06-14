@@ -8,10 +8,14 @@
 //! `WarriorLevel1to2` fixture). Versions `< 2` used a different (u32) event
 //! encoding and are rejected; version 2/3 share the compact u8 encoding.
 //!
-//! The companion save file (`spawn_0.sv`) is an MPQ archive (magic `MPQ\x1a`);
-//! loading its inner save structure is Tier 1+ work (see [`ReplayDriver`]).
+//! The companion save file (`spawn_0.sv`) is an MPQ archive (magic `MPQ\x1a`).
+//! [`load_save_archive`] opens it via the `engine::mpq` reader and exposes the
+//! inner entries — that is the Tier 1 save-loading step. Full headless replay
+//! (stepping the engine game loop over the demo stream) is Tier 2+ work.
 
 use std::collections::HashMap;
+
+use crate::engine::mpq::{MpqArchive, MpqError};
 
 // ────────────────────────────────────────────────────────────────────────────
 // Event types
@@ -241,7 +245,114 @@ pub fn parse_demo(data: &[u8]) -> Result<DemoFile, DemoParseError> {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Headless replay driver — Tier 1 scaffold
+// Save archive loading — Tier 1
+// ────────────────────────────────────────────────────────────────────────────
+//
+// GOAL (this section): open a Diablo save file (an MPQ archive, e.g.
+// `spawn_0.sv`) and enumerate / read its inner entries. This is the save-
+// loading half of the timedemo harness. The C++ gold standard
+// (`test/timedemo_test.cpp`) loads `spawn_0.sv` this way before replaying the
+// demo and byte-comparing against `demo_0_reference_spawn_0.sv`.
+//
+// WHAT'S HERE: a thin wrapper over `engine::mpq::MpqArchive`. We do NOT parse
+// the inner save structure (hero stats, level data, etc.) yet — only prove the
+// archive opens and we can reach its contents. Parsing the inner save blob and
+// feeding it into engine state is the next step toward Tier 2 (game-loop
+// stepping).
+
+/// MPQ-backed view of a Diablo save file.
+///
+/// Wraps [`MpqArchive`] so callers don't depend on mpq internals. Tier 1 only
+/// needs to open the archive and enumerate/reach entries; the engine-side save
+/// parser that consumes these bytes is Tier 2+ work.
+pub struct SaveArchive {
+    archive: MpqArchive,
+}
+
+/// Error opening a save archive. Carries the underlying [`MpqError`] so callers
+/// can distinguish "not an MPQ" / IO failures from missing inner entries.
+#[derive(Debug)]
+pub struct SaveLoadError(pub MpqError);
+
+impl std::fmt::Display for SaveLoadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "save archive load failed: {}", self.0)
+    }
+}
+impl std::error::Error for SaveLoadError {}
+
+impl From<MpqError> for SaveLoadError {
+    fn from(e: MpqError) -> Self {
+        Self(e)
+    }
+}
+
+/// One inner entry of a save archive, reached by name lookup.
+#[derive(Debug, Clone)]
+pub struct SaveEntry {
+    pub name: String,
+    pub unpacked_size: u32,
+}
+
+impl SaveArchive {
+    /// Open a save file by path. The file must be a valid MPQ archive
+    /// (Diablo saves always are — magic `MPQ\x1a`).
+    pub fn open<P: AsRef<std::path::Path>>(path: P) -> Result<Self, SaveLoadError> {
+        let archive = MpqArchive::open(path)?;
+        Ok(Self { archive })
+    }
+
+    /// Number of block-table entries in the archive. This is an upper bound on
+    /// the number of inner files; some slots may be empty/deleted. Useful as a
+    /// "the archive opened and has structure" sanity check without needing a
+    /// listfile (save archives typically ship without one).
+    pub fn block_count(&self) -> usize {
+        self.archive.get_block_info().len()
+    }
+
+    /// Does the archive contain an entry by this name?
+    pub fn has_entry(&self, name: &str) -> bool {
+        self.archive.has_file(name)
+    }
+
+    /// Read an inner entry by name, returning its decoded bytes.
+    pub fn read_entry(&mut self, name: &str) -> Result<Vec<u8>, SaveLoadError> {
+        let bytes = self.archive.read_file(name)?;
+        Ok(bytes)
+    }
+
+    /// Enumerate inner entries via the MPQ `(listfile)` pseudo-entry.
+    ///
+    /// Caveat: most Diablo save archives do **not** ship a `(listfile)`, so this
+    /// will commonly return `Err`. Callers that need the canonical entry names
+    /// for a Diablo save (`hero`, level blobs, etc.) should probe known names
+    /// with [`has_entry`](Self::has_entry) instead.
+    pub fn list_entries(&mut self) -> Result<Vec<String>, SaveLoadError> {
+        let names = self.archive.list_files()?;
+        Ok(names)
+    }
+
+    /// Borrowed access to the underlying archive, for callers that need an API
+    /// not yet surfaced here.
+    pub fn inner(&self) -> &MpqArchive {
+        &self.archive
+    }
+}
+
+/// Convenience: open a save archive and report whether it has structure
+/// (block table is non-empty). This is the Tier 1 acceptance predicate —
+/// "the save file opened as an MPQ and we can see its entries."
+pub fn load_save_archive<P: AsRef<std::path::Path>>(path: P) -> Result<SaveArchive, SaveLoadError> {
+    let archive = SaveArchive::open(path)?;
+    if archive.block_count() == 0 {
+        // Not strictly an error, but every real Diablo save has entries.
+        return Err(SaveLoadError(MpqError::InvalidHash));
+    }
+    Ok(archive)
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Headless replay driver — Tier 2+ scaffold
 // ────────────────────────────────────────────────────────────────────────────
 //
 // GOAL: load `spawn_0.sv`, feed the demo event stream into the engine game loop

@@ -432,11 +432,27 @@ impl PlayerControls {
     }
     
     /// Navigate inventory slot
+    ///
+    /// The inventory is a flat 10-wide grid (slots `SLOTXY_INV_FIRST..=SLOTXY_INV_LAST`,
+    /// 4 rows x 10 columns). The `Direction` enum uses isometric (iso) deltas where
+    /// `East` is `(dx=1, dy=1)` and would jump `+1 + 1*10 = +11` (a diagonal move).
+    /// For flat-grid navigation we instead map each direction to a grid
+    /// (column, row) delta: East/West move one column (+/-1), South/North move one
+    /// row (+/-10), and the diagonal directions combine both.
     pub fn navigate_inventory(&mut self, direction: Direction) {
-        let (dx, dy) = (direction.dx(), direction.dy());
-        
-        // Simple grid navigation
-        let new_slot = self.inv_slot + dx + dy * 10;
+        let (col_delta, row_delta): (i32, i32) = match direction {
+            Direction::East => (1, 0),
+            Direction::West => (-1, 0),
+            Direction::South => (0, 1),
+            Direction::North => (0, -1),
+            Direction::SouthEast => (1, 1),
+            Direction::SouthWest => (-1, 1),
+            Direction::NorthEast => (1, -1),
+            Direction::NorthWest => (-1, -1),
+        };
+
+        // Flat grid navigation: each row is 10 slots wide.
+        let new_slot = self.inv_slot + col_delta + row_delta * 10;
         if new_slot >= SLOTXY_INV_FIRST && new_slot <= SLOTXY_INV_LAST {
             self.inv_slot = new_slot;
         }

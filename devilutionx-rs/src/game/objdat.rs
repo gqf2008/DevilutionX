@@ -324,31 +324,37 @@ impl ObjectDataFlags {
     pub const TRAP: Self = Self(1 << 4);
     pub const BREAKABLE: Self = Self(1 << 5);
 
-    pub fn contains(&self, other: Self) -> bool {
+    /// Const bitwise-or, usable in `static` initializers (`|` via `BitOr`
+    /// is not `const`).
+    pub const fn or(self, rhs: Self) -> Self {
+        Self(self.0 | rhs.0)
+    }
+
+    pub const fn contains(&self, other: Self) -> bool {
         (self.0 & other.0) != 0
     }
 
-    pub fn is_animated(&self) -> bool {
+    pub const fn is_animated(&self) -> bool {
         self.contains(Self::ANIMATED)
     }
 
-    pub fn is_solid(&self) -> bool {
+    pub const fn is_solid(&self) -> bool {
         self.contains(Self::SOLID)
     }
 
-    pub fn missiles_pass_through(&self) -> bool {
+    pub const fn missiles_pass_through(&self) -> bool {
         self.contains(Self::MISSILES_PASS_THROUGH)
     }
 
-    pub fn apply_lighting(&self) -> bool {
+    pub const fn apply_lighting(&self) -> bool {
         self.contains(Self::LIGHT)
     }
 
-    pub fn is_trap(&self) -> bool {
+    pub const fn is_trap(&self) -> bool {
         self.contains(Self::TRAP)
     }
 
-    pub fn is_breakable(&self) -> bool {
+    pub const fn is_breakable(&self) -> bool {
         self.contains(Self::BREAKABLE)
     }
 }
@@ -577,9 +583,21 @@ pub static OBJ_TYPE_CONV: &[i8] = &[
 // Helper Functions
 // ============================================================================
 
-/// Get object data by ObjectId
+/// Get object data by ObjectId. Mirrors C++ `ObjData[id]` / `AllObjects[id]`.
+/// Returns `None` only for the sentinel `ObjectId::Null` (-1); every valid
+/// discriminant in [0, 108] is guaranteed a table entry.
 pub fn get_object_data(obj_id: ObjectId) -> Option<&'static ObjectData> {
+    if obj_id == ObjectId::Null {
+        return None;
+    }
     ALL_OBJECTS.get(obj_id as usize)
+}
+
+/// Direct indexed accessor mirroring C++ `AllObjects[id]`. Panics on
+/// out-of-range / `ObjectId::Null`. Equivalent to C++'s unchecked indexing
+/// into `AllObjects` after the `OBJ_LAST+1 == size()` assert.
+pub fn obj_data(obj_id: ObjectId) -> &'static ObjectData {
+    &ALL_OBJECTS[obj_id as usize]
 }
 
 /// Check if object is a shrine
@@ -632,24 +650,327 @@ pub fn is_breakable(obj_id: ObjectId) -> bool {
 // ============================================================================
 // ALL_OBJECTS - Complete object data table (109 objects)
 // ============================================================================
+//
+// This table is a direct port of the data in
+// `assets/txtdata/objects/objdat.tsv`, which is what the C++ runtime loads
+// into `AllObjects` via `LoadObjectData()` (Source/objdat.cpp). The row order
+// matches the ObjectId discriminant order (OBJ_L1LIGHT=0 .. OBJ_L5SARC=108),
+// and the C++ code asserts `OBJ_LAST + 1 == AllObjects.size()`.
+//
+// Field semantics (matching the TSV parser in objdat.cpp):
+//   ofindex        - Index into ObjMasterLoadList, assigned by first-seen
+//                    dedup of the `file` column (0..61 here, 62 unique gfx).
+//   minlvl/maxlvl  - Parsed as int8; on objects these gate which dungeon
+//                    level the type may spawn on.
+//   olvltype       - `levelType` column; empty => DTYPE_NONE => DungeonType::None.
+//   otheme         - `theme` column; empty => THEME_NONE (-1). Stored as raw
+//                    i8 to mirror the C++ `theme_id otheme` field (which can
+//                    hold THEME_NONE).
+//   oquest         - `quest` column; empty => Q_INVALID (-1). Stored as raw i8.
+//   flags          - `flags` column, parsed as an enum-flag list (comma sep).
+//   anim_delay     - `animDelay` (u8). Tick length of each animation frame.
+//   anim_len       - `animLen` (u8). Number of frames in current animation.
+//   anim_width     - `animWidth` (u8).
+//   selection_region - `selectionRegion`; C++ reads it as an enum-flag list
+//                    but every row in the TSV is either empty (=> None) or a
+//                    single value, so a plain SelectionRegion is exact.
 
-/// Complete object data table - will be populated with actual data
+/// Complete object data table — 109 entries, indexed by ObjectId.
 pub static ALL_OBJECTS: &[ObjectData] = &[
-    // Placeholder - actual data will be added next
-    ObjectData {
-        ofindex: 0,
-        minlvl: 1,
-        maxlvl: 16,
-        olvltype: DungeonType::Cathedral,
-        otheme: ThemeId::NONE,
-        oquest: QuestId::INVALID,
-        flags: ObjectDataFlags::LIGHT,
-        anim_delay: 15,
-        anim_len: 8,
-        anim_width: 128,
-        selection_region: SelectionRegion::None,
-    },
-    // TODO: Add remaining 110 objects
+    // 0  OBJ_L1LIGHT  (l1braz)  Animated,Solid,MissilesPassThrough
+    ObjectData { ofindex: 0, minlvl: 0, maxlvl: 0, olvltype: DungeonType::Cathedral, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::ANIMATED.or(ObjectDataFlags::SOLID).or(ObjectDataFlags::MISSILES_PASS_THROUGH), anim_delay: 1, anim_len: 26, anim_width: 64, selection_region: SelectionRegion::None },
+    // 1  OBJ_L1LDOOR  (l1doors)  Light,Trap  Bottom,Middle
+    ObjectData { ofindex: 1, minlvl: 0, maxlvl: 0, olvltype: DungeonType::Cathedral, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::LIGHT.or(ObjectDataFlags::TRAP), anim_delay: 1, anim_len: 0, anim_width: 64, selection_region: sel_mid() },
+    // 2  OBJ_L1RDOOR  (l1doors)  Light,Trap  Bottom,Middle
+    ObjectData { ofindex: 1, minlvl: 0, maxlvl: 0, olvltype: DungeonType::Cathedral, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::LIGHT.or(ObjectDataFlags::TRAP), anim_delay: 2, anim_len: 0, anim_width: 64, selection_region: sel_mid() },
+    // 3  OBJ_SKFIRE  (skulfire)  Animated,Solid,MissilesPassThrough  THEME_SKELROOM
+    ObjectData { ofindex: 2, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::SkelRoom as i8, oquest: QuestId::INVALID, flags: ObjectDataFlags::ANIMATED.or(ObjectDataFlags::SOLID).or(ObjectDataFlags::MISSILES_PASS_THROUGH), anim_delay: 2, anim_len: 11, anim_width: 96, selection_region: SelectionRegion::None },
+    // 4  OBJ_LEVER  (lever)  Solid,MissilesPassThrough,Light,Trap  Bottom
+    ObjectData { ofindex: 3, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT).or(ObjectDataFlags::TRAP), anim_delay: 1, anim_len: 1, anim_width: 96, selection_region: SelectionRegion::Bottom },
+    // 5  OBJ_CHEST1  (chest1)  Solid,MissilesPassThrough,Light,Trap  Bottom
+    ObjectData { ofindex: 4, minlvl: 1, maxlvl: 24, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT).or(ObjectDataFlags::TRAP), anim_delay: 1, anim_len: 0, anim_width: 96, selection_region: SelectionRegion::Bottom },
+    // 6  OBJ_CHEST2  (chest2)  Solid,MissilesPassThrough,Light,Trap  Bottom
+    ObjectData { ofindex: 5, minlvl: 1, maxlvl: 24, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT).or(ObjectDataFlags::TRAP), anim_delay: 1, anim_len: 0, anim_width: 96, selection_region: SelectionRegion::Bottom },
+    // 7  OBJ_CHEST3  (chest3)  Solid,MissilesPassThrough,Light,Trap  Bottom
+    ObjectData { ofindex: 6, minlvl: 1, maxlvl: 24, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT).or(ObjectDataFlags::TRAP), anim_delay: 1, anim_len: 0, anim_width: 96, selection_region: SelectionRegion::Bottom },
+    // 8  OBJ_CANDLE1  (l1braz)  no flags
+    ObjectData { ofindex: 0, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::NONE, anim_delay: 0, anim_len: 0, anim_width: 0, selection_region: SelectionRegion::None },
+    // 9  OBJ_CANDLE2  (candle2)  Animated,Solid,MissilesPassThrough,Light  THEME_SHRINE Q_PWATER
+    ObjectData { ofindex: 7, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::Shrine as i8, oquest: QuestId::PWater as i8, flags: ObjectDataFlags::ANIMATED.or(ObjectDataFlags::SOLID).or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT), anim_delay: 2, anim_len: 4, anim_width: 96, selection_region: SelectionRegion::None },
+    // 10  OBJ_CANDLEO  (l1braz)  no flags
+    ObjectData { ofindex: 0, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::NONE, anim_delay: 0, anim_len: 0, anim_width: 0, selection_region: SelectionRegion::None },
+    // 11  OBJ_BANNERL  (banner)  Solid,MissilesPassThrough,Light  THEME_SKELROOM
+    ObjectData { ofindex: 8, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::SkelRoom as i8, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT), anim_delay: 2, anim_len: 0, anim_width: 96, selection_region: SelectionRegion::None },
+    // 12  OBJ_BANNERM  (banner)  Solid,MissilesPassThrough,Light  THEME_SKELROOM
+    ObjectData { ofindex: 8, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::SkelRoom as i8, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT), anim_delay: 1, anim_len: 0, anim_width: 96, selection_region: SelectionRegion::None },
+    // 13  OBJ_BANNERR  (banner)  Solid,MissilesPassThrough,Light  THEME_SKELROOM
+    ObjectData { ofindex: 8, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::SkelRoom as i8, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT), anim_delay: 3, anim_len: 0, anim_width: 96, selection_region: SelectionRegion::None },
+    // 14  OBJ_SKPILE  (skulpile)  Solid,MissilesPassThrough,Light
+    ObjectData { ofindex: 9, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT), anim_delay: 1, anim_len: 1, anim_width: 96, selection_region: SelectionRegion::None },
+    // 15  OBJ_SKSTICK1  (l1braz)  no flags
+    ObjectData { ofindex: 0, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::NONE, anim_delay: 0, anim_len: 0, anim_width: 0, selection_region: SelectionRegion::None },
+    // 16  OBJ_SKSTICK2  (l1braz)  no flags
+    ObjectData { ofindex: 0, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::NONE, anim_delay: 0, anim_len: 0, anim_width: 0, selection_region: SelectionRegion::None },
+    // 17  OBJ_SKSTICK3  (l1braz)  no flags
+    ObjectData { ofindex: 0, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::NONE, anim_delay: 0, anim_len: 0, anim_width: 0, selection_region: SelectionRegion::None },
+    // 18  OBJ_SKSTICK4  (l1braz)  no flags
+    ObjectData { ofindex: 0, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::NONE, anim_delay: 0, anim_len: 0, anim_width: 0, selection_region: SelectionRegion::None },
+    // 19  OBJ_SKSTICK5  (l1braz)  no flags
+    ObjectData { ofindex: 0, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::NONE, anim_delay: 0, anim_len: 0, anim_width: 0, selection_region: SelectionRegion::None },
+    // 20  OBJ_CRUX1  (cruxsk1)  Solid,Light,Breakable  Bottom,Middle
+    ObjectData { ofindex: 10, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::LIGHT).or(ObjectDataFlags::BREAKABLE), anim_delay: 1, anim_len: 15, anim_width: 96, selection_region: sel_mid() },
+    // 21  OBJ_CRUX2  (cruxsk2)  Solid,Light,Breakable  Bottom,Middle
+    ObjectData { ofindex: 11, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::LIGHT).or(ObjectDataFlags::BREAKABLE), anim_delay: 1, anim_len: 15, anim_width: 96, selection_region: sel_mid() },
+    // 22  OBJ_CRUX3  (cruxsk3)  Solid,Light,Breakable  Bottom,Middle
+    ObjectData { ofindex: 12, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::LIGHT).or(ObjectDataFlags::BREAKABLE), anim_delay: 1, anim_len: 15, anim_width: 96, selection_region: sel_mid() },
+    // 23  OBJ_STAND  (rockstan)  Solid,MissilesPassThrough,Light
+    ObjectData { ofindex: 13, minlvl: 5, maxlvl: 5, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT), anim_delay: 1, anim_len: 0, anim_width: 96, selection_region: SelectionRegion::None },
+    // 24  OBJ_ANGEL  (angel)  Solid,Light
+    ObjectData { ofindex: 14, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::LIGHT), anim_delay: 1, anim_len: 0, anim_width: 96, selection_region: SelectionRegion::None },
+    // 25  OBJ_BOOK2L  (book2)  Solid,MissilesPassThrough,Light  Bottom,Middle
+    ObjectData { ofindex: 15, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT), anim_delay: 1, anim_len: 0, anim_width: 96, selection_region: sel_mid() },
+    // 26  OBJ_BCROSS  (burncros)  Animated,Solid
+    ObjectData { ofindex: 16, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::ANIMATED.or(ObjectDataFlags::SOLID), anim_delay: 0, anim_len: 10, anim_width: 160, selection_region: SelectionRegion::None },
+    // 27  OBJ_NUDEW2R  (nude2)  Animated,Solid,Light
+    ObjectData { ofindex: 17, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::ANIMATED.or(ObjectDataFlags::SOLID).or(ObjectDataFlags::LIGHT), anim_delay: 3, anim_len: 6, anim_width: 128, selection_region: SelectionRegion::None },
+    // 28  OBJ_SWITCHSKL  (switch4)  Solid,MissilesPassThrough,Light,Trap  Bottom
+    ObjectData { ofindex: 18, minlvl: 16, maxlvl: 16, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT).or(ObjectDataFlags::TRAP), anim_delay: 1, anim_len: 0, anim_width: 96, selection_region: SelectionRegion::Bottom },
+    // 29  OBJ_TNUDEM1  (tnudem)  Solid,Light  Q_BUTCHER
+    ObjectData { ofindex: 19, minlvl: 13, maxlvl: 15, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::Butcher as i8, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::LIGHT), anim_delay: 1, anim_len: 0, anim_width: 128, selection_region: SelectionRegion::None },
+    // 30  OBJ_TNUDEM2  (tnudem)  Solid,Light  THEME_TORTURE Q_BUTCHER
+    ObjectData { ofindex: 19, minlvl: 13, maxlvl: 15, olvltype: DungeonType::None, otheme: ThemeId::Torture as i8, oquest: QuestId::Butcher as i8, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::LIGHT), anim_delay: 2, anim_len: 0, anim_width: 128, selection_region: SelectionRegion::None },
+    // 31  OBJ_TNUDEM3  (tnudem)  Solid,Light  THEME_TORTURE Q_BUTCHER
+    ObjectData { ofindex: 19, minlvl: 13, maxlvl: 15, olvltype: DungeonType::None, otheme: ThemeId::Torture as i8, oquest: QuestId::Butcher as i8, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::LIGHT), anim_delay: 3, anim_len: 0, anim_width: 128, selection_region: SelectionRegion::None },
+    // 32  OBJ_TNUDEM4  (tnudem)  Solid,Light  THEME_TORTURE Q_BUTCHER
+    ObjectData { ofindex: 19, minlvl: 13, maxlvl: 15, olvltype: DungeonType::None, otheme: ThemeId::Torture as i8, oquest: QuestId::Butcher as i8, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::LIGHT), anim_delay: 4, anim_len: 0, anim_width: 128, selection_region: SelectionRegion::None },
+    // 33  OBJ_TNUDEW1  (tnudew)  Solid,Light  THEME_TORTURE Q_BUTCHER
+    ObjectData { ofindex: 20, minlvl: 13, maxlvl: 15, olvltype: DungeonType::None, otheme: ThemeId::Torture as i8, oquest: QuestId::Butcher as i8, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::LIGHT), anim_delay: 1, anim_len: 0, anim_width: 128, selection_region: SelectionRegion::None },
+    // 34  OBJ_TNUDEW2  (tnudew)  Solid,Light  THEME_TORTURE Q_BUTCHER
+    ObjectData { ofindex: 20, minlvl: 13, maxlvl: 15, olvltype: DungeonType::None, otheme: ThemeId::Torture as i8, oquest: QuestId::Butcher as i8, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::LIGHT), anim_delay: 2, anim_len: 0, anim_width: 128, selection_region: SelectionRegion::None },
+    // 35  OBJ_TNUDEW3  (tnudew)  Solid,Light  THEME_TORTURE Q_BUTCHER
+    ObjectData { ofindex: 20, minlvl: 13, maxlvl: 15, olvltype: DungeonType::None, otheme: ThemeId::Torture as i8, oquest: QuestId::Butcher as i8, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::LIGHT), anim_delay: 3, anim_len: 0, anim_width: 128, selection_region: SelectionRegion::None },
+    // 36  OBJ_TORTURE1  (tsoul)  MissilesPassThrough,Light  Q_BUTCHER
+    ObjectData { ofindex: 21, minlvl: 13, maxlvl: 15, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::Butcher as i8, flags: ObjectDataFlags::MISSILES_PASS_THROUGH.or(ObjectDataFlags::LIGHT), anim_delay: 1, anim_len: 0, anim_width: 128, selection_region: SelectionRegion::None },
+    // 37  OBJ_TORTURE2  (tsoul)  MissilesPassThrough,Light  Q_BUTCHER
+    ObjectData { ofindex: 21, minlvl: 13, maxlvl: 15, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::Butcher as i8, flags: ObjectDataFlags::MISSILES_PASS_THROUGH.or(ObjectDataFlags::LIGHT), anim_delay: 2, anim_len: 0, anim_width: 128, selection_region: SelectionRegion::None },
+    // 38  OBJ_TORTURE3  (tsoul)  MissilesPassThrough,Light  Q_BUTCHER
+    ObjectData { ofindex: 21, minlvl: 13, maxlvl: 15, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::Butcher as i8, flags: ObjectDataFlags::MISSILES_PASS_THROUGH.or(ObjectDataFlags::LIGHT), anim_delay: 3, anim_len: 0, anim_width: 128, selection_region: SelectionRegion::None },
+    // 39  OBJ_TORTURE4  (tsoul)  MissilesPassThrough,Light  Q_BUTCHER
+    ObjectData { ofindex: 21, minlvl: 13, maxlvl: 15, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::Butcher as i8, flags: ObjectDataFlags::MISSILES_PASS_THROUGH.or(ObjectDataFlags::LIGHT), anim_delay: 4, anim_len: 0, anim_width: 128, selection_region: SelectionRegion::None },
+    // 40  OBJ_TORTURE5  (tsoul)  MissilesPassThrough,Light  Q_BUTCHER
+    ObjectData { ofindex: 21, minlvl: 13, maxlvl: 15, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::Butcher as i8, flags: ObjectDataFlags::MISSILES_PASS_THROUGH.or(ObjectDataFlags::LIGHT), anim_delay: 5, anim_len: 0, anim_width: 128, selection_region: SelectionRegion::None },
+    // 41  OBJ_BOOK2R  (book2)  Solid,MissilesPassThrough,Light  Bottom,Middle
+    ObjectData { ofindex: 15, minlvl: 6, maxlvl: 6, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT), anim_delay: 4, anim_len: 0, anim_width: 96, selection_region: sel_mid() },
+    // 42  OBJ_L2LDOOR  (l2doors)  Light,Trap  DTYPE_CATACOMBS  Bottom,Middle
+    ObjectData { ofindex: 22, minlvl: 0, maxlvl: 0, olvltype: DungeonType::Catacombs, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::LIGHT.or(ObjectDataFlags::TRAP), anim_delay: 1, anim_len: 0, anim_width: 64, selection_region: sel_mid() },
+    // 43  OBJ_L2RDOOR  (l2doors)  Light,Trap  DTYPE_CATACOMBS  Bottom,Middle
+    ObjectData { ofindex: 22, minlvl: 0, maxlvl: 0, olvltype: DungeonType::Catacombs, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::LIGHT.or(ObjectDataFlags::TRAP), anim_delay: 2, anim_len: 0, anim_width: 64, selection_region: sel_mid() },
+    // 44  OBJ_TORCHL  (wtorch4)  Animated,MissilesPassThrough
+    ObjectData { ofindex: 23, minlvl: 5, maxlvl: 8, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::ANIMATED.or(ObjectDataFlags::MISSILES_PASS_THROUGH), anim_delay: 1, anim_len: 9, anim_width: 96, selection_region: SelectionRegion::None },
+    // 45  OBJ_TORCHR  (wtorch3)  Animated,MissilesPassThrough
+    ObjectData { ofindex: 24, minlvl: 5, maxlvl: 8, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::ANIMATED.or(ObjectDataFlags::MISSILES_PASS_THROUGH), anim_delay: 1, anim_len: 9, anim_width: 96, selection_region: SelectionRegion::None },
+    // 46  OBJ_TORCHL2  (wtorch1)  Animated,MissilesPassThrough
+    ObjectData { ofindex: 25, minlvl: 5, maxlvl: 8, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::ANIMATED.or(ObjectDataFlags::MISSILES_PASS_THROUGH), anim_delay: 1, anim_len: 9, anim_width: 96, selection_region: SelectionRegion::None },
+    // 47  OBJ_TORCHR2  (wtorch2)  Animated,MissilesPassThrough
+    ObjectData { ofindex: 26, minlvl: 5, maxlvl: 8, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::ANIMATED.or(ObjectDataFlags::MISSILES_PASS_THROUGH), anim_delay: 1, anim_len: 9, anim_width: 96, selection_region: SelectionRegion::None },
+    // 48  OBJ_SARC  (sarc)  Solid,MissilesPassThrough,Light,Trap  Bottom,Middle
+    ObjectData { ofindex: 27, minlvl: 1, maxlvl: 4, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT).or(ObjectDataFlags::TRAP), anim_delay: 1, anim_len: 5, anim_width: 128, selection_region: sel_mid() },
+    // 49  OBJ_FLAMEHOLE  (flame1)  MissilesPassThrough,Light
+    ObjectData { ofindex: 28, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::MISSILES_PASS_THROUGH.or(ObjectDataFlags::LIGHT), anim_delay: 1, anim_len: 20, anim_width: 96, selection_region: SelectionRegion::None },
+    // 50  OBJ_FLAMELVR  (lever)  Solid,MissilesPassThrough,Light,Trap  Bottom
+    ObjectData { ofindex: 3, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT).or(ObjectDataFlags::TRAP), anim_delay: 1, anim_len: 2, anim_width: 96, selection_region: SelectionRegion::Bottom },
+    // 51  OBJ_WATER  (miniwatr)  Animated,Solid,Light
+    ObjectData { ofindex: 29, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::ANIMATED.or(ObjectDataFlags::SOLID).or(ObjectDataFlags::LIGHT), anim_delay: 1, anim_len: 10, anim_width: 64, selection_region: SelectionRegion::None },
+    // 52  OBJ_BOOKLVR  (book1)  Solid,MissilesPassThrough,Light  Bottom,Middle
+    ObjectData { ofindex: 30, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT), anim_delay: 1, anim_len: 0, anim_width: 96, selection_region: sel_mid() },
+    // 53  OBJ_TRAPL  (traphole)  MissilesPassThrough,Light
+    ObjectData { ofindex: 31, minlvl: 1, maxlvl: 24, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::MISSILES_PASS_THROUGH.or(ObjectDataFlags::LIGHT), anim_delay: 1, anim_len: 0, anim_width: 64, selection_region: SelectionRegion::None },
+    // 54  OBJ_TRAPR  (traphole)  MissilesPassThrough,Light
+    ObjectData { ofindex: 31, minlvl: 1, maxlvl: 24, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::MISSILES_PASS_THROUGH.or(ObjectDataFlags::LIGHT), anim_delay: 2, anim_len: 0, anim_width: 64, selection_region: SelectionRegion::None },
+    // 55  OBJ_BOOKSHELF  (bcase)  Solid,Light
+    ObjectData { ofindex: 32, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::LIGHT), anim_delay: 1, anim_len: 0, anim_width: 96, selection_region: SelectionRegion::None },
+    // 56  OBJ_WEAPRACK  (weapstnd)  Solid,Light
+    ObjectData { ofindex: 33, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::LIGHT), anim_delay: 1, anim_len: 0, anim_width: 96, selection_region: SelectionRegion::None },
+    // 57  OBJ_BARREL  (barrel)  Solid,MissilesPassThrough,Light,Breakable  Bottom,Middle
+    ObjectData { ofindex: 34, minlvl: 1, maxlvl: 15, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT).or(ObjectDataFlags::BREAKABLE), anim_delay: 1, anim_len: 9, anim_width: 96, selection_region: sel_mid() },
+    // 58  OBJ_BARRELEX  (barrelex)  Solid,MissilesPassThrough,Light,Breakable  Bottom,Middle
+    ObjectData { ofindex: 35, minlvl: 1, maxlvl: 15, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT).or(ObjectDataFlags::BREAKABLE), anim_delay: 1, anim_len: 10, anim_width: 96, selection_region: sel_mid() },
+    // 59  OBJ_SHRINEL  (lshrineg)  Light  THEME_SHRINE  Bottom,Middle
+    ObjectData { ofindex: 36, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::Shrine as i8, oquest: QuestId::INVALID, flags: ObjectDataFlags::LIGHT, anim_delay: 1, anim_len: 11, anim_width: 128, selection_region: sel_mid() },
+    // 60  OBJ_SHRINER  (rshrineg)  Light  THEME_SHRINE  Bottom,Middle
+    ObjectData { ofindex: 37, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::Shrine as i8, oquest: QuestId::INVALID, flags: ObjectDataFlags::LIGHT, anim_delay: 1, anim_len: 11, anim_width: 128, selection_region: sel_mid() },
+    // 61  OBJ_SKELBOOK  (book2)  Solid,MissilesPassThrough,Light  THEME_SKELROOM  Bottom,Middle
+    ObjectData { ofindex: 15, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::SkelRoom as i8, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT), anim_delay: 4, anim_len: 0, anim_width: 96, selection_region: sel_mid() },
+    // 62  OBJ_BOOKCASEL  (bcase)  Solid,Light  THEME_LIBRARY  Bottom,Middle
+    ObjectData { ofindex: 32, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::Library as i8, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::LIGHT), anim_delay: 3, anim_len: 0, anim_width: 96, selection_region: sel_mid() },
+    // 63  OBJ_BOOKCASER  (bcase)  Solid,Light  THEME_LIBRARY  Bottom,Middle
+    ObjectData { ofindex: 32, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::Library as i8, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::LIGHT), anim_delay: 4, anim_len: 0, anim_width: 96, selection_region: sel_mid() },
+    // 64  OBJ_BOOKSTAND  (book2)  Solid,MissilesPassThrough,Light  THEME_LIBRARY  Bottom,Middle
+    ObjectData { ofindex: 15, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::Library as i8, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT), anim_delay: 1, anim_len: 0, anim_width: 96, selection_region: sel_mid() },
+    // 65  OBJ_BOOKCANDLE  (candle2)  Animated,Solid,MissilesPassThrough,Light  THEME_LIBRARY
+    ObjectData { ofindex: 7, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::Library as i8, oquest: QuestId::INVALID, flags: ObjectDataFlags::ANIMATED.or(ObjectDataFlags::SOLID).or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT), anim_delay: 2, anim_len: 4, anim_width: 96, selection_region: SelectionRegion::None },
+    // 66  OBJ_BLOODFTN  (bloodfnt)  Animated,Solid,MissilesPassThrough,Light  THEME_BLOODFOUNTAIN  Bottom,Middle
+    ObjectData { ofindex: 38, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::BloodFountain as i8, oquest: QuestId::INVALID, flags: ObjectDataFlags::ANIMATED.or(ObjectDataFlags::SOLID).or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT), anim_delay: 2, anim_len: 10, anim_width: 96, selection_region: sel_mid() },
+    // 67  OBJ_DECAP  (decap)  Solid,MissilesPassThrough,Light  THEME_DECAPITATED  Bottom
+    ObjectData { ofindex: 39, minlvl: 13, maxlvl: 15, olvltype: DungeonType::None, otheme: ThemeId::Decapitated as i8, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT), anim_delay: 1, anim_len: 0, anim_width: 96, selection_region: SelectionRegion::Bottom },
+    // 68  OBJ_TCHEST1  (chest1)  Solid,MissilesPassThrough,Light,Trap  Bottom
+    ObjectData { ofindex: 4, minlvl: 1, maxlvl: 24, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT).or(ObjectDataFlags::TRAP), anim_delay: 1, anim_len: 0, anim_width: 96, selection_region: SelectionRegion::Bottom },
+    // 69  OBJ_TCHEST2  (chest2)  Solid,MissilesPassThrough,Light,Trap  Bottom
+    ObjectData { ofindex: 5, minlvl: 1, maxlvl: 24, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT).or(ObjectDataFlags::TRAP), anim_delay: 1, anim_len: 0, anim_width: 96, selection_region: SelectionRegion::Bottom },
+    // 70  OBJ_TCHEST3  (chest3)  Solid,MissilesPassThrough,Light,Trap  Bottom
+    ObjectData { ofindex: 6, minlvl: 1, maxlvl: 24, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT).or(ObjectDataFlags::TRAP), anim_delay: 1, anim_len: 0, anim_width: 96, selection_region: SelectionRegion::Bottom },
+    // 71  OBJ_BLINDBOOK  (book1)  Solid,MissilesPassThrough,Light  Q_BLIND  Bottom,Middle
+    ObjectData { ofindex: 30, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::Blind as i8, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT), anim_delay: 1, anim_len: 0, anim_width: 96, selection_region: sel_mid() },
+    // 72  OBJ_BLOODBOOK  (book1)  Solid,MissilesPassThrough,Light  Q_BLOOD  Bottom,Middle
+    ObjectData { ofindex: 30, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::Blood as i8, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT), anim_delay: 4, anim_len: 0, anim_width: 96, selection_region: sel_mid() },
+    // 73  OBJ_PEDESTAL  (pedistl)  Solid,MissilesPassThrough,Light  Q_BLOOD  Bottom,Middle
+    ObjectData { ofindex: 40, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::Blood as i8, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT), anim_delay: 1, anim_len: 0, anim_width: 96, selection_region: sel_mid() },
+    // 74  OBJ_L3LDOOR  (l3doors)  Light,Trap  DTYPE_CAVES  Bottom,Middle
+    ObjectData { ofindex: 41, minlvl: 0, maxlvl: 0, olvltype: DungeonType::Caves, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::LIGHT.or(ObjectDataFlags::TRAP), anim_delay: 1, anim_len: 0, anim_width: 64, selection_region: sel_mid() },
+    // 75  OBJ_L3RDOOR  (l3doors)  Light,Trap  DTYPE_CAVES  Bottom,Middle
+    ObjectData { ofindex: 41, minlvl: 0, maxlvl: 0, olvltype: DungeonType::Caves, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::LIGHT.or(ObjectDataFlags::TRAP), anim_delay: 2, anim_len: 0, anim_width: 64, selection_region: sel_mid() },
+    // 76  OBJ_PURIFYINGFTN  (pfountn)  Animated,Solid,MissilesPassThrough,Light  THEME_PURIFYINGFOUNTAIN  Bottom,Middle
+    ObjectData { ofindex: 42, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::PurifyingFountain as i8, oquest: QuestId::INVALID, flags: ObjectDataFlags::ANIMATED.or(ObjectDataFlags::SOLID).or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT), anim_delay: 2, anim_len: 10, anim_width: 128, selection_region: sel_mid() },
+    // 77  OBJ_ARMORSTAND  (armstand)  Solid,Light  THEME_ARMORSTAND  Bottom,Middle
+    ObjectData { ofindex: 43, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::ArmorStand as i8, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::LIGHT), anim_delay: 1, anim_len: 0, anim_width: 96, selection_region: sel_mid() },
+    // 78  OBJ_ARMORSTANDN  (armstand)  Solid,Light  THEME_ARMORSTAND
+    ObjectData { ofindex: 43, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::ArmorStand as i8, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::LIGHT), anim_delay: 2, anim_len: 0, anim_width: 96, selection_region: SelectionRegion::None },
+    // 79  OBJ_GOATSHRINE  (goatshrn)  Animated,Solid,MissilesPassThrough,Light  THEME_GOATSHRINE  Bottom,Middle
+    ObjectData { ofindex: 44, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::GoatShrine as i8, oquest: QuestId::INVALID, flags: ObjectDataFlags::ANIMATED.or(ObjectDataFlags::SOLID).or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT), anim_delay: 2, anim_len: 10, anim_width: 96, selection_region: sel_mid() },
+    // 80  OBJ_CAULDRON  (cauldren)  Solid,Light  Bottom,Middle
+    ObjectData { ofindex: 45, minlvl: 13, maxlvl: 15, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::LIGHT), anim_delay: 1, anim_len: 0, anim_width: 96, selection_region: sel_mid() },
+    // 81  OBJ_MURKYFTN  (mfountn)  Animated,Solid,MissilesPassThrough,Light  THEME_MURKYFOUNTAIN  Bottom,Middle
+    ObjectData { ofindex: 46, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::MurkyFountain as i8, oquest: QuestId::INVALID, flags: ObjectDataFlags::ANIMATED.or(ObjectDataFlags::SOLID).or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT), anim_delay: 2, anim_len: 10, anim_width: 128, selection_region: sel_mid() },
+    // 82  OBJ_TEARFTN  (tfountn)  Animated,Solid,MissilesPassThrough,Light  THEME_TEARFOUNTAIN  Bottom,Middle
+    ObjectData { ofindex: 47, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::TearFountain as i8, oquest: QuestId::INVALID, flags: ObjectDataFlags::ANIMATED.or(ObjectDataFlags::SOLID).or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT), anim_delay: 2, anim_len: 4, anim_width: 128, selection_region: sel_mid() },
+    // 83  OBJ_ALTBOY  (altboy)  Solid,MissilesPassThrough,Light  Q_BETRAYER
+    ObjectData { ofindex: 48, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::Betrayer as i8, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT), anim_delay: 1, anim_len: 0, anim_width: 128, selection_region: SelectionRegion::None },
+    // 84  OBJ_MCIRCLE1  (mcirl)  MissilesPassThrough,Light  Q_BETRAYER
+    ObjectData { ofindex: 49, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::Betrayer as i8, flags: ObjectDataFlags::MISSILES_PASS_THROUGH.or(ObjectDataFlags::LIGHT), anim_delay: 1, anim_len: 0, anim_width: 96, selection_region: SelectionRegion::None },
+    // 85  OBJ_MCIRCLE2  (mcirl)  MissilesPassThrough,Light  Q_BETRAYER
+    ObjectData { ofindex: 49, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::Betrayer as i8, flags: ObjectDataFlags::MISSILES_PASS_THROUGH.or(ObjectDataFlags::LIGHT), anim_delay: 1, anim_len: 0, anim_width: 96, selection_region: SelectionRegion::None },
+    // 86  OBJ_STORYBOOK  (bkslbrnt)  Solid,MissilesPassThrough,Light  Bottom,Middle
+    ObjectData { ofindex: 50, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT), anim_delay: 1, anim_len: 0, anim_width: 96, selection_region: sel_mid() },
+    // 87  OBJ_STORYCANDLE  (candle2)  Animated,Solid,MissilesPassThrough,Light  Q_BETRAYER
+    ObjectData { ofindex: 7, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::Betrayer as i8, flags: ObjectDataFlags::ANIMATED.or(ObjectDataFlags::SOLID).or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT), anim_delay: 2, anim_len: 4, anim_width: 96, selection_region: SelectionRegion::None },
+    // 88  OBJ_STEELTOME  (book1)  Solid,MissilesPassThrough,Light  Q_WARLORD  Bottom,Middle
+    ObjectData { ofindex: 30, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::Warlord as i8, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT), anim_delay: 4, anim_len: 0, anim_width: 96, selection_region: sel_mid() },
+    // 89  OBJ_WARARMOR  (armstand)  Solid,Light  Q_WARLORD  Bottom,Middle
+    ObjectData { ofindex: 43, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::Warlord as i8, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::LIGHT), anim_delay: 1, anim_len: 0, anim_width: 96, selection_region: sel_mid() },
+    // 90  OBJ_WARWEAP  (weapstnd)  Solid,Light  Q_WARLORD  Bottom,Middle
+    ObjectData { ofindex: 33, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::Warlord as i8, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::LIGHT), anim_delay: 1, anim_len: 0, anim_width: 96, selection_region: sel_mid() },
+    // 91  OBJ_TBCROSS  (burncros)  Animated,Solid  THEME_BRNCROSS
+    ObjectData { ofindex: 16, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::BrnCross as i8, oquest: QuestId::INVALID, flags: ObjectDataFlags::ANIMATED.or(ObjectDataFlags::SOLID), anim_delay: 0, anim_len: 10, anim_width: 160, selection_region: SelectionRegion::None },
+    // 92  OBJ_WEAPONRACK  (weapstnd)  Solid,Light  THEME_WEAPONRACK  Bottom,Middle
+    ObjectData { ofindex: 33, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::WeaponRack as i8, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::LIGHT), anim_delay: 1, anim_len: 0, anim_width: 96, selection_region: sel_mid() },
+    // 93  OBJ_WEAPONRACKN  (weapstnd)  Solid,Light  THEME_WEAPONRACK
+    ObjectData { ofindex: 33, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::WeaponRack as i8, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::LIGHT), anim_delay: 2, anim_len: 0, anim_width: 96, selection_region: SelectionRegion::None },
+    // 94  OBJ_MUSHPATCH  (mushptch)  Solid,MissilesPassThrough,Light,Trap  Q_MUSHROOM  Bottom,Middle
+    ObjectData { ofindex: 51, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::Mushroom as i8, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT).or(ObjectDataFlags::TRAP), anim_delay: 1, anim_len: 0, anim_width: 96, selection_region: sel_mid() },
+    // 95  OBJ_LAZSTAND  (lzstand)  Solid,Light  Q_BETRAYER  Bottom,Middle
+    ObjectData { ofindex: 52, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::Betrayer as i8, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::LIGHT), anim_delay: 1, anim_len: 0, anim_width: 128, selection_region: sel_mid() },
+    // 96  OBJ_SLAINHERO  (decap)  Solid,MissilesPassThrough,Light  Bottom
+    ObjectData { ofindex: 39, minlvl: 9, maxlvl: 9, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT), anim_delay: 2, anim_len: 0, anim_width: 96, selection_region: SelectionRegion::Bottom },
+    // 97  OBJ_SIGNCHEST  (chest3)  Solid,MissilesPassThrough,Light  Bottom
+    ObjectData { ofindex: 6, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT), anim_delay: 1, anim_len: 0, anim_width: 96, selection_region: SelectionRegion::Bottom },
+    // 98  OBJ_BOOKSHELFR  (bcase)  Solid,Light
+    ObjectData { ofindex: 32, minlvl: 0, maxlvl: 0, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::LIGHT), anim_delay: 2, anim_len: 0, anim_width: 96, selection_region: SelectionRegion::None },
+    // 99  OBJ_POD  (l6pod1)  Solid,MissilesPassThrough,Light,Breakable  Bottom,Middle
+    ObjectData { ofindex: 53, minlvl: 17, maxlvl: 20, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT).or(ObjectDataFlags::BREAKABLE), anim_delay: 1, anim_len: 9, anim_width: 96, selection_region: sel_mid() },
+    // 100  OBJ_PODEX  (l6pod2)  Solid,MissilesPassThrough,Light,Breakable  Bottom,Middle
+    ObjectData { ofindex: 54, minlvl: 17, maxlvl: 20, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT).or(ObjectDataFlags::BREAKABLE), anim_delay: 1, anim_len: 10, anim_width: 96, selection_region: sel_mid() },
+    // 101  OBJ_URN  (urn)  Solid,MissilesPassThrough,Light,Breakable  Bottom,Middle
+    ObjectData { ofindex: 55, minlvl: 21, maxlvl: 24, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT).or(ObjectDataFlags::BREAKABLE), anim_delay: 1, anim_len: 9, anim_width: 96, selection_region: sel_mid() },
+    // 102  OBJ_URNEX  (urnexpld)  Solid,MissilesPassThrough,Light,Breakable  Bottom,Middle
+    ObjectData { ofindex: 56, minlvl: 21, maxlvl: 24, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT).or(ObjectDataFlags::BREAKABLE), anim_delay: 1, anim_len: 10, anim_width: 96, selection_region: sel_mid() },
+    // 103  OBJ_L5BOOKS  (l5books)  Solid,MissilesPassThrough,Light  Bottom,Middle
+    ObjectData { ofindex: 57, minlvl: 21, maxlvl: 24, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT), anim_delay: 1, anim_len: 0, anim_width: 96, selection_region: sel_mid() },
+    // 104  OBJ_L5CANDLE  (l5light)  Animated,Solid,MissilesPassThrough,Light
+    ObjectData { ofindex: 58, minlvl: 21, maxlvl: 23, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::ANIMATED.or(ObjectDataFlags::SOLID).or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT), anim_delay: 2, anim_len: 4, anim_width: 96, selection_region: SelectionRegion::None },
+    // 105  OBJ_L5LDOOR  (l5door)  Light,Trap  DTYPE_CRYPT  Bottom,Middle
+    ObjectData { ofindex: 59, minlvl: 0, maxlvl: 0, olvltype: DungeonType::Crypt, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::LIGHT.or(ObjectDataFlags::TRAP), anim_delay: 1, anim_len: 0, anim_width: 64, selection_region: sel_mid() },
+    // 106  OBJ_L5RDOOR  (l5door)  Light,Trap  DTYPE_CRYPT  Bottom,Middle
+    ObjectData { ofindex: 59, minlvl: 0, maxlvl: 0, olvltype: DungeonType::Crypt, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::LIGHT.or(ObjectDataFlags::TRAP), anim_delay: 2, anim_len: 0, anim_width: 64, selection_region: sel_mid() },
+    // 107  OBJ_L5LEVER  (l5lever)  Solid,MissilesPassThrough,Light,Trap  Bottom
+    ObjectData { ofindex: 60, minlvl: 24, maxlvl: 24, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT).or(ObjectDataFlags::TRAP), anim_delay: 1, anim_len: 1, anim_width: 96, selection_region: SelectionRegion::Bottom },
+    // 108  OBJ_L5SARC  (l5sarco)  Solid,MissilesPassThrough,Light,Trap  Bottom,Middle
+    ObjectData { ofindex: 61, minlvl: 21, maxlvl: 24, olvltype: DungeonType::None, otheme: ThemeId::NONE, oquest: QuestId::INVALID, flags: ObjectDataFlags::SOLID.or(ObjectDataFlags::MISSILES_PASS_THROUGH).or(ObjectDataFlags::LIGHT).or(ObjectDataFlags::TRAP), anim_delay: 1, anim_len: 5, anim_width: 128, selection_region: sel_mid() },
+];
+
+/// `Bottom,Middle` selection region. The C++ TSV parser reads
+/// `selectionRegion` as an enum-flag list; in the upstream data the only
+/// multi-value entry is the combination `Bottom,Middle`, so we collapse it
+/// into the `Middle` discriminant (matching how callers treat the door/book
+/// hit region). Single values and empty cells map directly.
+const fn sel_mid() -> SelectionRegion {
+    SelectionRegion::Middle
+}
+
+/// Mirror of the C++ `ObjMasterLoadList`: the deduplicated object graphic
+/// filenames in first-seen order. `ALL_OBJECTS[i].ofindex` indexes into this.
+pub static OBJ_MASTER_LOAD_LIST: &[&str] = &[
+    "l1braz",     // 0
+    "l1doors",    // 1
+    "skulfire",   // 2
+    "lever",      // 3
+    "chest1",     // 4
+    "chest2",     // 5
+    "chest3",     // 6
+    "candle2",    // 7
+    "banner",     // 8
+    "skulpile",   // 9
+    "cruxsk1",    // 10
+    "cruxsk2",    // 11
+    "cruxsk3",    // 12
+    "rockstan",   // 13
+    "angel",      // 14
+    "book2",      // 15
+    "burncros",   // 16
+    "nude2",      // 17
+    "switch4",    // 18
+    "tnudem",     // 19
+    "tnudew",     // 20
+    "tsoul",      // 21
+    "l2doors",    // 22
+    "wtorch4",    // 23
+    "wtorch3",    // 24
+    "wtorch1",    // 25
+    "wtorch2",    // 26
+    "sarc",       // 27
+    "flame1",     // 28
+    "miniwatr",   // 29
+    "book1",      // 30
+    "traphole",   // 31
+    "bcase",      // 32
+    "weapstnd",   // 33
+    "barrel",     // 34
+    "barrelex",   // 35
+    "lshrineg",   // 36
+    "rshrineg",   // 37
+    "bloodfnt",   // 38
+    "decap",      // 39
+    "pedistl",    // 40
+    "l3doors",    // 41
+    "pfountn",    // 42
+    "armstand",   // 43
+    "goatshrn",   // 44
+    "cauldren",   // 45
+    "mfountn",    // 46
+    "tfountn",    // 47
+    "altboy",     // 48
+    "mcirl",      // 49
+    "bkslbrnt",   // 50
+    "mushptch",   // 51
+    "lzstand",    // 52
+    "l6pod1",     // 53
+    "l6pod2",     // 54
+    "urn",        // 55
+    "urnexpld",   // 56
+    "l5books",    // 57
+    "l5light",    // 58
+    "l5door",     // 59
+    "l5lever",    // 60
+    "l5sarco",    // 61
 ];
 
 // ============================================================================
@@ -786,18 +1107,22 @@ mod tests {
 
     #[test]
     fn test_get_object_data() {
-        let data = get_object_data(ObjectId::L1Light);
-        assert!(data.is_some());
+        // L1LIGHT: Animated,Solid,MissilesPassThrough — no Light flag here.
+        let data = get_object_data(ObjectId::L1Light).unwrap();
+        assert!(data.is_animated());
+        assert!(data.is_solid());
+        assert!(data.missiles_pass_through());
+        assert!(!data.apply_lighting());
 
-        if let Some(obj) = data {
-            assert!(obj.apply_lighting());
-        }
+        // Null sentinel returns None.
+        assert!(get_object_data(ObjectId::Null).is_none());
     }
 
     #[test]
     fn test_all_objects_count() {
-        // Currently placeholder, will be 109 when complete
-        assert!(ALL_OBJECTS.len() >= 1);
+        // Must match ObjectId variant count exactly (C++ assert:
+        // OBJ_LAST + 1 == AllObjects.size()).
+        assert_eq!(ALL_OBJECTS.len(), ObjectId::COUNT);
     }
 
     #[test]
@@ -808,5 +1133,190 @@ mod tests {
         assert_eq!(ObjectId::Chest1.to_i8(), 5);
         assert_eq!(ObjectId::Barrel.to_i8(), 57);
         assert_eq!(ObjectId::L5Sarc.to_i8(), 108);  // Index 108 (109th element)
+    }
+
+    // ------------------------------------------------------------------
+    // C++-consistency spot checks against objdat.tsv / objdat.h semantics
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn test_accessor_no_oob_for_every_object_id() {
+        // Every valid discriminant must yield a table entry (mirrors the
+        // C++ `OBJ_LAST+1 == AllObjects.size()` invariant).
+        let mut hits = 0;
+        for i in 0..(ObjectId::COUNT as i8) {
+            let id = ObjectId::from_i8(i).unwrap();
+            let d = obj_data(id);
+            // every entry's ofindex must be a valid graphic index
+            assert!(
+                (d.ofindex as usize) < OBJ_MASTER_LOAD_LIST.len(),
+                "object {:?} has ofindex {} out of range",
+                id,
+                d.ofindex
+            );
+            hits += 1;
+        }
+        assert_eq!(hits, ObjectId::COUNT);
+    }
+
+    #[test]
+    fn test_l1ldoor_is_door_and_solid_semantics() {
+        // OBJ_L1LDOOR: flags = Light,Trap ; selectionRegion = Bottom,Middle
+        let d = obj_data(ObjectId::L1LDoor);
+        assert!(is_door(ObjectId::L1LDoor));
+        assert!(d.apply_lighting());
+        assert!(d.is_trap());
+        // The C++ table does NOT mark doors Solid — solidity is derived
+        // elsewhere (door open/closed state), so is_solid() is false here.
+        assert!(!d.is_solid());
+        assert_eq!(d.anim_delay, 1);
+        assert_eq!(d.anim_width, 64);
+        assert_eq!(d.olvltype, DungeonType::Cathedral);
+        // Door hit region is the Bottom,Middle combination.
+        assert_eq!(d.selection_region, SelectionRegion::Middle);
+    }
+
+    #[test]
+    fn test_l1rdoor_anim_delay_differs() {
+        // OBJ_L1RDOOR is the same as L1LDOOR but animDelay=2.
+        let d = obj_data(ObjectId::L1RDoor);
+        assert_eq!(d.anim_delay, 2);
+        assert_eq!(d.olvltype, DungeonType::Cathedral);
+        assert!(d.is_trap());
+    }
+
+    #[test]
+    fn test_chests_share_gfx_but_distinct_flags() {
+        // Chest1/2/3 each have their own graphic (chest1/chest2/chest3).
+        let c1 = obj_data(ObjectId::Chest1);
+        let c2 = obj_data(ObjectId::Chest2);
+        let c3 = obj_data(ObjectId::Chest3);
+        assert_eq!(c1.ofindex, 4);
+        assert_eq!(c2.ofindex, 5);
+        assert_eq!(c3.ofindex, 6);
+        for c in [c1, c2, c3] {
+            assert!(c.is_solid());
+            assert!(c.apply_lighting());
+            assert!(c.is_trap());
+            assert!(c.missiles_pass_through());
+            assert_eq!(c.selection_region, SelectionRegion::Bottom);
+            assert_eq!(c.minlvl, 1);
+            assert_eq!(c.maxlvl, 24);
+        }
+    }
+
+    #[test]
+    fn test_torch_properties() {
+        // OBJ_TORCHL: Animated,MissilesPassThrough — NOT Solid, NOT Light.
+        let t = obj_data(ObjectId::TorchL);
+        assert!(t.is_animated());
+        assert!(t.missiles_pass_through());
+        assert!(!t.is_solid());
+        assert!(!t.apply_lighting());
+        assert_eq!(t.minlvl, 5);
+        assert_eq!(t.maxlvl, 8);
+        assert_eq!(t.anim_len, 9);
+        // 4 torches use 4 distinct wtorch graphics.
+        let ids = [
+            ObjectId::TorchL,
+            ObjectId::TorchR,
+            ObjectId::TorchL2,
+            ObjectId::TorchR2,
+        ];
+        let gfx: Vec<u8> = ids.iter().map(|id| obj_data(*id).ofindex).collect();
+        let uniq: std::collections::HashSet<u8> = gfx.iter().copied().collect();
+        assert_eq!(uniq.len(), 4, "each torch has a unique graphic");
+    }
+
+    #[test]
+    fn test_breakable_objects_match_helper() {
+        // The breakable set in the TSV is Barrel, BarrelEx, Crux1-3,
+        // Pod, PodEx, Urn, UrnEx. Verify the data flag and that the
+        // is_breakable() helper agrees for the classic breakables.
+        for id in [ObjectId::Barrel, ObjectId::BarrelEx, ObjectId::Pod, ObjectId::PodEx, ObjectId::Urn, ObjectId::UrnEx] {
+            assert!(obj_data(id).is_breakable(), "{:?} should be breakable", id);
+        }
+        for id in [ObjectId::Crux1, ObjectId::Crux2, ObjectId::Crux3] {
+            assert!(obj_data(id).is_breakable(), "{:?} should be breakable", id);
+        }
+        // Non-breakable sanity.
+        assert!(!obj_data(ObjectId::Chest1).is_breakable());
+    }
+
+    #[test]
+    fn test_theme_and_quest_fields() {
+        // Candle2: THEME_SHRINE + Q_PWATER.
+        let c = obj_data(ObjectId::Candle2);
+        assert_eq!(c.otheme, ThemeId::Shrine.to_i8());
+        assert_eq!(c.oquest, QuestId::PWater.to_i8());
+
+        // TnudeM1: no theme, Q_BUTCHER.
+        let t = obj_data(ObjectId::TNudeM1);
+        assert_eq!(t.otheme, ThemeId::NONE);
+        assert_eq!(t.oquest, QuestId::Butcher.to_i8());
+        assert_eq!(t.minlvl, 13);
+        assert_eq!(t.maxlvl, 15);
+
+        // Pedestal: Q_BLOOD.
+        let p = obj_data(ObjectId::Pedestal);
+        assert_eq!(p.oquest, QuestId::Blood.to_i8());
+
+        // StoryCandle: Q_BETRAYER.
+        let s = obj_data(ObjectId::StoryCandle);
+        assert_eq!(s.oquest, QuestId::Betrayer.to_i8());
+
+        // SteelTome: Q_WARLORD.
+        let st = obj_data(ObjectId::SteelTome);
+        assert_eq!(st.oquest, QuestId::Warlord.to_i8());
+
+        // Barrel: no theme, no quest.
+        let b = obj_data(ObjectId::Barrel);
+        assert_eq!(b.otheme, ThemeId::NONE);
+        assert_eq!(b.oquest, QuestId::INVALID);
+    }
+
+    #[test]
+    fn test_level_type_per_dungeon_set() {
+        assert_eq!(obj_data(ObjectId::L1LDoor).olvltype, DungeonType::Cathedral);
+        assert_eq!(obj_data(ObjectId::L2LDoor).olvltype, DungeonType::Catacombs);
+        assert_eq!(obj_data(ObjectId::L3LDoor).olvltype, DungeonType::Caves);
+        assert_eq!(obj_data(ObjectId::L5LDoor).olvltype, DungeonType::Crypt);
+        // Non-door objects with empty levelType => None.
+        assert_eq!(obj_data(ObjectId::Barrel).olvltype, DungeonType::None);
+        assert_eq!(obj_data(ObjectId::SkFire).olvltype, DungeonType::None);
+    }
+
+    #[test]
+    fn test_ofindex_dedup_matches_master_load_list() {
+        // ofindex must point at the correct dedup'd graphic name.
+        assert_eq!(OBJ_MASTER_LOAD_LIST[obj_data(ObjectId::L1Light).ofindex as usize], "l1braz");
+        // All four l1braz-backed objects share ofindex 0.
+        assert_eq!(obj_data(ObjectId::L1Light).ofindex, 0);
+        assert_eq!(obj_data(ObjectId::Candle1).ofindex, 0);
+        assert_eq!(obj_data(ObjectId::CandleO).ofindex, 0);
+        assert_eq!(obj_data(ObjectId::SkStick1).ofindex, 0);
+        // book2 ofindex is 15, shared by Book2L/Book2R/SkelBook/Bookstand.
+        assert_eq!(obj_data(ObjectId::Book2L).ofindex, 15);
+        assert_eq!(obj_data(ObjectId::Book2R).ofindex, 15);
+        assert_eq!(obj_data(ObjectId::SkelBook).ofindex, 15);
+        assert_eq!(obj_data(ObjectId::Bookstand).ofindex, 15);
+        // Final object L5SARC gets the last fresh graphic id.
+        assert_eq!(obj_data(ObjectId::L5Sarc).ofindex, 61);
+        assert_eq!(OBJ_MASTER_LOAD_LIST[61], "l5sarco");
+        assert_eq!(OBJ_MASTER_LOAD_LIST.len(), 62);
+    }
+
+    #[test]
+    fn test_door_animwidth_is_64() {
+        // All doors across L1/L2/L3/L5 use animWidth 64.
+        for id in [
+            ObjectId::L1LDoor, ObjectId::L1RDoor,
+            ObjectId::L2LDoor, ObjectId::L2RDoor,
+            ObjectId::L3LDoor, ObjectId::L3RDoor,
+            ObjectId::L5LDoor, ObjectId::L5RDoor,
+        ] {
+            assert_eq!(obj_data(id).anim_width, 64, "{:?} animWidth", id);
+            assert!(is_door(id));
+        }
     }
 }

@@ -10,7 +10,7 @@
 //!   `#[ignore]`d until the engine's game loop / save systems are ported.
 
 use devilutionx_rs::engine::demo_reader::{
-    parse_demo, DemoEventType, DemoParseError, ReplayDriver,
+    load_save_archive, parse_demo, DemoEventType, DemoParseError, ReplayDriver,
 };
 
 /// Path to a file in the upstream `test/fixtures/timedemo/WarriorLevel1to2/` dir,
@@ -105,6 +105,39 @@ fn rejects_unsupported_demo_version() {
         parse_demo(&v5),
         Err(DemoParseError::UnsupportedVersion(5))
     ));
+}
+
+/// Tier 1: the save archive opens as an MPQ and we can see its structure.
+///
+/// This proves the save-loading pipeline works end-to-end against the real
+/// fixture: `engine::mpq::MpqArchive` reads the header, decrypts the hash and
+/// block tables, and exposes block-table entries. We don't yet parse the inner
+/// save structure (hero/level blobs) — that's Tier 2+.
+#[test]
+fn loads_save_archive_as_mpq() {
+    let save = load_save_archive(fixture_path("spawn_0.sv"))
+        .expect("spawn_0.sv should open as an MPQ archive");
+
+    // A real Diablo save has many block-table entries (hero data, per-level
+    // blobs, quest state, etc.). Non-zero means the archive parsed and we can
+    // reach its contents.
+    let blocks = save.block_count();
+    assert!(blocks > 0, "save archive should have inner entries, got {blocks}");
+
+    // Sanity: the reference save opens the same way and has the same structure.
+    let reference = load_save_archive(fixture_path("demo_0_reference_spawn_0.sv"))
+        .expect("reference save should open as an MPQ archive");
+    assert_eq!(
+        reference.block_count(),
+        blocks,
+        "initial and reference saves should share block-table layout"
+    );
+
+    // TODO(Tier 1.5): once the inner save-structure names are known, probe them
+    // here with `save.has_entry("<hero>")` etc. Diablo saves typically omit the
+    // MPQ `(listfile)`, so `list_entries()` is expected to fail — that's fine,
+    // the block-table count above is the real acceptance signal.
+    // TODO(Tier 2): feed the decoded inner bytes into the engine's save loader.
 }
 
 /// Tier 1..3 acceptance: load `spawn_0.sv`, replay `demo_0.dmo` headlessly through
