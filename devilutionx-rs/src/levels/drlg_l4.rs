@@ -1288,8 +1288,22 @@ impl Dungeon4Generator {
     }
 
     /// Helper: Check if tile is a floor tile
+    ///
+    /// Maps a transparency-grid coordinate `(x, y)` (in the `[MAXDUNX][MAXDUNY]`
+    /// rendering space, offset by 16 from the active region) back to an active
+    /// tile coordinate and checks the tile id. Port of `IsFloor` in gendung.cpp:
+    /// `i = (p.x - 16) / 2`, `j = (p.y - 16) / 2`.
     fn is_floor(&self, dungeon: &Dungeon, x: usize, y: usize, floor_id: u8) -> bool {
-        x < MAXDUNX && y < MAXDUNY && dungeon.tiles[x / 2][y / 2] == floor_id
+        // Transparency grid starts at offset 16; values below 16 are padding.
+        if x < 16 || y < 16 {
+            return false;
+        }
+        let i = (x - 16) / 2;
+        let j = (y - 16) / 2;
+        if i >= MAXDUNX || j >= MAXDUNY {
+            return false;
+        }
+        dungeon.tiles[i][j] == floor_id
     }
 
     /// Fill transparency values recursively (flood fill)
@@ -1342,15 +1356,29 @@ impl Dungeon4Generator {
 
     /// Flood fill transparency values for lighting calculations
     /// C++ equivalent: FloodTransparencyValues (gendung.cpp line 820)
+    ///
+    /// Iterates over the *active* dungeon region (DMAXX/DMAXY == 40 in C++),
+    /// mapping each active tile `(i, j)` to the rendering/transparency grid
+    /// at `(16 + i*2, 16 + j*2)`. The local `levels::types::DMAXX`/`DMAXY`
+    /// constants are incorrectly set to 112 (the full `MAXDUN*` array size),
+    /// so we use the C++-accurate active-region size here to avoid indexing
+    /// `trans_val` (which is `[MAXDUNX][MAXDUNY] == [112][112]`) out of
+    /// bounds and to match the original scan range.
     fn flood_transparency_values(&mut self, dungeon: &mut Dungeon, floor_id: u8) {
+        const ACTIVE_DMAXX: usize = 40;
+        const ACTIVE_DMAXY: usize = 40;
         self.trans_val_counter = 1;
         let mut yy = 16;
-        for j in 0..DMAXY {
+        for j in 0..ACTIVE_DMAXY {
             let mut xx = 16;
-            for i in 0..DMAXX {
+            for i in 0..ACTIVE_DMAXX {
                 if dungeon.tiles[i][j] == floor_id && dungeon.trans_val[xx][yy] == 0 {
                     self.fill_transparency_recursive(dungeon, xx, yy, floor_id);
-                    self.trans_val_counter += 1;
+                    // C++ `TransVal` is `int8_t` and relies on implicit
+                    // wrapping (signed overflow is UB but wraps in practice).
+                    // Use wrapping arithmetic to match that behavior rather
+                    // than panicking in debug builds.
+                    self.trans_val_counter = self.trans_val_counter.wrapping_add(1);
                 }
                 xx += 2;
             }

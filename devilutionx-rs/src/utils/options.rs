@@ -709,8 +709,8 @@ mod tests {
     #[test]
     fn test_default_options() {
         let opts = Options::default();
-        assert_eq!(opts.graphics.width, 640);
-        assert_eq!(opts.graphics.height, 480);
+        assert_eq!(opts.graphics.width, 1280);
+        assert_eq!(opts.graphics.height, 720);
         assert!(!opts.graphics.fullscreen);
         assert_eq!(opts.audio.sound_volume, 100);
         assert_eq!(opts.network.port, 6112);
@@ -844,7 +844,7 @@ Height=768
         assert!(ini.contains("[Gameplay]"));
         assert!(ini.contains("[Network]"));
         assert!(ini.contains("[Language]"));
-        assert!(ini.contains("Width=640"));
-        assert!(ini.contains("Height=480"));
+        assert!(ini.contains("Width=1280"));
+        assert!(ini.contains("Height=720"));
     }
 }

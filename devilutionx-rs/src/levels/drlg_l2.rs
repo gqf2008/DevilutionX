@@ -1265,8 +1265,21 @@ impl CatacombsGenerator {
 
         let mut in_room = false;
 
-        // Main corridor carving loop
-        while beginning != end {
+        // Main corridor carving loop.
+        //
+        // C++ uses `do { ... } while (beginning != end)` and relies on the
+        // game's seeded RNG (`random_chance`) to steer the corridor toward
+        // `end`, guaranteeing termination. Our `random_chance` is still a
+        // placeholder (returns `percent > 50`), which can make the direction
+        // logic oscillate forever for certain hall configurations. Bound the
+        // loop defensively so generation completes instead of hanging; the
+        // corridor simply stops where it is if the cap is hit. This cap can
+        // be removed once a real seeded RNG is wired in (see `generate`'s
+        // `SetRndSeed` TODO).
+        let mut steps = 0usize;
+        const MAX_HALL_STEPS: usize = 4 * (DMAXX + DMAXY);
+        while beginning != end && steps < MAX_HALL_STEPS {
+            steps += 1;
             // Boundary collision detection
             if beginning.x >= 38 && current_dir == HallDirection::Right {
                 current_dir = HallDirection::Left;

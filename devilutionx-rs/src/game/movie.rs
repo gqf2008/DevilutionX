@@ -104,8 +104,13 @@ impl MovieInfo {
     }
 
     /// 是否已完成
+    ///
+    /// A freshly-constructed `MovieInfo` has `total_frames == 0` (the real
+    /// frame count is only known once the Smacker stream is opened). Treat
+    /// that state as "not finished" rather than "0 >= 0 == finished", so a
+    /// movie that hasn't started playing isn't reported as already done.
     pub fn is_finished(&self) -> bool {
-        self.current_frame >= self.total_frames
+        self.total_frames > 0 && self.current_frame >= self.total_frames
     }
 }
 

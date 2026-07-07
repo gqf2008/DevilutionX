@@ -53,12 +53,16 @@ impl MainMenuSelection {
     }
 
     /// Get selection from index
+    ///
+    /// Menu item order matches C++ `Source/DiabloUI/mainmenu.cpp`
+    /// (MainMenuVector): Single Player, Multi Player, Settings, Support,
+    /// Show Credits, Exit Diablo.
     pub fn from_index(index: usize) -> Option<Self> {
         match index {
             0 => Some(Self::SinglePlayer),
             1 => Some(Self::Multiplayer),
-            2 => Some(Self::ShowSupport),
-            3 => Some(Self::Settings),
+            2 => Some(Self::Settings),
+            3 => Some(Self::ShowSupport),
             4 => Some(Self::ShowCredits),
             5 => Some(Self::ExitDiablo),
             _ => None,
@@ -489,6 +493,10 @@ mod tests {
         );
         assert_eq!(
             MainMenuSelection::from_index(4),
+            Some(MainMenuSelection::ShowCredits)
+        );
+        assert_eq!(
+            MainMenuSelection::from_index(5),
             Some(MainMenuSelection::ExitDiablo)
         );
         assert_eq!(MainMenuSelection::from_index(10), None);

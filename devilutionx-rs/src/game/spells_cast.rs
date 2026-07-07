@@ -258,9 +258,21 @@ fn is_readied_spell_valid(player: &Player) -> bool {
 }
 
 /// Get bitmask for spell ID (for spell tracking bitfields)
-/// Exact port of GetSpellBitmask from spells.h
+///
+/// Port of `GetSpellBitmask` from spells.h: `1ULL << (int8_t(spellId) - 1)`.
+///
+/// Note: the authoritative C++ `SpellID` enum (`spelldat.h`) numbers spells
+/// starting at `Firebolt = 1`, so `spellId - 1` yields a 0-based bit index.
+/// The local `player_exact::SpellId` re-export numbers `Firebolt = 0`
+/// (with `None = -1`), so the effective bit index is just `spell as i8`.
+/// We guard `None` explicitly (returns 0 = no bits) and use wrapping shifts
+/// so the function is total rather than panicking on out-of-range inputs.
 pub const fn get_spell_bitmask(spell: SpellId) -> u64 {
-    1u64 << ((spell as i8 - 1) as u64)
+    let idx = spell as i8;
+    if idx < 0 {
+        return 0;
+    }
+    1u64.wrapping_shl(idx as u32)
 }
 
 /// Clear player's readied spell

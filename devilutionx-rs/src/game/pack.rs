@@ -223,8 +223,12 @@ pub struct ItemPack {
 }
 
 impl ItemPack {
-    /// Size of packed item in bytes
-    pub const SIZE: usize = 18;
+    /// Size of packed item in bytes.
+    ///
+    /// Matches the C++ `ItemPack` packed struct in `Source/pack.h`:
+    /// iSeed(4) + iCreateInfo(2) + idx(2) + bId(1) + bDur(1) + bMDur(1)
+    /// + bCh(1) + bMCh(1) + wValue(2) + dwBuff(4) = 19 bytes.
+    pub const SIZE: usize = 19;
 
     /// Create empty item pack
     pub fn empty() -> Self {
@@ -1009,7 +1013,7 @@ mod tests {
 
     #[test]
     fn test_item_pack_size() {
-        assert_eq!(ItemPack::SIZE, 18);
+        assert_eq!(ItemPack::SIZE, 19);
     }
 
     #[test]

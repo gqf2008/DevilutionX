@@ -342,6 +342,10 @@ impl MultiplayerManager {
         self.game_name = game_name.to_string();
         self.game_password = password.to_string();
         self.public_game = public_game;
+        // A multiplayer game starts empty: players join explicitly via
+        // `player_joined`. Unlike single player (where the host is always
+        // active), the host hasn't been registered yet at this point.
+        self.active_players = 0;
         self.clear_buffers();
     }
 

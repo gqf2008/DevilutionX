@@ -733,9 +733,9 @@ mod tests {
     #[test]
     fn test_melee_to_hit() {
         let player = Player::new("Test", HeroClass::Warrior);
-        // Warrior base melee to-hit is 20
-        // Level 1 + dex/2 (20/2=10) + bonus (0) + base (20) = 31
-        assert_eq!(player.get_melee_to_hit(), 31);
+        // Warrior base melee to-hit is 70 (assets/txtdata/classes/warrior/attributes.tsv)
+        // level(1) + dex/2 (20/2=10) + i_bonus_to_hit(0) + base(70) = 81
+        assert_eq!(player.get_melee_to_hit(), 81);
     }
 
     #[test]

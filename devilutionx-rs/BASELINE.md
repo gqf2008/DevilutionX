@@ -18,23 +18,65 @@
 - 修 `objdat.rs` import：`crate::levels::types`（bin 上下文不存在）→ `super::types`
 - 修测试/示例：`Monster::new` 4参→5参、`GameState::new` 补 seed
 
-## 测试基线: 🔴 RED（+ 崩溃）
+## 测试基线: ✅ GREEN（2026-07-07 更新）
 
-`cargo test --lib --bins` 全量并行运行以 **STATUS_STACK_BUFFER_OVERRUN (0xc0000409, 疑栈溢出)** 崩溃，无法给出完整 pass/fail 计数。
+`cargo test --lib` → **1804 passed; 0 failed; 2 ignored**
+`cargo test --bins` → **1460 passed; 0 failed; 2 ignored**
 
-**分模块采样**（崩溃源不在这些模块）:
+此前基线为 🔴 RED（全量并行运行以 `STATUS_STACK_BUFFER_OVERRUN` 崩溃，且 `drlg_l2::test_create_dungeon_with_fill_voids` 死循环卡死）。
+本轮清理了 15 个失败 + 1 个卡死测试，详见下表与"已知技术债务"。
 
-| 模块 | pass | fail | 备注 |
-|------|------|------|------|
-| `game::monster` | 45 | 8 | 纯断言失败（重构 API 漂移） |
+### 本轮修复清单（15 failed + 1 hang → 0）
+
+| 测试 | 根因 | 修复 |
+|------|------|------|
+| `sha::test_circular_shift_positive` | `bits=0` → `>>32` 溢出 panic | `wrapping_shl/shr` 让函数 total |
+| `sha::test_circular_shift_negative` | 期望值算术错误（注释把 `0x80000000>>27=16` 写成 1） | 修正期望 `0xFFFFFFE4→0xFFFFFFF0` |
+| `utils::options::test_default_options` | 默认分辨率 640→1280，测试未跟上 | 更新期望为 1280×720 |
+| `utils::options::test_to_ini_format` | 同上 | 更新期望 |
+| `pack::test_item_pack_serialize` | `ItemPack::SIZE=18` 错误（C++ `ItemPack` packed = 19 字节） | SIZE 改 19 + 更新 size 断言 |
+| `pack::test_player_pack_serialize_deserialize` | 同上（共享 SIZE） | 同上 |
+| `spells_cast::test_spell_bitmask` | `player_exact::SpellId` Firebolt=0 与 C++ Firebolt=1 偏移；`None=-1`→移位溢出 | wrapping + 负值返回 0 |
+| `movie::test_movie_info_new` | `is_finished`: `0>=0` 误判新建为完成 | `total_frames>0 &&` 守卫 |
+| `movie::test_smacker_video_play` | 同上（共享 is_finished） | 同上 |
+| `multi::test_player_join_leave` | `init_multiplayer` 未重置 `active_players`（沿用 new()=1） | MP 初始化置 0（host 经 join 加入） |
+| `ui::diabloui::mainmenu::test_main_menu_selection` | `from_index` 顺序与 C++ 不符 + 测试期望错 | 对齐 C++ 菜单顺序 + 修正测试（4→ShowCredits, 5→ExitDiablo） |
+| `player_new::test_melee_to_hit` | 测试期望 31 用了错误 base=20；权威 TSV base=70 | 期望改 81（lvl1+dex/2 10+0+70） |
+| `drlg_l4::test_complete_l4_generation` | `levels::types::DMAXX/DMAXY=112`（应 40）→ flood 循环越界 | flood 用本地 ACTIVE=40 |
+| `drlg_l4::test_flood_transparency_values` | `is_floor` 坐标映射错（`x/2` 应为 `(x-16)/2`） | 对齐 C++ `IsFloor` |
+| `drlg_l4::test_generate_diablo_lair` | `trans_val_counter: i8` 递增溢出 + 上面的越界 | `wrapping_add` |
+| `drlg_l2::test_create_dungeon_with_fill_voids` | `random_chance` 是占位符（`percent>50`）→ `ConnectHall` 方向逻辑振荡死循环 | 加步数上限防御（真实 RNG 接入后可移除） |
+
+## 已知技术债务（供后续移植参考）
+
+1. **常量系统不一致**：`DMAXX/DMAXY/DMAXX/MAXDUNY` 在多处定义且值冲突。
+   - 权威（C++）：`DMAXX=DMAXY=40`（活跃区），`MAXDUNX=MAXDUNY=112`（含 16 边距渲染区）。
+   - `levels/types.rs` 错误地把 `DMAXX/DMAXY` 也设成 112，导致 `Dungeon.tiles` 被 padding 覆盖。
+   - `engine/render/light_render.rs` 的值是对的；`game/automap.rs`、`game/cursor.rs` 又各自重定义。
+   - **建议**：统一到一处，消除重复定义。
+
+2. **RNG 未接入**：`levels/drlg_l2.rs::random_chance` 是占位符（`percent > 50`），`generate()` 里有 `// TODO: SetRndSeed(seed)`。
+   - 后果：所有依赖概率的地牢生成（走廊转向、miniset 随机放置、fill_voids 起点）都退化为确定性，可能产生病态布局。
+   - `drlg_l2::ConnectHall` 已加步数上限保护，但这是权宜之计。
+   - **建议**：移植 Diablo 的 seeded PRNG（`Source/utils/random.cpp` 的 `SetRndSeed/GenerateRnd`），接入所有生成器。
+
+3. **两套 SpellId 枚举**：`game/player.rs::SpellId`（Firebolt=1，对齐 C++）与 `game/player_exact.rs::SpellId`（Firebolt=0，遗留适配模块）判别值不同。
+   - `spells_cast.rs` 用后者，`get_spell_bitmask` 已做兼容；但长期应统一到权威枚举。
+
+4. **两套战斗数据表**：`playerdat.rs`（Warrior base_melee_to_hit=20，错误）与 `player_dat.rs`（=70，对齐 TSV）并存。
+   - **建议**：删除 `playerdat.rs` 的错误副本，统一到 `player_dat.rs`（TSV 来源）。
+
+5. **自报完成度虚高**：`PROGRESS.md`/`README.md` 声称多数模块"100% 完成"，但 `PORTING/151.M80-HONEST-STATUS.md` 已诚实指出游戏流程层（UI/菜单/角色创建/MPQ 加载/启动流程）基本为 0%。后续评估以实际运行 + 测试为准，不信自报数字。
+
+6. **全局 static 导致测试偶发污染**：`cargo check` 报 145 条 `static_mut_refs` 警告。后果：`cargo test --lib` 与 `cargo test --bins` 各自全绿，但 `cargo test --lib --bins` 混合运行时偶发 1 个 monster 测试失败（如 `test_ai_counselor_ranged_attack`，单独/分组跑均通过）。根因是测试间通过全局 static 互相污染，属架构层债务，非逻辑 bug。
+
+## 端到端基线: ❌ 不存在
 | `game::missiles` | 83 | 12 | `attempt to multiply with overflow` 算术溢出 panic |
 | `game::pathfinding` | 2 | 0 | ✅ 全过 |
 | `game::lighting` | — | 多 | 有失败 |
 | 其他（cel/controls/automap/capture/combat_system/dialogue/gamemenu/inventory） | — | 多 | 重构遗留 |
 
-**结论**: 测试大面积红的根因是**未完成重构留下的 API 漂移**——大量测试按旧 `monster_exact`/旧 `Monster` 字段 API 编写。这是工作流要逐模块清理的债务。
-
-**未决**: 全量崩溃的元凶测试尚未隔离（待办 #5，用 `--test-threads=1` 二分）。
+**（上表为历史采样，已在 2026-07-07 全部转绿，保留作背景。）**
 
 ## 端到端基线: ❌ 不存在
 
@@ -43,17 +85,18 @@ Rust 端没有确定性回放测试。C++ 的黄金标准是 `test/timedemo_test
 - 起始存档 `spawn_0.sv`，比对 `demo_0_reference_spawn_0.sv`（**逐字节**）
 - 这是**移植接近完成的终态验收**，非近期可达门
 
-## 规模
+## 规模（2026-07-07 核实）
 
-- Rust: 273 文件 / 163k 行 / 2096 个 `#[test]`
-- C++ 参考: 250 文件 / 113k 行
-- 自报完成度: ~38%
+- Rust: 317 文件 / 173,704 行 / 2,131 个 `#[test]`（lib+bin 合计 ~3,264 测试）
+- C++ 参考: ~250 文件 / 143,170 行
+- 自报完成度: ~38%（注：自报数字普遍虚高，见"已知技术债务"#5）
 
 ## 快速命令
 
 ```bash
 cd devilutionx-rs
-cargo check                          # ✅ green
-cargo test --lib game::monster       # 分模块跑（避开全量崩溃）
-cargo test --lib --bins              # 全量（当前会崩）
+cargo check                          # ✅ green (145 warnings, 0 errors)
+cargo test --lib                     # ✅ 1804 passed / 0 failed
+cargo test --bins                    # ✅ 1460 passed / 0 failed
+cargo test --lib game::monster       # 分模块跑
 ```

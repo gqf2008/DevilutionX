@@ -101,10 +101,17 @@ fn sha1_circular_shift(word: u32, bits: u32) -> u32 {
     if (word & (1 << 31)) != 0 {
         // Sign bit is set: fill high bits with 1s after rotation
         // This simulates arithmetic right shift behavior
-        (0xFFFFFFFF_u32 << bits) | (word >> (32 - bits))
+        //
+        // C++ uses unsigned shifts which are well-defined for bits < 32.
+        // In practice SHA1ProcessMessageBlock only ever calls this with
+        // bits == 5 or bits == 30, so `32 - bits` never reaches 0 and the
+        // shift amounts stay in range. We use wrapping ops defensively so
+        // the function is total (shifts by the full width are well-defined
+        // as 0 in Rust via wrapping_{shl,shr}).
+        (0xFFFFFFFF_u32).wrapping_shl(bits) | word.wrapping_shr(32 - bits)
     } else {
         // Sign bit is clear: standard circular left shift
-        (word << bits) | (word >> (32 - bits))
+        word.wrapping_shl(bits) | word.wrapping_shr(32 - bits)
     }
 }
 
@@ -295,10 +302,11 @@ mod tests {
     fn test_circular_shift_negative() {
         // When high bit is set, the Diablo implementation fills high bits with 1s
         // For 0x80000000 shifted left by 5:
-        // Standard: (0x80000000 << 5) | (0x80000000 >> 27) = 0x00000004
-        // Diablo:   (0xFFFFFFFF << 5) | (0x80000000 >> 27) = 0xFFFFFFE4
+        //   (0xFFFFFFFF << 5) = 0xFFFFFFE0
+        //   (0x80000000 >> 27) = 0x00000010
+        //   OR = 0xFFFFFFF0
         let result = sha1_circular_shift(0x80000000, 5);
-        assert_eq!(result, 0xFFFFFFE4);
+        assert_eq!(result, 0xFFFFFFF0);
 
         // Another test: 0xFFFFFFFF (all bits set)
         // Shifted left by 1: (0xFFFFFFFF << 1) | (0xFFFFFFFF >> 31) = 0xFFFFFFFF
