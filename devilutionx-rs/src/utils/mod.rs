@@ -9,6 +9,7 @@ pub mod math;
 pub mod options;
 pub mod parse_int;
 pub mod paths;
+pub mod random;
 pub mod str_case;
 
 pub use bitset2d::*;

@@ -6,15 +6,10 @@
 //! C++ source: Source/levels/trigs.cpp (948 lines)
 //! Target: ~600-700 lines Rust code
 
-use crate::levels::types::DungeonType;
+use crate::levels::types::{DungeonType, MAXDUNX, MAXDUNY};
 
 /// Maximum number of triggers per level
 pub const MAXTRIGGERS: usize = 7;
-
-/// Maximum dungeon X coordinate (112 = 16 + 40*2 + 16)
-const MAXDUNX: usize = 112;
-/// Maximum dungeon Y coordinate (112 = 16 + 40*2 + 16)
-const MAXDUNY: usize = 112;
 
 /// 2D position in dungeon coordinates
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

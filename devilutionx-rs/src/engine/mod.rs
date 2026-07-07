@@ -8,6 +8,7 @@ pub mod assets;
 pub mod font;
 pub mod textures;
 pub mod mpq;
+pub mod archive; // Multi-MPQ ArchiveManager (load-order priority)
 pub mod clx;
 pub mod cel;  // CEL/CL2 decoder (M80)
 pub mod explode;
@@ -58,6 +59,7 @@ pub use textures::{
     AssetManager as TextureManager, TextureCache, Palette as TexturePalette,
 };
 pub use mpq::{MpqArchive, MpqError, AssetManager as MpqAssetManager};
+pub use archive::{ArchiveManager, ArchiveError};
 pub use clx::{ClxSprite, ClxSpriteList, ClxSpriteSheet, DiabloPalette};
 pub use pcx::PcxImage;
 pub use dungeon::{

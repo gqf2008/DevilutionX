@@ -7,10 +7,19 @@ use serde::{Deserialize, Serialize};
 use bitflags::bitflags;
 
 /// Dungeon map dimensions (in tiles)
+///
+/// This is the *correct* C++ value (`Source/levels/gendung_defs.hpp: DMAXX 40`).
+/// It cannot be imported from `crate::levels::types` because (a) that module's
+/// `DMAXX`/`DMAXY` are still incorrectly 112 (see the bug note there), and
+/// (b) this file also compiles inside the `devilutionx` binary crate, whose
+/// `src/main.rs` does not declare a `levels` module.
 pub const DMAXX: usize = 40;
 pub const DMAXY: usize = 40;
 
 /// Full dungeon dimensions (in world units) - 4x map tiles
+///
+/// NOTE: duplicates `crate::levels::types::MAXDUNX`/`MAXDUNY` (= 112); see the
+/// note on `DMAXX` for why it is not consolidated via `use`.
 pub const MAXDUNX: usize = 112;
 pub const MAXDUNY: usize = 112;
 

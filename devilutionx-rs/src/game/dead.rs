@@ -37,11 +37,16 @@ pub const MAX_CORPSES: usize = 31;
 /// 地牢最大X坐标
 ///
 /// **C++ Reference**: `MAXDUNX` in defs.h
+///
+/// NOTE: duplicates the canonical `crate::levels::types::MAXDUNX` (= 112).
+/// Not yet consolidated via `use` because this module is marked
+/// "禁止变更 - 已完成移植"; both have identical value.
 pub const MAXDUNX: usize = 112;
 
 /// 地牢最大Y坐标
 ///
 /// **C++ Reference**: `MAXDUNY` in defs.h
+/// NOTE: duplicates `crate::levels::types::MAXDUNY` (= 112).
 pub const MAXDUNY: usize = 112;
 
 /// 尸体结构

@@ -175,10 +175,14 @@ pub const TILE_WIDTH: i32 = 64;
 /// Tile height in pixels
 pub const TILE_HEIGHT: i32 = 32;
 
-/// Maximum dungeon X dimension
+/// Maximum dungeon X dimension (i32, for cursor coordinate arithmetic).
+///
+/// This mirrors the canonical `crate::levels::types::MAXDUNX` (= 112) but is
+/// kept as `i32` here because cursor code performs signed coordinate math.
+/// The `usize`/`i32` split is intentional — do not unify the types.
 pub const MAXDUNX: i32 = 112;
 
-/// Maximum dungeon Y dimension
+/// Maximum dungeon Y dimension (i32, see `MAXDUNX` above).
 pub const MAXDUNY: i32 = 112;
 
 // ============================================================================

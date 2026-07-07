@@ -14,7 +14,13 @@ use crate::game::lighting::DungeonLevelType;
 // Constants
 // ============================================================================
 
-/// Maximum dungeon X dimension
+/// Maximum dungeon X dimension (active region).
+///
+/// This is the *correct* C++ value (`Source/levels/gendung_defs.hpp: DMAXX 40`).
+/// It cannot be imported from `crate::levels::types` because (a) that module's
+/// `DMAXX`/`DMAXY` are still incorrectly 112 (see the bug note there), and
+/// (b) this file also compiles inside the `devilutionx` binary crate, whose
+/// `src/main.rs` does not declare a `levels` module.
 pub const DMAXX: usize = 40;
 /// Maximum dungeon Y dimension
 pub const DMAXY: usize = 40;

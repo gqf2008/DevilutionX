@@ -11,6 +11,10 @@ pub const LIGHT_TABLE_SIZE: usize = 256;
 pub const NUM_LIGHTING_LEVELS: usize = 16;
 
 /// 最大地下城尺寸
+///
+/// NOTE: duplicates the canonical `crate::levels::types::MAXDUNX`/`MAXDUNY`
+/// (= 112). Kept locally because `engine` is a lower-level module that does
+/// not depend on `levels`; values are identical to the canonical source.
 pub const MAXDUNX: usize = 112;
 pub const MAXDUNY: usize = 112;
 

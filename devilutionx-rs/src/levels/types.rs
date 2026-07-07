@@ -16,9 +16,32 @@ pub const MAXTILES: usize = 1379;
 pub const MAXTHEMES: usize = 50;
 
 /// Maximum dungeon X coordinate (in tile space)
+///
+/// # ⚠️ KNOWN BUG — value is wrong
+///
+/// C++ authoritative value is **40** (`Source/levels/gendung_defs.hpp: DMAXX 40`).
+/// `DMAXX`/`DMAXY` denote the dungeon **active region** (the range the
+/// generation algorithms loop over), whereas `MAXDUNX`/`MAXDUNY` (= 112, the
+/// formula `16 + 40*2 + 16`) is the **render region / array dimension**.
+///
+/// This constant is kept at 112 intentionally because the `levels::drlg_l4`
+/// port indexes `Dungeon.tiles` (which is `[[u8; DMAXY]; DMAXX]`) using
+/// `MAXDUNX`-sized loops — i.e. it treats the tile array as the full 112×112
+/// render region rather than the 40×40 active region. Setting this to 40
+/// therefore shrinks `Dungeon.tiles` to `[40][40]` and makes `drlg_l4`'s
+/// generation loops (`MakeDmt`, `FixTilesPatterns`, `AddWall`, `GeneralFix`,
+/// `ApplyShadows`, `FixCornerTiles`, `Substitution`, `PlaceMiniSet`, ...) panic
+/// with index-out-of-bounds (12 tests fail).
+///
+/// Until `drlg_l4` is refactored to loop over `DMAXX`/`DMAXY` (40) instead of
+/// `MAXDUNX`/`MAXDUNY` (112), this stays at 112. The flood-fill helpers in
+/// `drlg_l4` already work around this with a local `ACTIVE_DMAXX = 40`
+/// constant (see `flood_transparency_values`).
 pub const DMAXX: usize = 112;
 
 /// Maximum dungeon Y coordinate (in tile space)
+///
+/// See `DMAXX`: kept at 112 (should be 40) until `drlg_l4` is fixed.
 pub const DMAXY: usize = 112;
 
 /// Maximum dungeon X coordinate (in subtile/piece space, 2x of tile space)

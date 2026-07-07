@@ -24,6 +24,13 @@ pub const TILE_WIDTH: i32 = 64;
 pub const TILE_HEIGHT: i32 = 32;
 
 /// 最大地下城尺寸
+///
+/// NOTE: `DMAXX`/`DMAXY`/`MAXDUNX`/`MAXDUNY` here are the *correct* C++ values
+/// (`gendung_defs.hpp`). They duplicate `crate::levels::types`, but that
+/// module's `DMAXX`/`DMAXY` are currently (incorrectly) 112 — see the bug note
+/// in `levels::types`. `engine` is also a lower-level module that does not
+/// import `levels`, so these stay local. `MAXDUN*` are kept as a formula of
+/// `DMAX*` so they stay internally consistent.
 pub const DMAXX: usize = 40;
 pub const DMAXY: usize = 40;
 pub const MAXDUNX: usize = 16 + DMAXX * 2 + 16;

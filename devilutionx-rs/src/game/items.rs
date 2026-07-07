@@ -1283,6 +1283,12 @@ use super::item_affix::{AffixItemType, ITEM_PREFIXES, ITEM_SUFFIXES, AffixData};
 pub const MAXITEMS: usize = 127;
 
 /// Maximum dungeon size for item placement
+///
+/// NOTE: duplicates the canonical `crate::levels::types::MAXDUNX`/`MAXDUNY`
+/// (= 112). Not consolidated via `use` because this file compiles inside both
+/// the library crate and the `devilutionx` *binary* crate, whose module tree
+/// (`src/main.rs`) does not declare a `levels` module — so `crate::levels`
+/// is not a valid path here. Values are kept identical to the canonical source.
 pub const MAXDUNX: usize = 112;
 pub const MAXDUNY: usize = 112;
 

@@ -10,12 +10,7 @@
 //! Target: ~400-450 lines Rust code
 
 use crate::levels::gendung::Dungeon;
-use crate::levels::types::DungeonType;
-
-/// Maximum dungeon X coordinate (112 = 16 + 40*2 + 16)
-const MAXDUNX: usize = 112;
-/// Maximum dungeon Y coordinate (112 = 16 + 40*2 + 16)
-const MAXDUNY: usize = 112;
+use crate::levels::types::{DungeonType, MAXDUNX, MAXDUNY};
 
 /// Town entry point (how player entered town)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
