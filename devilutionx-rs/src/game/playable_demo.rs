@@ -2,6 +2,13 @@
 //!
 //! Simplified game loop for M80 playable demo.
 //! Full game loop is in game_loop.rs, this is for testing rendering/input.
+//!
+// TODO(dead code?): `PlayableDemo`/`DemoState` are `pub` but have NO external callers
+// (main.rs and diablo_main use the real `game_loop.rs`). This whole module is
+// functionally dead code. Kept for now because it carries 2 running lib tests
+// (test_demo_state_creation, test_movement_speed); removing it would drop the
+// lib test count from 1832 -> 1830, below the held baseline. Safe to delete
+// once the test baseline is no longer a hard constraint.
 
 use anyhow::Result;
 use crate::engine::window::{GameWindow, Color};

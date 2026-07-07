@@ -533,6 +533,41 @@ impl DungeonLevelData {
             level_cel,
         })
     }
+
+    /// Load level data from an `AssetManager` (the multi-MPQ wrapper used by
+    /// the game's main context). Equivalent to `load_from_mpq` but operates on
+    /// the wrapper, which transparently resolves files across all loaded MPQs.
+    ///
+    /// This is the entry point the game loop uses (main.rs holds an
+    /// `AssetManager`, not a raw `MpqArchive`).
+    pub fn load_from_asset_manager(
+        assets: &mut crate::engine::mpq::AssetManager,
+        dungeon_type: DungeonType,
+    ) -> Result<Self, crate::engine::mpq::MpqError> {
+        let prefix = dungeon_type.data_prefix();
+        let blocks_per_tile = dungeon_type.blocks_per_tile();
+
+        let pal_data = assets.read_file(&format!("{}.pal", prefix))?;
+        let palette = PaletteData::from_bytes(&pal_data)
+            .ok_or_else(|| crate::engine::mpq::MpqError::DecompressionError("Invalid palette".to_string()))?;
+
+        let sol = SolData::from_bytes(&assets.read_file(&format!("{}.sol", prefix))?);
+        let min = MinData::from_bytes(
+            &assets.read_file(&format!("{}.min", prefix))?,
+            blocks_per_tile,
+        );
+        let til = TilData::from_bytes(&assets.read_file(&format!("{}.til", prefix))?);
+        let level_cel = assets.read_file(&format!("{}.cel", prefix))?;
+
+        Ok(Self {
+            dungeon_type,
+            palette,
+            sol,
+            min,
+            til,
+            level_cel,
+        })
+    }
 }
 
 /// CEL tile decoder

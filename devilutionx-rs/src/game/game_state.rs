@@ -18,6 +18,7 @@ use crate::game::dungeon::DungeonMap;
 use crate::game::combat_integration::{monster_attack_player, player_attack_monster, walking_distance};
 use crate::game::monster_object_interaction::{monster_check_doors, is_position_blocked_by_object};
 use crate::game::types::Point;
+use crate::engine::dungeon::DungeonLevelData;
 use rand::Rng;
 
 /// Game logic processing steps
@@ -67,6 +68,13 @@ pub struct GameState {
 
     /// Is this a town level?
     pub is_town: bool,
+
+    /// Loaded tile/palette/CEL data for the current level, if any.
+    ///
+    /// This is `Some` once `start_game` has loaded the town (or dungeon) level
+    /// data from MPQ. The renderer (`draw_and_blit`) reads it to draw the
+    /// isometric floor. It is `None` in tests that don't need real assets.
+    pub level_data: Option<DungeonLevelData>,
 }
 
 impl GameState {
@@ -83,6 +91,7 @@ impl GameState {
             logic_step: GameLogicStep::None,
             game_tick: 0,
             is_town,
+            level_data: None,
         }
     }
 

@@ -19,6 +19,7 @@ pub mod window;  // SDL2 window management (M80)
 pub mod resources;  // Resource manager (M80)
 pub mod isometric;  // Isometric tile renderer (M80)
 pub mod timing;  // Game loop timing (M80)
+pub mod sprite_render;  // CLX/CEL sprite → SDL Texture bridge (R1)
 
 // New ported modules from C++ engine
 pub mod types;
@@ -178,4 +179,11 @@ pub use load_sprite::{
 pub use events::{
     ModState, MouseButton, KeyCode, GameEvent, EventWithMod, EventManager,
     is_printable_key, key_to_char,
+};
+
+// Re-export sprite_render types (CLX/CEL → SDL Texture bridge)
+pub use sprite_render::{
+    SpriteRenderError,
+    clx_sprite_to_rgba, clx_sprite_to_texture, rgba_to_texture,
+    solid_color_texture, palette_to_rgb768,
 };

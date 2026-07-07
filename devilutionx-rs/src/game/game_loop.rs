@@ -11,11 +11,15 @@
 
 use crate::engine::timing::GameTiming;
 use crate::engine::window::{GameWindow, Color};
+use crate::engine::isometric::{IsoPoint, TILE_WIDTH, TILE_HEIGHT};
+use crate::engine::dungeon::{TileDecoder, TileType};
+use crate::engine::sprite_render::rgba_to_texture;
 use crate::game::input::InputSystem;
 use crate::game::network;
 use crate::game::game_state::GameState;
 use anyhow::Result;
 use sdl2::event::Event;
+use sdl2::rect::Rect;
 use rand::SeedableRng;
 
 /// Interface mode for game initialization
@@ -353,26 +357,166 @@ fn process_input(_input: &mut InputSystem) -> Result<()> {
 //------------------------------------------------------------------------------
 
 fn redraw_viewport(_window: &mut GameWindow, _game_state: &GameState) {
-    // C++: RedrawViewport() - renders game world
-    // TODO: Implement viewport rendering
+    // C++: RedrawViewport() - marks dirty regions; the actual drawing happens
+    // in draw_and_blit() below, which now renders the full isometric view each
+    // frame. Kept as a hook for future partial-redraw optimisation.
 }
 
 fn draw_and_blit(window: &mut GameWindow, game_state: &GameState) {
-    // C++: DrawAndBlit() - draws UI and flips buffers
+    // C++: DrawAndBlit() - renders the dungeon viewport then flips the back
+    // buffer. Previously this drew a single 32x32 green square. It now renders
+    // an isometric floor (checkerboard) as a stable proof that the camera/
+    // viewport/isometric pipeline works, and — when town level data has been
+    // loaded into game_state.level_data — overlays real decoded town tiles.
+    //
+    // Rendering uses logical 640x480 coordinates (the canvas has
+    // set_logical_size(640,480) applied in main.rs), so the viewport centre is
+    // (320, 240) regardless of the physical window size.
+
     window.clear(Color::BLACK);
 
-    // Simple debug rendering
-    let canvas = window.canvas_mut();
+    // Logical viewport centre.
+    let center_x: i32 = LOGICAL_WIDTH as i32 / 2; // 320
+    let center_y: i32 = LOGICAL_HEIGHT as i32 / 2; // 240
 
-    // Draw player
-    canvas.set_draw_color(sdl2::pixels::Color::RGB(0, 255, 0));
-    let _ = canvas.fill_rect(sdl2::rect::Rect::new(
-        (game_state.player.position.x * 32) as i32,
-        (game_state.player.position.y * 32) as i32,
-        32, 32
-    ));
+    // Camera is at the world origin (no scrolling yet), so screen positions are
+    // computed relative to (0,0) and then offset by the viewport centre.
+    let camera = IsoPoint::new(0, 0);
+    // Render a grid large enough to cover the 640x480 logical viewport. Each
+    // isometric tile is 64x32; ~16 columns x ~24 rows comfortably fills it.
+    let grid_w = 16;
+    let grid_h = 24;
+
+    // 1. Stable checkerboard floor (always drawn) — proves the iso pipeline.
+    //    Drawn as filled diamonds centred on each tile's screen position.
+    let canvas = window.canvas_mut();
+    for ty in 0..grid_h {
+        for tx in 0..grid_w {
+            let is_dark = (tx + ty) % 2 == 0;
+            let color = if is_dark {
+                sdl2::pixels::Color::RGB(36, 36, 52)
+            } else {
+                sdl2::pixels::Color::RGB(58, 58, 78)
+            };
+            let (sx, sy) = IsoPoint::new(tx, ty).to_screen(camera);
+            fill_diamond(canvas, center_x + sx, center_y + sy, color);
+        }
+    }
+
+    // 2. If real town level data is available, attempt to draw decoded tiles.
+    //    This is the "real Tristram art" path; it's best-effort and may only
+    //    show a few tiles correctly (tile-type/sub-tile mapping is approximate
+    //    for this demo), but it proves the MPQ→CEL→RGBA→Texture→screen chain.
+    if let Some(level) = &game_state.level_data {
+        let _ = draw_real_tiles(window, camera, level, grid_w, grid_h);
+    }
+
+    // 3. Draw the player marker at the iso origin so its position is visible.
+    let canvas = window.canvas_mut();
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(255, 220, 60));
+    let _ = canvas.fill_rect(Rect::new(center_x - 4, center_y - 4, 8, 8));
+
+    // 4. Status line so it's obvious this is no longer the green-square stub.
+    let mode = if game_state.is_town { "Town (Tristram)" } else { "Dungeon" };
+    let has_art = if game_state.level_data.is_some() { "real tiles ON" } else { "checkerboard only" };
+    println!("[DrawAndBlit] mode={} {} (tick {})", mode, has_art, game_state.game_tick);
 
     window.present();
+}
+
+/// Logical render resolution. The canvas is configured with
+/// `set_logical_size(640, 480)` in main.rs, so all drawing happens in this
+/// coordinate space and SDL scales it to the physical window.
+const LOGICAL_WIDTH: u32 = 640;
+const LOGICAL_HEIGHT: u32 = 480;
+
+/// Fill a 64x32 isometric diamond centred at (cx, cy) using horizontal spans.
+/// This is the floor-cell shape; used for the checkerboard.
+fn fill_diamond(
+    canvas: &mut sdl2::render::Canvas<sdl2::video::Window>,
+    cx: i32,
+    cy: i32,
+    color: sdl2::pixels::Color,
+) {
+    canvas.set_draw_color(color);
+    let half_w = TILE_WIDTH / 2; // 32
+    let half_h = TILE_HEIGHT / 2; // 16
+    for dy in -half_h..=half_h {
+        // width grows linearly toward the centre, shrinks toward the edges
+        let w = half_w - (dy.abs() * half_w / half_h);
+        if w > 0 {
+            let y = cy + dy;
+            let _ = canvas.draw_line((cx - w, y), (cx + w, y));
+        }
+    }
+}
+
+/// Decode town floor tiles from the loaded `DungeonLevelData` and blit them at
+/// their isometric screen positions.
+///
+/// For each visible tile we decode a CEL frame to a 32x32 RGBA buffer (Square
+/// type), upload it as a streaming texture, and copy it to the tile's screen
+/// position. This is slow (re-decodes every frame) but sufficient to prove the
+/// rendering chain; a real implementation caches textures per frame index.
+fn draw_real_tiles(
+    window: &mut GameWindow,
+    camera: IsoPoint,
+    level: &crate::engine::dungeon::DungeonLevelData,
+    grid_w: i32,
+    grid_h: i32,
+) -> Result<()> {
+    let creator = window.canvas_mut().texture_creator();
+    let screen_center_x = LOGICAL_WIDTH as i32 / 2;
+    let screen_center_y = LOGICAL_HEIGHT as i32 / 2;
+
+    // Use a stable frame index from the level's CEL. Frame 1 is the first real
+    // tile graphic; we vary it by tile coordinate so the floor isn't uniform.
+    let mut drawn = 0u32;
+    let mut failed = 0u32;
+    for ty in 0..grid_h {
+        for tx in 0..grid_w {
+            // Pick a frame index deterministically from tile coords. Keep it
+            // within the first chunk of frames to avoid out-of-range tiles.
+            let frame = 1 + ((tx + ty * 3) as u16 % 40u16);
+            let rgba = match TileDecoder::decode_tile(
+                &level.level_cel,
+                frame,
+                TileType::Square,
+                &level.palette,
+            ) {
+                Some(px) => px,
+                None => {
+                    failed += 1;
+                    continue;
+                }
+            };
+
+            // Tile screen position (top-left of the 32x32 sub-tile), centred on
+            // the diamond cell like the floor tiles above.
+            let (sx, sy) = IsoPoint::new(tx, ty).to_screen(camera);
+            // Anchor so the tile sits on its diamond: shift up by TILE_HEIGHT.
+            let dst_x = screen_center_x + sx - (TILE_WIDTH / 2);
+            let dst_y = screen_center_y + sy - TILE_HEIGHT;
+
+            match rgba_to_texture(&creator, &rgba, 32, 32) {
+                Ok(tex) => {
+                    let _ = window.canvas_mut().copy(
+                        &tex,
+                        None,
+                        Rect::new(dst_x, dst_y, 32, 32),
+                    );
+                    drawn += 1;
+                }
+                Err(_) => {
+                    failed += 1;
+                }
+            }
+        }
+    }
+    if drawn > 0 {
+        println!("[DrawRealTiles] drew {} town tiles ({} skipped)", drawn, failed);
+    }
+    Ok(())
 }
 
 //------------------------------------------------------------------------------

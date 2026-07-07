@@ -1790,8 +1790,29 @@ fn start_game(ctx: &mut DiabloContext, class: game::player::PlayerClass) -> Resu
     };
     player.plr_active = true;
 
-    // Initialize GameState
-    let mut game_state = GameState::new(player, false, seed);
+    // Initialize GameState. We enter Tristram (town) directly so the player sees
+    // real level graphics: load the town MIN/SOL/TIL/CEL + palette from MPQ and
+    // stash it on the GameState for the renderer. (Recon note R5: previously
+    // this created is_town=false + a random Cathedral with no real art.)
+    let mut game_state = GameState::new(player, true, seed);
+    match engine::dungeon::DungeonLevelData::load_from_asset_manager(
+        &mut ctx.mpq_manager,
+        engine::dungeon::DungeonType::Town,
+    ) {
+        Ok(level) => {
+            println!(
+                "[StartGame] Loaded Tristram town data: {} CEL bytes, {} TIL entries",
+                level.level_cel.len(),
+                level.til.len()
+            );
+            game_state.level_data = Some(level);
+        }
+        Err(e) => {
+            // Non-fatal: the renderer will fall back to a debug floor if the
+            // town data is unavailable, so the game loop still runs.
+            println!("[StartGame] Could not load town level data ({}); renderer will use fallback", e);
+        }
+    }
 
     // Run the real game loop
     match run_game_loop(InterfaceMode::NewGame, &mut ctx.window, &mut game_state) {
