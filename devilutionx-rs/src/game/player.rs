@@ -1513,9 +1513,40 @@ pub enum SpellType {
     Invalid = 4,
 }
 
-/// Spell ID enumeration (simplified)
+/// Spell ID enumeration — **AUTHORITATIVE** Rust `SpellId`.
 ///
-/// **C++ Reference**: `SpellID` enum in Source/spelldat.h
+/// **C++ Reference**: `SpellID` enum in `Source/spelldat.h`.
+///
+/// # Why this enum is authoritative
+///
+/// This is the *only* `SpellId` whose discriminants line up 1:1 with the C++
+/// `SpellID` enum (`Null = 0`, `Firebolt = 1`, `Healing = 2`, …, `Invalid = -1`).
+/// All other `SpellId` definitions in the crate are legacy/deprecated and carry
+/// an off-by-one offset (see `player_exact::SpellId`, `spells::SpellId`,
+/// `panels::spell_book::SpellId`).
+///
+/// # Tech-debt note: duplicate `SpellId` enums
+///
+/// There are multiple `SpellId` enums in the crate:
+/// - **This one** (`game::player::SpellId`) — authoritative, C++-aligned.
+/// - `game::player_exact::SpellId` — legacy adapter; numbers `Firebolt = 0`
+///   (offset by 1 vs C++). Used by `player_exact::Player` struct fields
+///   (`_p_spell`, `_p_r_spell`, `_p_target_spell`) and by `spells_cast.rs`.
+/// - `game::spells::SpellId` and `panels::spell_book::SpellId` — separate
+///   copies (outside the scope of this cleanup; owned by other agents).
+///
+/// Unifying onto this enum was evaluated and **deferred as too risky**: the
+/// `spells_cast` / `player_exact` migration is structurally coupled (the
+/// `player_exact::Player` struct's spell fields are typed as
+/// `player_exact::SpellId`, and `spells_cast.rs` would need ~16 missing
+/// variants added here plus a full match rewrite). The bitmask offset is
+/// already reconciled at the single chokepoint `spells_cast::get_spell_bitmask`.
+/// To finish the unification: add the missing variants here, type the
+/// `player_exact::Player` spell fields as `player::SpellId`, then migrate
+/// `spells_cast.rs` and delete `player_exact::SpellId`.
+///
+/// Note: `None = -1` here corresponds to C++ `Invalid = -1`; C++ `Null = 0`
+/// is intentionally not represented in this (simplified) enum.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[repr(i8)]
 pub enum SpellId {

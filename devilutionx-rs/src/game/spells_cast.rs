@@ -257,16 +257,22 @@ fn is_readied_spell_valid(player: &Player) -> bool {
     }
 }
 
-/// Get bitmask for spell ID (for spell tracking bitfields)
+/// Get bitmask for spell ID (for spell tracking bitfields).
 ///
 /// Port of `GetSpellBitmask` from spells.h: `1ULL << (int8_t(spellId) - 1)`.
 ///
-/// Note: the authoritative C++ `SpellID` enum (`spelldat.h`) numbers spells
-/// starting at `Firebolt = 1`, so `spellId - 1` yields a 0-based bit index.
-/// The local `player_exact::SpellId` re-export numbers `Firebolt = 0`
-/// (with `None = -1`), so the effective bit index is just `spell as i8`.
-/// We guard `None` explicitly (returns 0 = no bits) and use wrapping shifts
-/// so the function is total rather than panicking on out-of-range inputs.
+/// # Tech-debt note: this is the single off-by-one reconciliation point
+///
+/// The authoritative C++ `SpellID` enum (`spelldat.h`) numbers spells starting
+/// at `Firebolt = 1`, so the C++ formula `spellId - 1` yields a 0-based bit
+/// index. This module still uses the legacy `player_exact::SpellId`, which
+/// numbers `Firebolt = 0` (offset by 1 vs C++ — see `player_exact::SpellId` and
+/// `player::SpellId` doc-comments). For that legacy enum the effective bit
+/// index is therefore just `spell as i8` (no `- 1`).
+///
+/// When `spells_cast.rs` is migrated to the authoritative `player::SpellId`
+/// (Firebolt = 1), restore the C++ form `1u64.wrapping_shl((spell as i8 - 1)
+/// as u32)` here, guarding `None = -1` so the subtraction does not overflow.
 pub const fn get_spell_bitmask(spell: SpellId) -> u64 {
     let idx = spell as i8;
     if idx < 0 {

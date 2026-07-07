@@ -91,7 +91,25 @@ pub enum CharacterAttribute {
     Vitality,
 }
 
-/// Spell ID - all spells in game
+/// Spell ID - all spells in game.
+///
+/// # Tech-debt note: DEPRECATED legacy adapter (off-by-one vs C++)
+///
+/// **Prefer `game::player::SpellId`**, which is the authoritative enum aligned
+/// 1:1 with the C++ `SpellID` (`Source/spelldat.h`, `Firebolt = 1`).
+///
+/// This enum is a legacy adapter whose discriminants are offset by 1 relative
+/// to C++ (`Firebolt = 0` here vs `Firebolt = 1` in C++ / `player::SpellId`).
+/// `None = -1` here coincidentally matches C++ `Invalid = -1`, but the real
+/// C++ `Null = 0` slot is occupied by `Firebolt` in this enum. `Invalid = -2`
+/// is an extra sentinel with no C++ counterpart.
+///
+/// It remains because the `player_exact::Player` struct's spell fields
+/// (`_p_spell`, `_p_target_spell`, `_p_r_spell`) and many `Player` methods are
+/// typed with it, and `spells_cast.rs` (which operates on `player_exact::Player`)
+/// transitively depends on it. The off-by-one is reconciled at the single
+/// chokepoint `spells_cast::get_spell_bitmask`. See the doc-comment on
+/// `player::SpellId` for the unification plan.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[repr(i8)]
 pub enum SpellId {
