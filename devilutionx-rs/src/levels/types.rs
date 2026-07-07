@@ -17,32 +17,18 @@ pub const MAXTHEMES: usize = 50;
 
 /// Maximum dungeon X coordinate (in tile space)
 ///
-/// # ⚠️ KNOWN BUG — value is wrong
-///
-/// C++ authoritative value is **40** (`Source/levels/gendung_defs.hpp: DMAXX 40`).
-/// `DMAXX`/`DMAXY` denote the dungeon **active region** (the range the
-/// generation algorithms loop over), whereas `MAXDUNX`/`MAXDUNY` (= 112, the
-/// formula `16 + 40*2 + 16`) is the **render region / array dimension**.
-///
-/// This constant is kept at 112 intentionally because the `levels::drlg_l4`
-/// port indexes `Dungeon.tiles` (which is `[[u8; DMAXY]; DMAXX]`) using
-/// `MAXDUNX`-sized loops — i.e. it treats the tile array as the full 112×112
-/// render region rather than the 40×40 active region. Setting this to 40
-/// therefore shrinks `Dungeon.tiles` to `[40][40]` and makes `drlg_l4`'s
-/// generation loops (`MakeDmt`, `FixTilesPatterns`, `AddWall`, `GeneralFix`,
-/// `ApplyShadows`, `FixCornerTiles`, `Substitution`, `PlaceMiniSet`, ...) panic
-/// with index-out-of-bounds (12 tests fail).
-///
-/// Until `drlg_l4` is refactored to loop over `DMAXX`/`DMAXY` (40) instead of
-/// `MAXDUNX`/`MAXDUNY` (112), this stays at 112. The flood-fill helpers in
-/// `drlg_l4` already work around this with a local `ACTIVE_DMAXX = 40`
-/// constant (see `flood_transparency_values`).
-pub const DMAXX: usize = 112;
+/// C++ authoritative value (`Source/levels/gendung_defs.hpp: DMAXX 40`).
+/// `DMAXX`/`DMAXY` denote the dungeon **active region** — the range the
+/// generation algorithms loop over and the dimension of `Dungeon.tiles`.
+/// `MAXDUNX`/`MAXDUNY` (= 112, the formula `16 + 40*2 + 16`) is the
+/// **render region / array dimension** used by the transparency grid
+/// (`dTransVal`) and other subtile-level arrays.
+pub const DMAXX: usize = 40;
 
 /// Maximum dungeon Y coordinate (in tile space)
 ///
-/// See `DMAXX`: kept at 112 (should be 40) until `drlg_l4` is fixed.
-pub const DMAXY: usize = 112;
+/// See `DMAXX`: the dungeon active-region Y dimension (40).
+pub const DMAXY: usize = 40;
 
 /// Maximum dungeon X coordinate (in subtile/piece space, 2x of tile space)
 pub const MAXDUNX: usize = 112;
@@ -317,8 +303,8 @@ mod tests {
 
     #[test]
     fn test_dungeon_constants() {
-        assert_eq!(DMAXX, 112);
-        assert_eq!(DMAXY, 112);
+        assert_eq!(DMAXX, 40);
+        assert_eq!(DMAXY, 40);
         assert_eq!(MAXDUNX, 112);
         assert_eq!(MAXDUNY, 112);
         assert_eq!(MAXTILES, 1379);

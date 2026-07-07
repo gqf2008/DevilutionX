@@ -228,13 +228,16 @@ pub struct Dungeon4Generator {
     rng_state: u32,
 
     /// Pre-dungeon grid (before conversion)
-    predungeon: [[u8; MAXDUNY]; MAXDUNX],
+    /// C++ `dungeon[DMAXX][DMAXY]` / `pdungeon[DMAXX][DMAXY]` — active region (40×40)
+    predungeon: [[u8; DMAXY]; DMAXX],
 
     /// Room occupancy bitmap (first quadrant only)
-    dungeon_mask: [[bool; MAXDUNY]; MAXDUNX],
+    /// C++ `Bitset2d<DMAXX, DMAXY> DungeonMask` — active region (40×40)
+    dungeon_mask: [[bool; DMAXY]; DMAXX],
 
     /// Protected tiles bitmap (quest rooms, cannot place decorations)
-    protected: [[bool; MAXDUNY]; MAXDUNX],
+    /// C++ `Bitset2d<DMAXX, DMAXY> Protected` — active region (40×40)
+    protected: [[bool; DMAXY]; DMAXX],
 
     /// Hall placement validity flags (20 possible hall positions)
     hall_ok: [bool; 20],
@@ -269,9 +272,9 @@ impl Dungeon4Generator {
     pub fn new() -> Self {
         Self {
             rng_state: 0,
-            predungeon: [[0; MAXDUNY]; MAXDUNX],
-            dungeon_mask: [[false; MAXDUNY]; MAXDUNX],
-            protected: [[false; MAXDUNY]; MAXDUNX],
+            predungeon: [[0; DMAXY]; DMAXX],
+            dungeon_mask: [[false; DMAXY]; DMAXX],
+            protected: [[false; DMAXY]; DMAXX],
             hall_ok: [false; 20],
             l4_hold: (0, 0),
             trans_val_counter: 1,
@@ -305,9 +308,9 @@ impl Dungeon4Generator {
     /// Initialize dungeon flags and grid
     /// C++ equivalent: InitDungeonFlags
     fn init_dungeon_flags(&mut self) {
-        self.predungeon = [[30; MAXDUNY]; MAXDUNX]; // Fill with default wall tile
-        self.dungeon_mask = [[false; MAXDUNY]; MAXDUNX]; // Clear room occupancy
-        self.protected = [[false; MAXDUNY]; MAXDUNX]; // Clear protected tiles
+        self.predungeon = [[30; DMAXY]; DMAXX]; // Fill with default wall tile
+        self.dungeon_mask = [[false; DMAXY]; DMAXX]; // Clear room occupancy
+        self.protected = [[false; DMAXY]; DMAXX]; // Clear protected tiles
         self.hall_ok = [false; 20];
         self.l4_hold = (0, 0);
     }
@@ -315,12 +318,12 @@ impl Dungeon4Generator {
     /// Mirror first quadrant to other 3 quadrants
     /// C++ equivalent: MirrorDungeonLayout (lines 300-311)
     fn mirror_dungeon_layout(&mut self) {
-        for y in 0..MAXDUNY / 2 {
-            for x in 0..MAXDUNX / 2 {
+        for y in 0..DMAXY / 2 {
+            for x in 0..DMAXX / 2 {
                 if self.dungeon_mask[x][y] {
-                    self.dungeon_mask[x][MAXDUNY - 1 - y] = true; // Top-right
-                    self.dungeon_mask[MAXDUNX - 1 - x][y] = true; // Bottom-left
-                    self.dungeon_mask[MAXDUNX - 1 - x][MAXDUNY - 1 - y] = true; // Bottom-right
+                    self.dungeon_mask[x][DMAXY - 1 - y] = true; // Top-right
+                    self.dungeon_mask[DMAXX - 1 - x][y] = true; // Bottom-left
+                    self.dungeon_mask[DMAXX - 1 - x][DMAXY - 1 - y] = true; // Bottom-right
                 }
             }
         }
@@ -329,8 +332,8 @@ impl Dungeon4Generator {
     /// Convert dungeon_mask to dungeon tiles using L4_CONV_TABLE
     /// C++ equivalent: MakeDmt (lines 313-321)
     fn make_dmt(&self, dungeon: &mut Dungeon) {
-        for y in 0..MAXDUNY - 1 {
-            for x in 0..MAXDUNX - 1 {
+        for y in 0..DMAXY - 1 {
+            for x in 0..DMAXX - 1 {
                 // 2×2 pattern to index (bit pattern: bottom-right, bottom-left, top-right, top-left)
                 let val = ((self.dungeon_mask[x + 1][y + 1] as u8) << 3)
                         | ((self.dungeon_mask[x][y + 1] as u8) << 2)
@@ -344,17 +347,17 @@ impl Dungeon4Generator {
     /// Check if horizontal wall can be placed
     /// C++ equivalent: HorizontalWallOk (lines 323-341)
     fn horizontal_wall_ok(&self, dungeon: &Dungeon, i: usize, j: usize) -> Option<usize> {
-        if i >= MAXDUNX - 1 || j >= MAXDUNY { return None; }
+        if i >= DMAXX - 1 || j >= DMAXY { return None; }
 
         let mut x = 1;
-        while i + x < MAXDUNX && dungeon.tiles[i + x][j] == 6 {
+        while i + x < DMAXX && dungeon.tiles[i + x][j] == 6 {
             if self.protected[i + x][j] { break; }
             if j == 0 || dungeon.tiles[i + x][j - 1] != 6 { break; }
-            if j >= MAXDUNY - 1 || dungeon.tiles[i + x][j + 1] != 6 { break; }
+            if j >= DMAXY - 1 || dungeon.tiles[i + x][j + 1] != 6 { break; }
             x += 1;
         }
 
-        if i + x < MAXDUNX {
+        if i + x < DMAXX {
             let end_tile = dungeon.tiles[i + x][j];
             if matches!(end_tile, 10 | 12 | 13 | 15 | 16 | 21 | 22) && x > 3 {
                 return Some(x);
@@ -367,17 +370,17 @@ impl Dungeon4Generator {
     /// Check if vertical wall can be placed
     /// C++ equivalent: VerticalWallOk (lines 344-362)
     fn vertical_wall_ok(&self, dungeon: &Dungeon, i: usize, j: usize) -> Option<usize> {
-        if i >= MAXDUNX || j >= MAXDUNY - 1 { return None; }
+        if i >= DMAXX || j >= DMAXY - 1 { return None; }
 
         let mut y = 1;
-        while j + y < MAXDUNY && dungeon.tiles[i][j + y] == 6 {
+        while j + y < DMAXY && dungeon.tiles[i][j + y] == 6 {
             if self.protected[i][j + y] { break; }
             if i == 0 || dungeon.tiles[i - 1][j + y] != 6 { break; }
-            if i >= MAXDUNX - 1 || dungeon.tiles[i + 1][j + y] != 6 { break; }
+            if i >= DMAXX - 1 || dungeon.tiles[i + 1][j + y] != 6 { break; }
             y += 1;
         }
 
-        if j + y < MAXDUNY {
+        if j + y < DMAXY {
             let end_tile = dungeon.tiles[i][j + y];
             if matches!(end_tile, 8 | 9 | 11 | 14 | 15 | 16 | 21 | 23) && y > 3 {
                 return Some(y);
@@ -390,7 +393,7 @@ impl Dungeon4Generator {
     /// Place horizontal wall with door
     /// C++ equivalent: HorizontalWall (lines 365-405)
     fn horizontal_wall(&mut self, dungeon: &mut Dungeon, i: usize, j: usize, dx: usize) {
-        if i >= MAXDUNX || j >= MAXDUNY { return; }
+        if i >= DMAXX || j >= DMAXY { return; }
 
         // Convert start tile
         match dungeon.tiles[i][j] {
@@ -402,13 +405,13 @@ impl Dungeon4Generator {
 
         // Fill wall (horizontal floor tiles)
         for xx in 1..dx {
-            if i + xx < MAXDUNX {
+            if i + xx < DMAXX {
                 dungeon.tiles[i + xx][j] = 2;
             }
         }
 
         // Convert end tile
-        if i + dx < MAXDUNX {
+        if i + dx < DMAXX {
             match dungeon.tiles[i + dx][j] {
                 15 => dungeon.tiles[i + dx][j] = 14,
                 10 => dungeon.tiles[i + dx][j] = 17,
@@ -421,7 +424,7 @@ impl Dungeon4Generator {
         // Place door (random position, 3 tiles: left, center, right)
         if dx > 3 {
             let xx = self.random_range(0, dx - 3) + 1;
-            if i + xx + 2 < MAXDUNX {
+            if i + xx + 2 < DMAXX {
                 dungeon.tiles[i + xx][j] = 57; // Door left
                 dungeon.tiles[i + xx + 2][j] = 56; // Door right
                 dungeon.tiles[i + xx + 1][j] = 60; // Door center
@@ -442,7 +445,7 @@ impl Dungeon4Generator {
     /// Place vertical wall with door
     /// C++ equivalent: VerticalWall (lines 407-458)
     fn vertical_wall(&mut self, dungeon: &mut Dungeon, i: usize, j: usize, dy: usize) {
-        if i >= MAXDUNX || j >= MAXDUNY { return; }
+        if i >= DMAXX || j >= DMAXY { return; }
 
         // Convert start tile
         match dungeon.tiles[i][j] {
@@ -454,13 +457,13 @@ impl Dungeon4Generator {
 
         // Fill wall (vertical floor tiles)
         for yy in 1..dy {
-            if j + yy < MAXDUNY {
+            if j + yy < DMAXY {
                 dungeon.tiles[i][j + yy] = 1;
             }
         }
 
         // Convert end tile
-        if j + dy < MAXDUNY {
+        if j + dy < DMAXY {
             match dungeon.tiles[i][j + dy] {
                 11 => dungeon.tiles[i][j + dy] = 17,
                 9 => dungeon.tiles[i][j + dy] = 10,
@@ -474,7 +477,7 @@ impl Dungeon4Generator {
         // Place door (random position, 3 tiles: top, center, bottom)
         if dy > 3 {
             let yy = self.random_range(0, dy - 3) + 1;
-            if j + yy + 2 < MAXDUNY {
+            if j + yy + 2 < DMAXY {
                 dungeon.tiles[i][j + yy] = 53; // Door top
                 dungeon.tiles[i][j + yy + 2] = 52; // Door bottom
                 dungeon.tiles[i][j + yy + 1] = 6; // Door center (floor)
@@ -495,8 +498,8 @@ impl Dungeon4Generator {
     /// Add horizontal/vertical walls (halls) between rooms
     /// C++ equivalent: AddWall (lines 459-479)
     fn add_wall(&mut self, dungeon: &mut Dungeon) {
-        for j in 1..MAXDUNY - 1 {
-            for i in 1..MAXDUNX - 1 {
+        for j in 1..DMAXY - 1 {
+            for i in 1..DMAXX - 1 {
                 // Try horizontal wall
                 if dungeon.tiles[i][j] == 6
                     && dungeon.tiles[i - 1][j] == 6
@@ -523,9 +526,9 @@ impl Dungeon4Generator {
     /// C++ equivalent: FixTilesPatterns (lines 481-691, 211 lines of pattern matching rules)
     fn fix_tiles_patterns(&mut self, dungeon: &mut Dungeon) {
         // Pass 1: Basic transitions (2→5, 2→13, 1→14)
-        for j in 0..MAXDUNY {
-            for i in 0..MAXDUNX {
-                if i + 1 < MAXDUNX {
+        for j in 0..DMAXY {
+            for i in 0..DMAXX {
+                if i + 1 < DMAXX {
                     if dungeon.tiles[i][j] == 2 && dungeon.tiles[i + 1][j] == 6 {
                         dungeon.tiles[i + 1][j] = 5;
                     }
@@ -533,7 +536,7 @@ impl Dungeon4Generator {
                         dungeon.tiles[i + 1][j] = 13;
                     }
                 }
-                if j + 1 < MAXDUNY {
+                if j + 1 < DMAXY {
                     if dungeon.tiles[i][j] == 1 && dungeon.tiles[i][j + 1] == 2 {
                         dungeon.tiles[i][j + 1] = 14;
                     }
@@ -542,9 +545,9 @@ impl Dungeon4Generator {
         }
 
         // Pass 2: Extended transitions (74 rules)
-        for j in 0..MAXDUNY {
-            for i in 0..MAXDUNX {
-                if i + 1 < MAXDUNX {
+        for j in 0..DMAXY {
+            for i in 0..DMAXX {
+                if i + 1 < DMAXX {
                     if dungeon.tiles[i][j] == 2 && dungeon.tiles[i + 1][j] == 6 {
                         dungeon.tiles[i + 1][j] = 2;
                     }
@@ -561,7 +564,7 @@ impl Dungeon4Generator {
                         dungeon.tiles[i + 1][j] = 15;
                     }
                 }
-                if j + 1 < MAXDUNY {
+                if j + 1 < DMAXY {
                     if dungeon.tiles[i][j] == 6 && dungeon.tiles[i][j + 1] == 13 {
                         dungeon.tiles[i][j + 1] = 16;
                     }
@@ -578,16 +581,16 @@ impl Dungeon4Generator {
         }
 
         // Pass 3: Complex patterns (94 rules)
-        for j in 0..MAXDUNY {
-            for i in 0..MAXDUNX {
-                if j + 1 < MAXDUNY {
+        for j in 0..DMAXY {
+            for i in 0..DMAXX {
+                if j + 1 < DMAXY {
                     if dungeon.tiles[i][j] == 13 && dungeon.tiles[i][j + 1] == 30 {
                         dungeon.tiles[i][j + 1] = 27;
                     }
                     if dungeon.tiles[i][j] == 1 && dungeon.tiles[i][j + 1] == 30 {
                         dungeon.tiles[i][j + 1] = 27;
                     }
-                    if dungeon.tiles[i][j] == 16 && dungeon.tiles[i][j + 1] == 30 && i + 1 < MAXDUNX && j + 1 < MAXDUNY && dungeon.tiles[i + 1][j + 1] == 30 {
+                    if dungeon.tiles[i][j] == 16 && dungeon.tiles[i][j + 1] == 30 && i + 1 < DMAXX && j + 1 < DMAXY && dungeon.tiles[i + 1][j + 1] == 30 {
                         dungeon.tiles[i][j + 1] = 27;
                     }
                     if dungeon.tiles[i][j] == 21 && dungeon.tiles[i][j + 1] == 2 {
@@ -664,7 +667,7 @@ impl Dungeon4Generator {
                     }
                 }
 
-                if i + 1 < MAXDUNX {
+                if i + 1 < DMAXX {
                     if dungeon.tiles[i][j] == 27 && dungeon.tiles[i + 1][j] == 30 {
                         dungeon.tiles[i + 1][j] = 19;
                     }
@@ -683,7 +686,7 @@ impl Dungeon4Generator {
                     if dungeon.tiles[i][j] == 22 && dungeon.tiles[i + 1][j] == 1 {
                         dungeon.tiles[i + 1][j] = 16;
                     }
-                    if i + 1 < MAXDUNX && j + 1 < MAXDUNY {
+                    if i + 1 < DMAXX && j + 1 < DMAXY {
                         if dungeon.tiles[i][j] == 6 && dungeon.tiles[i + 1][j] == 27 && dungeon.tiles[i + 1][j + 1] != 0 {
                             dungeon.tiles[i + 1][j] = 22;
                         }
@@ -691,12 +694,12 @@ impl Dungeon4Generator {
                     if dungeon.tiles[i][j] == 22 && dungeon.tiles[i + 1][j] == 30 {
                         dungeon.tiles[i + 1][j] = 19;
                     }
-                    if i + 1 < MAXDUNX && j > 0 {
+                    if i + 1 < DMAXX && j > 0 {
                         if dungeon.tiles[i][j] == 21 && dungeon.tiles[i + 1][j] == 1 && dungeon.tiles[i + 1][j - 1] == 1 {
                             dungeon.tiles[i + 1][j] = 13;
                         }
                     }
-                    if i + 1 < MAXDUNX && j + 1 < MAXDUNY {
+                    if i + 1 < DMAXX && j + 1 < DMAXY {
                         if dungeon.tiles[i][j] == 14 && dungeon.tiles[i + 1][j] == 30 && dungeon.tiles[i][j + 1] == 6 {
                             dungeon.tiles[i + 1][j] = 28;
                         }
@@ -704,12 +707,12 @@ impl Dungeon4Generator {
                             dungeon.tiles[i][j + 1] = 27;
                         }
                     }
-                    if i + 1 < MAXDUNX && j > 0 {
+                    if i + 1 < DMAXX && j > 0 {
                         if dungeon.tiles[i][j] == 6 && dungeon.tiles[i + 1][j] == 30 && dungeon.tiles[i + 1][j - 1] == 6 {
                             dungeon.tiles[i + 1][j] = 21;
                         }
                     }
-                    if i + 1 < MAXDUNX && j + 1 < MAXDUNY {
+                    if i + 1 < DMAXX && j + 1 < DMAXY {
                         if dungeon.tiles[i][j] == 2 && dungeon.tiles[i + 1][j] == 27 && dungeon.tiles[i + 1][j + 1] == 9 {
                             dungeon.tiles[i + 1][j] = 29;
                         }
@@ -717,7 +720,7 @@ impl Dungeon4Generator {
                     if dungeon.tiles[i][j] == 9 && dungeon.tiles[i + 1][j] == 15 {
                         dungeon.tiles[i + 1][j] = 14;
                     }
-                    if i + 1 < MAXDUNX && j + 1 < MAXDUNY {
+                    if i + 1 < DMAXX && j + 1 < DMAXY {
                         if dungeon.tiles[i][j] == 15 && dungeon.tiles[i + 1][j] == 27 && dungeon.tiles[i + 1][j + 1] == 2 {
                             dungeon.tiles[i + 1][j] = 29;
                         }
@@ -725,7 +728,7 @@ impl Dungeon4Generator {
                     if dungeon.tiles[i][j] == 19 && dungeon.tiles[i + 1][j] == 18 {
                         dungeon.tiles[i + 1][j] = 24;
                     }
-                    if i + 1 < MAXDUNX && j > 0 {
+                    if i + 1 < DMAXX && j > 0 {
                         if dungeon.tiles[i][j] == 19 && dungeon.tiles[i + 1][j] == 19 && dungeon.tiles[i + 1][j - 1] == 30 {
                             dungeon.tiles[i + 1][j] = 24;
                         }
@@ -741,7 +744,7 @@ impl Dungeon4Generator {
                     if dungeon.tiles[i][j] == 15 && dungeon.tiles[i + 1][j] == 30 {
                         dungeon.tiles[i + 1][j] = 28;
                     }
-                    if i + 2 < MAXDUNX && j > 0 && j + 1 < MAXDUNY {
+                    if i + 2 < DMAXX && j > 0 && j + 1 < DMAXY {
                         if dungeon.tiles[i][j] == 19 && dungeon.tiles[i + 2][j] == 2 && dungeon.tiles[i + 1][j - 1] == 18 && dungeon.tiles[i + 1][j + 1] == 1 {
                             dungeon.tiles[i + 1][j] = 17;
                         }
@@ -758,27 +761,27 @@ impl Dungeon4Generator {
                             dungeon.tiles[i + 1][j] = 17;
                         }
                     }
-                    if i + 2 < MAXDUNX && j > 0 {
+                    if i + 2 < DMAXX && j > 0 {
                         if dungeon.tiles[i][j] == 15 && dungeon.tiles[i + 1][j] == 28 && dungeon.tiles[i + 2][j] == 30 && dungeon.tiles[i + 1][j - 1] == 6 {
                             dungeon.tiles[i + 1][j] = 23;
                         }
                     }
-                    if i + 2 < MAXDUNX {
+                    if i + 2 < DMAXX {
                         if dungeon.tiles[i][j] == 14 && dungeon.tiles[i + 1][j] == 28 && dungeon.tiles[i + 2][j] == 1 {
                             dungeon.tiles[i + 1][j] = 23;
                         }
                     }
-                    if i + 1 < MAXDUNX && j + 1 < MAXDUNY {
+                    if i + 1 < DMAXX && j + 1 < DMAXY {
                         if dungeon.tiles[i][j] == 15 && dungeon.tiles[i + 1][j] == 27 && dungeon.tiles[i + 1][j + 1] == 30 {
                             dungeon.tiles[i + 1][j] = 29;
                         }
                     }
-                    if i + 1 < MAXDUNX && j > 0 {
+                    if i + 1 < DMAXX && j > 0 {
                         if dungeon.tiles[i][j] == 21 && dungeon.tiles[i + 1][j - 1] == 21 {
                             dungeon.tiles[i + 1][j] = 24;
                         }
                     }
-                    if i + 1 < MAXDUNX && j + 1 < MAXDUNY {
+                    if i + 1 < DMAXX && j + 1 < DMAXY {
                         if dungeon.tiles[i][j] == 2 && dungeon.tiles[i + 1][j] == 27 && dungeon.tiles[i + 1][j + 1] == 30 {
                             dungeon.tiles[i + 1][j] = 29;
                         }
@@ -786,7 +789,7 @@ impl Dungeon4Generator {
                     if dungeon.tiles[i][j] == 2 && dungeon.tiles[i + 1][j] == 18 {
                         dungeon.tiles[i + 1][j] = 25;
                     }
-                    if i + 2 < MAXDUNX {
+                    if i + 2 < DMAXX {
                         if dungeon.tiles[i][j] == 21 && dungeon.tiles[i + 1][j] == 9 && dungeon.tiles[i + 2][j] == 2 {
                             dungeon.tiles[i + 1][j] = 11;
                         }
@@ -799,12 +802,12 @@ impl Dungeon4Generator {
                             dungeon.tiles[i - 1][j] = 19;
                         }
                     }
-                    if i + 2 < MAXDUNX {
+                    if i + 2 < DMAXX {
                         if dungeon.tiles[i][j] == 21 && dungeon.tiles[i + 1][j] == 18 && dungeon.tiles[i + 2][j] == 30 {
                             dungeon.tiles[i + 1][j] = 24;
                         }
                     }
-                    if i + 1 < MAXDUNX && j + 1 < MAXDUNY {
+                    if i + 1 < DMAXX && j + 1 < DMAXY {
                         if dungeon.tiles[i][j] == 21 && dungeon.tiles[i + 1][j] == 9 && dungeon.tiles[i + 1][j + 1] == 1 {
                             dungeon.tiles[i + 1][j] = 16;
                         }
@@ -863,7 +866,7 @@ impl Dungeon4Generator {
                     if dungeon.tiles[i][j] == 19 && dungeon.tiles[i + 1][j] == 1 {
                         dungeon.tiles[i + 1][j] = 13;
                     }
-                    if i + 1 < MAXDUNX && j > 0 {
+                    if i + 1 < DMAXX && j > 0 {
                         if dungeon.tiles[i][j] == 19 && dungeon.tiles[i + 1][j] == 13 && dungeon.tiles[i + 1][j - 1] == 6 {
                             dungeon.tiles[i + 1][j] = 16;
                         }
@@ -876,12 +879,12 @@ impl Dungeon4Generator {
                     }
                 }
 
-                if i + 1 < MAXDUNX && j + 1 < MAXDUNY {
+                if i + 1 < DMAXX && j + 1 < DMAXY {
                     if dungeon.tiles[i][j] == 14 && dungeon.tiles[i + 1][j] == 30 && dungeon.tiles[i + 1][j + 1] == 30 {
                         dungeon.tiles[i + 1][j] = 23;
                     }
                 }
-                if i + 1 < MAXDUNX && j > 0 {
+                if i + 1 < DMAXX && j > 0 {
                     if dungeon.tiles[i][j] == 2 && dungeon.tiles[i + 1][j] == 28 && dungeon.tiles[i + 1][j - 1] == 6 {
                         dungeon.tiles[i + 1][j] = 23;
                     }
@@ -889,12 +892,12 @@ impl Dungeon4Generator {
                         dungeon.tiles[i + 1][j] = 24;
                     }
                 }
-                if i + 2 < MAXDUNX {
+                if i + 2 < DMAXX {
                     if dungeon.tiles[i][j] == 14 && dungeon.tiles[i + 1][j] == 23 && dungeon.tiles[i + 2][j] == 30 {
                         dungeon.tiles[i + 1][j] = 28;
                     }
                 }
-                if i + 2 < MAXDUNX && j > 0 {
+                if i + 2 < DMAXX && j > 0 {
                     if dungeon.tiles[i][j] == 14 && dungeon.tiles[i + 1][j] == 28 && dungeon.tiles[i + 2][j] == 30 && dungeon.tiles[i + 1][j - 1] == 6 {
                         dungeon.tiles[i + 1][j] = 23;
                     }
@@ -903,14 +906,14 @@ impl Dungeon4Generator {
         }
 
         // Pass 4: Final cleanup (43 rules)
-        for j in 0..MAXDUNY {
-            for i in 0..MAXDUNX {
-                if j + 2 < MAXDUNY {
+        for j in 0..DMAXY {
+            for i in 0..DMAXX {
+                if j + 2 < DMAXY {
                     if dungeon.tiles[i][j] == 21 && dungeon.tiles[i][j + 1] == 24 && dungeon.tiles[i][j + 2] == 1 {
                         dungeon.tiles[i][j + 1] = 17;
                     }
                 }
-                if i + 2 < MAXDUNX && j > 0 && j + 1 < MAXDUNY {
+                if i + 2 < DMAXX && j > 0 && j + 1 < DMAXY {
                     if dungeon.tiles[i][j] == 15 && dungeon.tiles[i + 1][j + 1] == 9 && dungeon.tiles[i + 1][j - 1] == 1 && dungeon.tiles[i + 2][j] == 16 {
                         dungeon.tiles[i + 1][j] = 29;
                     }
@@ -920,12 +923,12 @@ impl Dungeon4Generator {
                         dungeon.tiles[i - 1][j] = 2;
                     }
                 }
-                if i + 1 < MAXDUNX && j + 1 < MAXDUNY {
+                if i + 1 < DMAXX && j + 1 < DMAXY {
                     if dungeon.tiles[i][j] == 6 && dungeon.tiles[i + 1][j] == 18 && dungeon.tiles[i][j + 1] == 6 && dungeon.tiles[i + 1][j + 1] == 2 {
                         dungeon.tiles[i + 1][j] = 25;
                     }
                 }
-                if i + 1 < MAXDUNX && j > 0 && j + 1 < MAXDUNY {
+                if i + 1 < DMAXX && j > 0 && j + 1 < DMAXY {
                     if dungeon.tiles[i][j] == 6 && dungeon.tiles[i + 1][j] == 19 && dungeon.tiles[i][j + 1] == 6 && dungeon.tiles[i + 1][j - 1] == 2 && dungeon.tiles[i + 1][j + 1] == 6 {
                         dungeon.tiles[i + 1][j] = 21;
                     }
@@ -933,22 +936,22 @@ impl Dungeon4Generator {
                         dungeon.tiles[i + 1][j] = 21;
                     }
                 }
-                if i + 1 < MAXDUNX && j > 1 && j + 1 < MAXDUNY {
+                if i + 1 < DMAXX && j > 1 && j + 1 < DMAXY {
                     if dungeon.tiles[i][j] == 6 && dungeon.tiles[i + 1][j] == 19 && dungeon.tiles[i][j - 1] == 6 && dungeon.tiles[i + 1][j - 2] == 2 && dungeon.tiles[i + 1][j + 1] == 6 && dungeon.tiles[i + 1][j - 1] == 18 {
                         dungeon.tiles[i + 1][j] = 21;
                     }
                 }
-                if i + 1 < MAXDUNX && j > 0 {
+                if i + 1 < DMAXX && j > 0 {
                     if dungeon.tiles[i][j] == 2 && dungeon.tiles[i + 1][j] == 19 && dungeon.tiles[i + 1][j - 1] == 2 {
                         dungeon.tiles[i + 1][j] = 28;
                     }
                 }
-                if i + 2 < MAXDUNX && j > 0 && j + 1 < MAXDUNY {
+                if i + 2 < DMAXX && j > 0 && j + 1 < DMAXY {
                     if dungeon.tiles[i][j] == 6 && dungeon.tiles[i + 1][j] == 18 && dungeon.tiles[i + 2][j] == 2 && dungeon.tiles[i + 1][j - 1] == 6 && dungeon.tiles[i + 1][j + 1] == 2 {
                         dungeon.tiles[i + 1][j] = 25;
                     }
                 }
-                if i + 2 < MAXDUNX && j > 0 {
+                if i + 2 < DMAXX && j > 0 {
                     if dungeon.tiles[i][j] == 19 && dungeon.tiles[i + 1][j] == 18 && dungeon.tiles[i + 2][j] == 2 && dungeon.tiles[i + 1][j - 1] == 6 {
                         dungeon.tiles[i + 1][j] = 24;
                     }
@@ -956,7 +959,7 @@ impl Dungeon4Generator {
                         dungeon.tiles[i + 1][j] = 28;
                     }
                 }
-                if i + 1 < MAXDUNX && j + 1 < MAXDUNY {
+                if i + 1 < DMAXX && j + 1 < DMAXY {
                     if dungeon.tiles[i][j] == 2 && dungeon.tiles[i + 1][j] == 18 && dungeon.tiles[i][j + 1] == 6 && dungeon.tiles[i + 1][j + 1] == 2 {
                         dungeon.tiles[i + 1][j] = 25;
                     }
@@ -964,12 +967,12 @@ impl Dungeon4Generator {
                         dungeon.tiles[i + 1][j] = 25;
                     }
                 }
-                if i + 2 < MAXDUNX && j + 1 < MAXDUNY {
+                if i + 2 < DMAXX && j + 1 < DMAXY {
                     if dungeon.tiles[i][j] == 2 && dungeon.tiles[i + 1][j] == 18 && dungeon.tiles[i + 2][j] == 6 && dungeon.tiles[i + 1][j + 1] == 2 {
                         dungeon.tiles[i + 1][j] = 25;
                     }
                 }
-                if i + 2 < MAXDUNX && j > 0 && j + 1 < MAXDUNY {
+                if i + 2 < DMAXX && j > 0 && j + 1 < DMAXY {
                     if dungeon.tiles[i][j] == 2 && dungeon.tiles[i + 1][j] == 18 && dungeon.tiles[i + 2][j] == 6 && dungeon.tiles[i + 1][j - 1] == 6 && dungeon.tiles[i + 1][j + 1] == 2 {
                         dungeon.tiles[i + 1][j] = 25;
                     }
@@ -980,22 +983,22 @@ impl Dungeon4Generator {
                         dungeon.tiles[i + 1][j] = 25;
                     }
                 }
-                if i + 2 < MAXDUNX && j > 1 {
+                if i + 2 < DMAXX && j > 1 {
                     if dungeon.tiles[i][j] == 6 && dungeon.tiles[i + 1][j] == 19 && dungeon.tiles[i + 2][j] == 2 && dungeon.tiles[i + 1][j - 2] == 2 && dungeon.tiles[i + 1][j - 1] == 18 {
                         dungeon.tiles[i + 1][j] = 21;
                     }
                 }
-                if i + 2 < MAXDUNX && j > 0 && j + 1 < MAXDUNY {
+                if i + 2 < DMAXX && j > 0 && j + 1 < DMAXY {
                     if dungeon.tiles[i][j] == 2 && dungeon.tiles[i + 1][j] == 19 && dungeon.tiles[i + 2][j] == 6 && dungeon.tiles[i + 1][j - 1] == 2 && dungeon.tiles[i + 1][j + 1] == 6 {
                         dungeon.tiles[i + 1][j] = 28;
                     }
                 }
-                if i + 1 < MAXDUNX && j > 0 {
+                if i + 1 < DMAXX && j > 0 {
                     if dungeon.tiles[i][j] == 19 && dungeon.tiles[i + 1][j] == 18 && dungeon.tiles[i + 1][j - 1] == 6 {
                         dungeon.tiles[i + 1][j] = 24;
                     }
                 }
-                if i + 2 < MAXDUNX && j > 0 && j + 1 < MAXDUNY {
+                if i + 2 < DMAXX && j > 0 && j + 1 < DMAXY {
                     if dungeon.tiles[i][j] == 19 && dungeon.tiles[i + 1][j] == 18 && dungeon.tiles[i + 2][j] == 2 && dungeon.tiles[i + 1][j - 1] == 2 && dungeon.tiles[i + 1][j + 1] == 6 {
                         dungeon.tiles[i + 1][j] = 24;
                     }
@@ -1003,42 +1006,42 @@ impl Dungeon4Generator {
                         dungeon.tiles[i + 1][j] = 21;
                     }
                 }
-                if i + 2 < MAXDUNX && j > 1 && j + 1 < MAXDUNY {
+                if i + 2 < DMAXX && j > 1 && j + 1 < DMAXY {
                     if dungeon.tiles[i][j] == 6 && dungeon.tiles[i + 1][j] == 19 && dungeon.tiles[i + 2][j] == 2 && dungeon.tiles[i + 1][j - 2] == 2 && dungeon.tiles[i + 1][j - 1] == 18 && dungeon.tiles[i + 1][j + 1] == 6 {
                         dungeon.tiles[i + 1][j] = 21;
                     }
                 }
-                if i + 2 < MAXDUNX && j > 0 && j + 1 < MAXDUNY {
+                if i + 2 < DMAXX && j > 0 && j + 1 < DMAXY {
                     if dungeon.tiles[i][j] == 2 && dungeon.tiles[i + 1][j] == 19 && dungeon.tiles[i + 2][j] == 6 && dungeon.tiles[i + 1][j - 1] == 6 && dungeon.tiles[i + 1][j + 1] == 2 {
                         dungeon.tiles[i + 1][j] = 28;
                     }
                 }
-                if i + 1 < MAXDUNX && j > 0 && j + 1 < MAXDUNY {
+                if i + 1 < DMAXX && j > 0 && j + 1 < DMAXY {
                     if dungeon.tiles[i][j] == 2 && dungeon.tiles[i + 1][j] == 19 && dungeon.tiles[i + 1][j - 1] == 6 && dungeon.tiles[i + 1][j + 1] == 6 {
                         dungeon.tiles[i + 1][j] = 28;
                     }
                 }
-                if i + 2 < MAXDUNX && j > 0 {
+                if i + 2 < DMAXX && j > 0 {
                     if dungeon.tiles[i][j] == 6 && dungeon.tiles[i + 1][j] == 18 && dungeon.tiles[i + 2][j] == 2 && dungeon.tiles[i + 1][j - 1] == 6 {
                         dungeon.tiles[i + 1][j] = 24;
                     }
                 }
-                if i + 1 < MAXDUNX && j > 0 && j + 1 < MAXDUNY {
+                if i + 1 < DMAXX && j > 0 && j + 1 < DMAXY {
                     if dungeon.tiles[i][j] == 6 && dungeon.tiles[i + 1][j] == 19 && dungeon.tiles[i + 1][j - 1] == 6 && dungeon.tiles[i + 1][j + 1] == 2 {
                         dungeon.tiles[i + 1][j] = 21;
                     }
                 }
-                if i + 2 < MAXDUNX && j > 0 && j + 1 < MAXDUNY {
+                if i + 2 < DMAXX && j > 0 && j + 1 < DMAXY {
                     if dungeon.tiles[i][j] == 6 && dungeon.tiles[i + 1][j] == 19 && dungeon.tiles[i + 2][j] == 6 && dungeon.tiles[i + 1][j - 1] == 2 && dungeon.tiles[i + 1][j + 1] == 6 {
                         dungeon.tiles[i + 1][j] = 21;
                     }
                 }
-                if i + 1 < MAXDUNX && j > 0 {
+                if i + 1 < DMAXX && j > 0 {
                     if dungeon.tiles[i][j] == 6 && dungeon.tiles[i + 1][j] == 18 && dungeon.tiles[i + 1][j - 1] == 6 {
                         dungeon.tiles[i + 1][j] = 24;
                     }
                 }
-                if i + 2 < MAXDUNX && j > 0 {
+                if i + 2 < DMAXX && j > 0 {
                     if dungeon.tiles[i][j] == 6 && dungeon.tiles[i + 1][j] == 19 && dungeon.tiles[i + 2][j] == 2 && dungeon.tiles[i + 1][j - 1] == 6 {
                         dungeon.tiles[i + 1][j] = 21;
                     }
@@ -1052,8 +1055,8 @@ impl Dungeon4Generator {
     /// C++ equivalent: FindArea (line 941)
     fn find_area(&self) -> usize {
         let mut count = 0;
-        for y in 0..MAXDUNY / 2 {
-            for x in 0..MAXDUNX / 2 {
+        for y in 0..DMAXY / 2 {
+            for x in 0..DMAXX / 2 {
                 if self.dungeon_mask[x][y] {
                     count += 1;
                 }
@@ -1068,14 +1071,14 @@ impl Dungeon4Generator {
     fn place_miniset(&mut self, dungeon: &mut Dungeon, miniset: &Miniset) -> Option<(usize, usize)> {
         // Try random positions to place the miniset
         for _ in 0..100 {
-            let x = self.random_range(0, MAXDUNX - miniset.width - 1);
-            let y = self.random_range(0, MAXDUNY - miniset.height - 1);
+            let x = self.random_range(0, DMAXX - miniset.width - 1);
+            let y = self.random_range(0, DMAXY - miniset.height - 1);
 
             // Check if pattern matches
             let mut matches = true;
             for dy in 0..miniset.height {
                 for dx in 0..miniset.width {
-                    if x + dx >= MAXDUNX || y + dy >= MAXDUNY {
+                    if x + dx >= DMAXX || y + dy >= DMAXY {
                         matches = false;
                         break;
                     }
@@ -1092,7 +1095,7 @@ impl Dungeon4Generator {
                 // Place replacement tiles
                 for dy in 0..miniset.height {
                     for dx in 0..miniset.width {
-                        if x + dx < MAXDUNX && y + dy < MAXDUNY {
+                        if x + dx < DMAXX && y + dy < DMAXY {
                             dungeon.tiles[x + dx][y + dy] = miniset.replace[dy][dx];
                         }
                     }
@@ -1204,9 +1207,9 @@ impl Dungeon4Generator {
     /// General tile fixes for final polish
     /// C++ equivalent: GeneralFix (line 1083)
     fn general_fix(&mut self, dungeon: &mut Dungeon) {
-        for j in 0..MAXDUNY {
-            for i in 0..MAXDUNX {
-                if i + 1 < MAXDUNX {
+        for j in 0..DMAXY {
+            for i in 0..DMAXX {
+                if i + 1 < DMAXX {
                     if dungeon.tiles[i][j] == 21 && dungeon.tiles[i + 1][j] == 10 {
                         dungeon.tiles[i + 1][j] = 17;
                     }
@@ -1214,7 +1217,7 @@ impl Dungeon4Generator {
                         dungeon.tiles[i + 1][j] = 12;
                     }
                 }
-                if j + 1 < MAXDUNY {
+                if j + 1 < DMAXY {
                     if dungeon.tiles[i][j] == 17 && dungeon.tiles[i][j + 1] == 5 {
                         dungeon.tiles[i][j + 1] = 12;
                     }
@@ -1226,8 +1229,8 @@ impl Dungeon4Generator {
     /// Apply shadow tiles to dungeon edges
     /// C++ equivalent: ApplyShadowsPatterns (line 146)
     fn apply_shadows_patterns(&mut self, dungeon: &mut Dungeon) {
-        for y in 1..MAXDUNY {
-            for x in 1..MAXDUNX {
+        for y in 1..DMAXY {
+            for x in 1..DMAXX {
                 if matches!(dungeon.tiles[x][y], 3 | 4 | 8 | 15) {
                     if dungeon.tiles[x - 1][y] == 6 {
                         dungeon.tiles[x - 1][y] = 47; // Shadow left
@@ -1243,8 +1246,8 @@ impl Dungeon4Generator {
     /// Fix corner tile transitions for polish
     /// C++ equivalent: FixCornerTiles (line 1057)
     fn fix_corner_tiles(&mut self, dungeon: &mut Dungeon) {
-        for j in 1..MAXDUNY - 1 {
-            for i in 1..MAXDUNX - 1 {
+        for j in 1..DMAXY - 1 {
+            for i in 1..DMAXX - 1 {
                 if dungeon.tiles[i][j] >= 18 && dungeon.tiles[i][j] <= 30 {
                     if dungeon.tiles[i + 1][j] < 18 || dungeon.tiles[i][j + 1] < 18 {
                         dungeon.tiles[i][j] += 98;
@@ -1257,8 +1260,8 @@ impl Dungeon4Generator {
     /// Replace basic tiles with decorated variants
     /// C++ equivalent: Substitution (uses L4BTYPES)
     fn substitution(&mut self, dungeon: &mut Dungeon) {
-        for y in 0..MAXDUNY {
-            for x in 0..MAXDUNX {
+        for y in 0..DMAXY {
+            for x in 0..DMAXX {
                 let tile = dungeon.tiles[x][y] as usize;
                 if tile < L4BTYPES.len() {
                     let base_tile = L4BTYPES[tile];
@@ -1280,9 +1283,9 @@ impl Dungeon4Generator {
             for x in 0..14 {
                 // Protect 4 quadrants around L4Hold
                 self.protected[hold_x + x][hold_y + y] = true;
-                self.protected[MAXDUNX - 1 - x - hold_x][hold_y + y] = true;
-                self.protected[hold_x + x][MAXDUNY - 1 - y - hold_y] = true;
-                self.protected[MAXDUNX - 1 - x - hold_x][MAXDUNY - 1 - y - hold_y] = true;
+                self.protected[DMAXX - 1 - x - hold_x][hold_y + y] = true;
+                self.protected[hold_x + x][DMAXY - 1 - y - hold_y] = true;
+                self.protected[DMAXX - 1 - x - hold_x][DMAXY - 1 - y - hold_y] = true;
             }
         }
     }
@@ -1300,7 +1303,7 @@ impl Dungeon4Generator {
         }
         let i = (x - 16) / 2;
         let j = (y - 16) / 2;
-        if i >= MAXDUNX || j >= MAXDUNY {
+        if i >= DMAXX || j >= DMAXY {
             return false;
         }
         dungeon.tiles[i][j] == floor_id
@@ -1357,21 +1360,17 @@ impl Dungeon4Generator {
     /// Flood fill transparency values for lighting calculations
     /// C++ equivalent: FloodTransparencyValues (gendung.cpp line 820)
     ///
-    /// Iterates over the *active* dungeon region (DMAXX/DMAXY == 40 in C++),
+    /// Iterates over the active dungeon region (`DMAXX`/`DMAXY` == 40),
     /// mapping each active tile `(i, j)` to the rendering/transparency grid
-    /// at `(16 + i*2, 16 + j*2)`. The local `levels::types::DMAXX`/`DMAXY`
-    /// constants are incorrectly set to 112 (the full `MAXDUN*` array size),
-    /// so we use the C++-accurate active-region size here to avoid indexing
-    /// `trans_val` (which is `[MAXDUNX][MAXDUNY] == [112][112]`) out of
-    /// bounds and to match the original scan range.
+    /// at `(16 + i*2, 16 + j*2)`. `trans_val` is `[MAXDUNX][MAXDUNY]`
+    /// (`[112][112]`), and the doubled coordinates stay within bounds
+    /// (`16 + (40-1)*2 == 94 < 112`).
     fn flood_transparency_values(&mut self, dungeon: &mut Dungeon, floor_id: u8) {
-        const ACTIVE_DMAXX: usize = 40;
-        const ACTIVE_DMAXY: usize = 40;
         self.trans_val_counter = 1;
         let mut yy = 16;
-        for j in 0..ACTIVE_DMAXY {
+        for j in 0..DMAXY {
             let mut xx = 16;
-            for i in 0..ACTIVE_DMAXX {
+            for i in 0..DMAXX {
                 if dungeon.tiles[i][j] == floor_id && dungeon.trans_val[xx][yy] == 0 {
                     self.fill_transparency_recursive(dungeon, xx, yy, floor_id);
                     // C++ `TransVal` is `int8_t` and relies on implicit
@@ -1924,11 +1923,11 @@ impl Dungeon4Generator {
     /// C++ equivalent: MapRoom
     fn map_room(&mut self, room: Room) {
         for y in 0..room.height {
-            if room.y + y < 0 || room.y + y >= (MAXDUNY / 2) as i32 {
+            if room.y + y < 0 || room.y + y >= (DMAXY / 2) as i32 {
                 continue;
             }
             for x in 0..room.width {
-                if room.x + x < 0 || room.x + x >= (MAXDUNX / 2) as i32 {
+                if room.x + x < 0 || room.x + x >= (DMAXX / 2) as i32 {
                     continue;
                 }
                 self.dungeon_mask[(room.x + x) as usize][(room.y + y) as usize] = true;
@@ -1948,7 +1947,7 @@ impl Dungeon4Generator {
                 let px = room.x + x;
                 let py = room.y + y;
 
-                if px < 0 || px >= (MAXDUNX / 2) as i32 || py < 0 || py >= (MAXDUNY / 2) as i32 {
+                if px < 0 || px >= (DMAXX / 2) as i32 || py < 0 || py >= (DMAXY / 2) as i32 {
                     return false;
                 }
 
@@ -2015,8 +2014,8 @@ impl Dungeon4Generator {
             let clamped_room = Room::new(
                 room1.x,
                 room1.y,
-                std::cmp::min(MAXDUNX as i32 - room1.x, room1.width),
-                std::cmp::min(MAXDUNY as i32 - room1.y, room1.height),
+                std::cmp::min(DMAXX as i32 - room1.x, room1.width),
+                std::cmp::min(DMAXY as i32 - room1.y, room1.height),
             );
             self.map_room(clamped_room);
         }
@@ -2072,10 +2071,10 @@ impl Dungeon4Generator {
         }
 
         // Calculate random position in first quadrant
-        let xmin = (MAXDUNX / 2 - room_width) / 2;
-        let xmax = MAXDUNX / 2 - 1 - room_width;
-        let ymin = (MAXDUNY / 2 - room_height) / 2;
-        let ymax = MAXDUNY / 2 - 1 - room_height;
+        let xmin = (DMAXX / 2 - room_width) / 2;
+        let xmax = DMAXX / 2 - 1 - room_width;
+        let ymin = (DMAXY / 2 - room_height) / 2;
+        let ymax = DMAXY / 2 - 1 - room_height;
 
         let random_x = self.random_range(0, xmax - xmin + 1) + xmin;
         let random_y = self.random_range(0, ymax - ymin + 1) + ymin;
@@ -2446,8 +2445,8 @@ mod tests {
 
         // Check that at least some rooms were created
         let mut room_count = 0;
-        for y in 0..MAXDUNY / 2 {
-            for x in 0..MAXDUNX / 2 {
+        for y in 0..DMAXY / 2 {
+            for x in 0..DMAXX / 2 {
                 if generator.dungeon_mask[x][y] {
                     room_count += 1;
                 }
@@ -2455,7 +2454,7 @@ mod tests {
         }
 
         assert!(room_count > 0); // Should have created at least one room
-        assert!(room_count < (MAXDUNX / 2) * (MAXDUNY / 2)); // But not fill entire quadrant
+        assert!(room_count < (DMAXX / 2) * (DMAXY / 2)); // But not fill entire quadrant
     }
 
     #[test]
@@ -2482,8 +2481,8 @@ mod tests {
 
         // Should have created additional rooms through recursion
         let mut room_count = 0;
-        for y in 0..MAXDUNY / 2 {
-            for x in 0..MAXDUNX / 2 {
+        for y in 0..DMAXY / 2 {
+            for x in 0..DMAXX / 2 {
                 if generator.dungeon_mask[x][y] {
                     room_count += 1;
                 }
@@ -2508,9 +2507,9 @@ mod tests {
 
         // Check all 4 quadrants
         assert!(generator.dungeon_mask[5][5]); // Original (top-left quadrant)
-        assert!(generator.dungeon_mask[5][MAXDUNY - 1 - 5]); // Top-right
-        assert!(generator.dungeon_mask[MAXDUNX - 1 - 5][5]); // Bottom-left
-        assert!(generator.dungeon_mask[MAXDUNX - 1 - 5][MAXDUNY - 1 - 5]); // Bottom-right
+        assert!(generator.dungeon_mask[5][DMAXY - 1 - 5]); // Top-right
+        assert!(generator.dungeon_mask[DMAXX - 1 - 5][5]); // Bottom-left
+        assert!(generator.dungeon_mask[DMAXX - 1 - 5][DMAXY - 1 - 5]); // Bottom-right
     }
 
     #[test]
@@ -2533,7 +2532,7 @@ mod tests {
 
         // Pattern 0000 (binary) = 0 (decimal)
         // L4_CONV_TABLE[0] = 30 (wall tile)
-        generator.dungeon_mask = [[false; MAXDUNY]; MAXDUNX];
+        generator.dungeon_mask = [[false; DMAXY]; DMAXX];
         generator.make_dmt(&mut dungeon);
         assert_eq!(dungeon.tiles[0][0], 30);
     }
@@ -2772,8 +2771,8 @@ mod tests {
         let mut dungeon = Dungeon::new();
 
         // Fill dungeon with floor tiles
-        for y in 0..MAXDUNY {
-            for x in 0..MAXDUNX {
+        for y in 0..DMAXY {
+            for x in 0..DMAXX {
                 dungeon.tiles[x][y] = 6;
             }
         }
@@ -2891,9 +2890,9 @@ mod tests {
 
         // Check all 4 quadrants protected
         assert!(generator.protected[10][10]); // Top-left quad
-        assert!(generator.protected[MAXDUNX - 1 - 10][10]); // Top-right
-        assert!(generator.protected[10][MAXDUNY - 1 - 10]); // Bottom-left
-        assert!(generator.protected[MAXDUNX - 1 - 10][MAXDUNY - 1 - 10]); // Bottom-right
+        assert!(generator.protected[DMAXX - 1 - 10][10]); // Top-right
+        assert!(generator.protected[10][DMAXY - 1 - 10]); // Bottom-left
+        assert!(generator.protected[DMAXX - 1 - 10][DMAXY - 1 - 10]); // Bottom-right
     }
 
     #[test]

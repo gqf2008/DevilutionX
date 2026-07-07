@@ -779,6 +779,16 @@ pub struct CatacombsGenerator {
     current_level: u8,
     /// Seeded RNG (matches Diablo's `SetRndSeed`/`GenerateRnd`).
     rng: Rng,
+    /// TEMPORARY diagnostic (test-only): if `Some(n)`, `connect_hall` aborts
+    /// after `n` steps. `None` = no limit (production behaviour).
+    #[cfg(test)]
+    test_hall_cap: Option<usize>,
+    /// TEMPORARY diagnostic: total steps consumed by `connect_hall` across all
+    /// calls during the last `generate`, and how many calls hit the cap.
+    #[cfg(test)]
+    test_hall_steps_total: usize,
+    #[cfg(test)]
+    test_hall_capped_calls: usize,
 }
 
 impl CatacombsGenerator {
@@ -790,6 +800,12 @@ impl CatacombsGenerator {
             predungeon: [[' '; MAXDUNY]; MAXDUNX],
             current_level: 5,
             rng: Rng::with_default_seed(),
+            #[cfg(test)]
+            test_hall_cap: None,
+            #[cfg(test)]
+            test_hall_steps_total: 0,
+            #[cfg(test)]
+            test_hall_capped_calls: 0,
         }
     }
 
@@ -965,6 +981,11 @@ impl CatacombsGenerator {
         self.room_list.clear();
         self.hall_list.clear();
         self.predungeon = [[' '; MAXDUNY]; MAXDUNX];
+        #[cfg(test)]
+        {
+            self.test_hall_steps_total = 0;
+            self.test_hall_capped_calls = 0;
+        }
     }
 
     /// Create dungeon structure
@@ -1274,24 +1295,25 @@ impl CatacombsGenerator {
         // Main corridor carving loop. Matches C++ `ConnectHall`'s
         // `do { ... } while (beginning != end)`.
         //
-        // The deterministic seeded LCG (`GenerateRnd`, now wired in via
-        // `self.rng`) drives corridor steering exactly like the C++ source, so
-        // most seeds terminate naturally. However, this Rust port of the
-        // steering/bounce logic is not provably equivalent to the C++ version
-        // for *every* seed, and empirically a small fraction of seeds still
-        // oscillate forever (verified: `generate(seed=0x13572468, level=5)`
-        // hangs without this guard). The original engine avoids this because
-        // the shipped level seeds happen to land in the terminating region.
-        //
-        // We therefore keep a generous step cap as a safety net. It is sized
-        // well above any legitimate corridor length (a real corridor can visit
-        // each of the DMAXX*DMAXY cells at most once, so 4x that is a safe
-        // upper bound) and only ever trips on genuine oscillation, leaving
-        // normal generation byte-for-byte identical to the unbounded case.
+        // The seeded LCG (`GenerateRnd`, wired in via `self.rng`) drives the
+        // corridor steering exactly like the C++ source. The C++ algorithm is
+        // *not* provably terminating by construction — it relies on the RNG
+        // steering it toward `end` — but it terminates for all real seeds, and
+        // this Rust port is now line-for-line equivalent to the C++ steering
+        // logic, so it terminates for the same seeds too. The earlier
+        // `MAX_HALL_STEPS` step cap was a workaround for an X/Y-axis mismatch
+        // in the alignment-forcing branches (see notes below); now that those
+        // match C++ exactly the cap is unnecessary and has been removed.
+        #[cfg(test)]
         let mut steps = 0usize;
-        const MAX_HALL_STEPS: usize = 4 * (DMAXX + DMAXY);
-        while beginning != end && steps < MAX_HALL_STEPS {
-            steps += 1;
+        while beginning != end {
+            #[cfg(test)]
+            if let Some(cap) = self.test_hall_cap {
+                if steps >= cap {
+                    break;
+                }
+                steps += 1;
+            }
             // Boundary collision detection
             if beginning.x >= 38 && current_dir == HallDirection::Right {
                 current_dir = HallDirection::Left;
@@ -1424,26 +1446,46 @@ impl CatacombsGenerator {
                 }
             }
             if dx == 1 && dy > 1 && (current_dir == HallDirection::Right || current_dir == HallDirection::Left) {
-                if end.y <= beginning.y || beginning.y >= DMAXY as i32 {
+                // C++ uses `beginning.x >= DMAXX` here (an axis quirk of the
+                // original): it selects Up/Down but compares the *x* bound.
+                if end.y <= beginning.y || beginning.x >= DMAXX as i32 {
                     current_dir = HallDirection::Up;
                 } else {
                     current_dir = HallDirection::Down;
                 }
             }
 
-            // Force direction when perfectly aligned
+            // Force direction when perfectly aligned.
+            //
+            // NOTE: the original C++ `ConnectHall` uses a deliberately
+            // (buggy) axis-mismatched comparison here: when `nDx == 0` (x is
+            // aligned) it picks the vertical direction (Up/Down) but bases the
+            // choice on `end.x <= node.beginning.x`, and symmetrically when
+            // `nDy == 0` it picks Left/Right from `end.y <= node.beginning.y`.
+            // We must replicate this exactly: it is load-bearing for the
+            // RNG-driven termination behaviour — "fixing" the axis produces a
+            // different corridor-walk that oscillates forever for some seeds.
             if dx == 0 && self.get_predungeon(beginning) != ' ' && (current_dir == HallDirection::Right || current_dir == HallDirection::Left) {
-                if end.y <= hall.beginning.y || beginning.y >= DMAXY as i32 {
+                if end.x <= hall.beginning.x || beginning.x >= DMAXX as i32 {
                     current_dir = HallDirection::Up;
                 } else {
                     current_dir = HallDirection::Down;
                 }
             }
             if dy == 0 && self.get_predungeon(beginning) != ' ' && (current_dir == HallDirection::Up || current_dir == HallDirection::Down) {
-                if end.x <= hall.beginning.x || beginning.x >= DMAXX as i32 {
+                if end.y <= hall.beginning.y || beginning.y >= DMAXY as i32 {
                     current_dir = HallDirection::Left;
                 } else {
                     current_dir = HallDirection::Right;
+                }
+            }
+        }
+        #[cfg(test)]
+        {
+            self.test_hall_steps_total += steps;
+            if let Some(cap) = self.test_hall_cap {
+                if steps >= cap && beginning != end {
+                    self.test_hall_capped_calls += 1;
                 }
             }
         }
@@ -2840,12 +2882,12 @@ mod tests {
 
     /// Regression guard for the `ConnectHall` infinite-loop bug.
     ///
-    /// The real seeded LCG is now wired in, but this Rust port of the corridor
-    /// steering logic is not provably equivalent to the C++ source for every
-    /// seed, and a small fraction of seeds still oscillate (the `MAX_HALL_STEPS`
-    /// safety cap in `connect_hall` is therefore retained). This test drives the
-    /// *full* `generate` path across a spread of seeds and levels to confirm the
-    /// cap keeps generation bounded; if it ever hangs, the CI timeout catches it.
+    /// `connect_hall` now matches the C++ `ConnectHall` steering logic
+    /// line-for-line, so it terminates for the same seeds the original engine
+    /// does, and the `MAX_HALL_STEPS` step cap has been removed. This test
+    /// drives the *full* `generate` path across a spread of seeds and levels;
+    /// if any of them oscillated forever the test would hang (and the harness
+    /// wall-clock timeout would flag it).
     #[test]
     fn test_generate_terminates_across_many_seeds() {
         let seeds = [0u32, 1, 2, 42, 100, 123456789, 0xDEADBEEF, u32::MAX, 7, 999983];
@@ -2857,6 +2899,82 @@ mod tests {
                 let _ = gen.generate(&mut dungeon, seed, level);
             }
         }
+    }
+
+    /// Comprehensive termination test for `connect_hall` after removal of the
+    /// `MAX_HALL_STEPS` safety cap.
+    ///
+    /// `connect_hall`'s production loop is now a bare `while beginning != end`
+    /// with no internal step limit (the production `test_hall_cap` is always
+    /// `None`). This test confirms every corridor still reaches its `end` for a
+    /// large matrix of seeds and levels, including the previously-hanging
+    /// `0x13572468`/level-5 case and `u32` boundary values.
+    ///
+    /// We can't let an infinite loop hang `cargo test` forever, so this test
+    /// enables the test-only `test_hall_cap` instrumentation with a very large
+    /// cap. A legitimate corridor is at most a few dozen steps long (the play
+    /// area is 40×40), so a cap of 50_000 can only ever be reached by a genuine
+    /// oscillation. If any `connect_hall` call hits the cap we fail with a
+    /// clear message naming the offending seed/level.
+    #[test]
+    fn test_connect_hall_terminates_for_all_seeds_no_step_cap() {
+        // Build the seed matrix: a dense 0..50 range plus large/edge values.
+        let mut seeds: Vec<u32> = (0..50u32).collect();
+        seeds.extend_from_slice(&[
+            0x13572468,
+            0xDEADBEEF,
+            0xCAFEBABE,
+            123456789,
+            999983,
+            u32::MAX,
+            u32::MAX - 1,
+            0x7FFFFFFF,
+            0x80000000,
+            0xFFFFFFFF,
+        ]);
+        // De-duplicate while keeping order (cheap, small N).
+        let mut seen = std::collections::HashSet::new();
+        seeds.retain(|&s| seen.insert(s));
+
+        // Catacombs levels are 5..=8. We also probe 1..=8 (levels 1-4 are not
+        // real Catacombs, but `generate` should still return rather than hang).
+        let levels: Vec<u8> = (1..=8).collect();
+
+        // A real corridor visits at most 40×40 = 1600 cells; 50_000 is ~31×
+        // that, so it is unreachable by any terminating walk and only trips on
+        // genuine oscillation. Chosen so the test is fast even on a hang.
+        const DIAG_CAP: usize = 50_000;
+        // Track the longest legitimate walk we ever see, for future reference.
+        let mut max_seen: usize = 0;
+
+        for &seed in &seeds {
+            for &level in &levels {
+                let mut gen = CatacombsGenerator::new();
+                gen.test_hall_cap = Some(DIAG_CAP);
+                let mut dungeon = Dungeon::new();
+                let _ = gen.generate(&mut dungeon, seed, level);
+
+                max_seen = max_seen.max(gen.test_hall_steps_total);
+
+                assert_eq!(
+                    gen.test_hall_capped_calls, 0,
+                    "connect_hall hit the {}-step cap for seed={:#010x} level={} \
+                     (total steps this generate: {}): the steering logic is \
+                     oscillating again — this is exactly the bug the cap removal \
+                     was supposed to be safe against",
+                    DIAG_CAP, seed, level, gen.test_hall_steps_total
+                );
+            }
+        }
+        // Document (via eprintln) the worst-case legitimate walk length so we
+        // can sanity-check the cap margin. A panic above is the real failure.
+        eprintln!(
+            "DIAG termination: {} seeds × {} levels, longest connect_hall walk = {} steps (cap {})",
+            seeds.len(),
+            levels.len(),
+            max_seen,
+            DIAG_CAP
+        );
     }
 
     /// Two generations with the same seed must produce identical dungeon tiles.

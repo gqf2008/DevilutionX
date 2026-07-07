@@ -448,8 +448,9 @@ mod tests {
     #[test]
     fn test_set_get_tile() {
         let mut dungeon = Dungeon::new();
-        dungeon.set_tile(50, 50, 123);
-        assert_eq!(dungeon.get_tile(50, 50), 123);
+        // Use a coordinate inside the active region (DMAXX/DMAXY == 40).
+        dungeon.set_tile(20, 20, 123);
+        assert_eq!(dungeon.get_tile(20, 20), 123);
     }
 
     #[test]
