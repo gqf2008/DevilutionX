@@ -14,6 +14,7 @@
 use crate::engine::types::{Point, Displacement};
 use crate::levels::gendung::Dungeon;
 use crate::levels::types::{DungeonType, LevelEntry, DMAXX, DMAXY, MAXDUNX, MAXDUNY};
+use crate::utils::random::Rng;
 
 // =============================================================================
 // Constants
@@ -314,8 +315,13 @@ pub fn miniset_l6_isle5() -> Miniset {
 // =============================================================================
 
 pub struct CavesGenerator {
-    /// Random number generator state
-    rng_state: u32,
+    /// Seeded RNG (matches Diablo's `SetRndSeed`/`GenerateRnd`/`FlipCoin`).
+    ///
+    /// All randomness in the Caves generator flows through the three helpers
+    /// `random_range`, `flip_coin` and `flip_coin_n`, which delegate to this
+    /// `Rng`. This makes level generation bit-for-bit reproducible for a given
+    /// seed, matching the C++ engine (`Source/engine/random.cpp`).
+    rng: Rng,
     /// Predungeon grid (cellular automata workspace)
     predungeon: [[u8; MAXDUNY]; MAXDUNX],
     /// Lockout counter (for door placement)
@@ -325,7 +331,7 @@ pub struct CavesGenerator {
 impl CavesGenerator {
     pub fn new() -> Self {
         CavesGenerator {
-            rng_state: 0,
+            rng: Rng::with_default_seed(),
             predungeon: [[0; MAXDUNY]; MAXDUNX],
             lockout_count: 0,
         }
@@ -334,7 +340,9 @@ impl CavesGenerator {
     /// Generate L3 cave dungeon
     /// C++ equivalent: GenerateLevel
     pub fn generate(&mut self, dungeon: &mut Dungeon, seed: u32, level: u8, entry: LevelEntry) -> bool {
-        self.rng_state = seed;
+        // Seed the Diablo LCG before generation so results are deterministic
+        // and reproduce the C++ `SetRndSeed(seed)` behaviour exactly.
+        self.rng.set_seed(seed);
 
         // Generation loop (retry until valid dungeon)
         loop {
@@ -661,25 +669,33 @@ impl CavesGenerator {
         }
     }
 
-    /// Simple random number generator
+    /// Random integer in `[min, max)`.
+    ///
+    /// Mirrors C++ `GenerateRnd(max - min) + min`. `min >= max` yields `min`
+    /// without advancing the engine (matching the old `GenerateRnd(<=0)` guard).
+    /// Uses the deterministic Borland LCG via [`Rng`], so identical seeds
+    /// produce identical sequences.
     fn random_range(&mut self, min: usize, max: usize) -> usize {
         if min >= max {
             return min;
         }
-        self.rng_state = self.rng_state.wrapping_mul(1103515245).wrapping_add(12345);
-        let range = max - min;
-        min + ((self.rng_state >> 16) % range as u32) as usize
+        let range = (max - min) as i32;
+        min + self.rng.random_less_than(range) as usize
     }
 
-    /// Flip coin (50% chance)
+    /// Flip coin with a 1-in-2 chance (`GenerateRnd(2) == 0`).
+    ///
+    /// Mirrors C++ `FlipCoin()` (default frequency 2).
     fn flip_coin(&mut self) -> bool {
-        self.rng_state = self.rng_state.wrapping_mul(1103515245).wrapping_add(12345);
-        (self.rng_state >> 16) & 1 == 1
+        // FlipCoin() == FlipCoin(2) == (GenerateRnd(2) == 0)
+        self.rng.generate(2) == 0
     }
 
-    /// Flip coin with 1/n probability
+    /// Flip coin with a 1-in-`n` chance (`GenerateRnd(n) == 0`).
+    ///
+    /// Mirrors C++ `FlipCoin(n)`.
     fn flip_coin_n(&mut self, n: usize) -> bool {
-        self.random_range(0, n) == 0
+        self.rng.generate(n as i32) == 0
     }
 
     /// Copy predungeon to dungeon grid
@@ -1405,14 +1421,14 @@ mod tests {
     #[test]
     fn test_caves_generator_creation() {
         let generator = CavesGenerator::new();
-        assert_eq!(generator.rng_state, 0);
+        assert_eq!(generator.rng.get_seed(), 0);
         assert_eq!(generator.lockout_count, 0);
     }
 
     #[test]
     fn test_random_range() {
         let mut generator = CavesGenerator::new();
-        generator.rng_state = 12345;
+        generator.rng.set_seed(12345);
 
         let val = generator.random_range(0, 10);
         assert!(val < 10);
@@ -1440,7 +1456,7 @@ mod tests {
     #[test]
     fn test_fill_room() {
         let mut generator = CavesGenerator::new();
-        generator.rng_state = 12345;
+        generator.rng.set_seed(12345);
 
         // Test valid room
         let result = generator.fill_room(5, 5, 10, 10);
@@ -1457,7 +1473,7 @@ mod tests {
     #[test]
     fn test_fill_diagonals() {
         let mut generator = CavesGenerator::new();
-        generator.rng_state = 12345;
+        generator.rng.set_seed(12345);
 
         // Setup a diagonal pattern (value 6)
         generator.predungeon[5][5] = 0;
@@ -1511,7 +1527,7 @@ mod tests {
     #[test]
     fn test_make_megas() {
         let mut generator = CavesGenerator::new();
-        generator.rng_state = 42;
+        generator.rng.set_seed(42);
         let mut dungeon = Dungeon::new();
 
         // Setup 2x2 pattern (all 1s = value 15)
@@ -1723,5 +1739,78 @@ mod tests {
         // Note: Since this uses RNG, we can't assert specific result
         // Just verify it runs without panic
     }
-}
 
+    /// Two generations with the same seed must produce identical dungeon tiles.
+    ///
+    /// This is the core determinism contract (save/replay compatibility): the
+    /// Caves generator must be bit-for-bit reproducible for a given seed. It
+    /// depends on the Borland LCG (`Rng`) being wired in correctly end-to-end
+    /// via the `random_range`/`flip_coin`/`flip_coin_n` helpers.
+    #[test]
+    fn test_generate_is_deterministic_for_same_seed() {
+        let seed = 12345u32;
+        let level = 9u8;
+
+        let mut a = CavesGenerator::new();
+        let mut da = Dungeon::new();
+        a.generate(&mut da, seed, level, LevelEntry::MainEntry);
+
+        let mut b = CavesGenerator::new();
+        let mut db = Dungeon::new();
+        b.generate(&mut db, seed, level, LevelEntry::MainEntry);
+
+        assert_eq!(da.tiles, db.tiles, "same seed must yield identical tiles");
+    }
+
+    /// The RNG helpers must be deterministic and seed-driven.
+    ///
+    /// Two generators seeded identically must draw the same `random_range` and
+    /// `flip_coin` sequences, and the engine state must advance identically.
+    /// Guards against the generator silently reverting to a non-deterministic
+    /// RNG (the bug class the original custom LCG belonged to).
+    #[test]
+    fn test_rng_helpers_are_deterministic() {
+        let mut a = CavesGenerator::new();
+        let mut b = CavesGenerator::new();
+        a.rng.set_seed(0xABCDEF01);
+        b.rng.set_seed(0xABCDEF01);
+
+        for _ in 0..100 {
+            assert_eq!(a.random_range(0, 100), b.random_range(0, 100));
+            assert_eq!(a.flip_coin(), b.flip_coin());
+            assert_eq!(a.flip_coin_n(4), b.flip_coin_n(4));
+        }
+        assert_eq!(
+            a.rng.get_seed(),
+            b.rng.get_seed(),
+            "identical draw sequences must leave the engine in the same state"
+        );
+    }
+
+    /// Different seeds must drive the RNG into different end states.
+    ///
+    /// Guards against the generator accidentally ignoring its seed.
+    #[test]
+    fn test_different_seeds_drive_rng_differently() {
+        let mut a = CavesGenerator::new();
+        let mut da = Dungeon::new();
+        a.generate(&mut da, 1, 9, LevelEntry::MainEntry);
+
+        let mut b = CavesGenerator::new();
+        let mut db = Dungeon::new();
+        b.generate(&mut db, 2, 9, LevelEntry::MainEntry);
+
+        assert_ne!(
+            a.rng.get_seed(),
+            b.rng.get_seed(),
+            "different seeds should leave the engine in different states"
+        );
+
+        // Sanity: a seed must actually have been consumed (default seed is 0).
+        assert_ne!(
+            a.rng.get_seed(),
+            Rng::with_default_seed().get_seed(),
+            "generate() must advance the RNG past its initial state"
+        );
+    }
+}
