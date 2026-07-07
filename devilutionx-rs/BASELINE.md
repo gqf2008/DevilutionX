@@ -20,11 +20,12 @@
 
 ## 测试基线: ✅ GREEN（2026-07-07 更新）
 
-`cargo test --lib` → **1804 passed; 0 failed; 2 ignored**
-`cargo test --bins` → **1460 passed; 0 failed; 2 ignored**
+`cargo test --lib` → **1826 passed; 0 failed; 2 ignored**
+`cargo test --bins` → **1479 passed; 0 failed; 2 ignored**
+`cargo test --test archive_manager` → 8 passed（真实 MPQ 解压/优先级覆盖）
 
 此前基线为 🔴 RED（全量并行运行以 `STATUS_STACK_BUFFER_OVERRUN` 崩溃，且 `drlg_l2::test_create_dungeon_with_fill_voids` 死循环卡死）。
-本轮清理了 15 个失败 + 1 个卡死测试，详见下表与"已知技术债务"。
+第 1 轮清理了 15 个失败 + 1 个卡死测试；第 2 轮并行推进了 RNG 移植 / 常量去重 / MPQ 归档管理（+41 测试）。
 
 ### 本轮修复清单（15 failed + 1 hang → 0）
 
@@ -55,10 +56,11 @@
    - `engine/render/light_render.rs` 的值是对的；`game/automap.rs`、`game/cursor.rs` 又各自重定义。
    - **建议**：统一到一处，消除重复定义。
 
-2. **RNG 未接入**：`levels/drlg_l2.rs::random_chance` 是占位符（`percent > 50`），`generate()` 里有 `// TODO: SetRndSeed(seed)`。
-   - 后果：所有依赖概率的地牢生成（走廊转向、miniset 随机放置、fill_voids 起点）都退化为确定性，可能产生病态布局。
-   - `drlg_l2::ConnectHall` 已加步数上限保护，但这是权宜之计。
-   - **建议**：移植 Diablo 的 seeded PRNG（`Source/utils/random.cpp` 的 `SetRndSeed/GenerateRnd`），接入所有生成器。
+2. **RNG 部分接入**：`utils/random.rs` 已移植 Diablo 的 Borland LCG（确定性，对齐 C++ `Source/engine/random.cpp`），并接入 `drlg_l2`（`generate()` 调 `set_seed`，`random_chance`/坐标选择用真实引擎）。
+   - **遗留**：`drlg_l2::ConnectHall` 对部分种子仍振荡死循环（该端口的走廊导向逻辑与 C++ 有偏差），保留了 `MAX_HALL_STEPS` 步数上限安全网。根治需逐行比对 Rust 与 C++ `connect_hall`。
+   - **遗留**：其他生成器（drlg_l1/l3/l4、town、themes、objects 等）的随机调用仍未接入真实 RNG，需要逐个迁移。
+
+2b. **drlg_l4 生成循环范围错误**（阻塞 DMAXX 修正）：`src/levels/drlg_l4.rs` 把 C++ 中 `for (x=0; x<DMAXX=40; ...)` 的生成循环（`make_dmt`/`fix_tiles_patterns`/`add_wall`/`general_fix`/`apply_shadows`/`fix_corner_tiles`/`substitution`/`place_miniset` 等 ~30 处）端口为 `0..MAXDUNX(112)`，并按 `[MAXDUNX][MAXDUNY]` 维度索引 `dungeon.tiles`（C++ 是 `[DMAXX=40][DMAXY=40]`）。这是真实端口 bug，导致把 `levels::types::DMAXX` 从 112 改回 40 时会触发 13 个越界失败。**修正需要把 drlg_l4 的循环/数组语义整体改回 DMAX(40)**，这是独立重构任务。修好后才能把全局 DMAXX 改 40 并清理 `drlg_l4::flood_transparency_values` 的 `ACTIVE_DMAXX` 本地补丁。
 
 3. **两套 SpellId 枚举**：`game/player.rs::SpellId`（Firebolt=1，对齐 C++）与 `game/player_exact.rs::SpellId`（Firebolt=0，遗留适配模块）判别值不同。
    - `spells_cast.rs` 用后者，`get_spell_bitmask` 已做兼容；但长期应统一到权威枚举。
@@ -87,7 +89,7 @@ Rust 端没有确定性回放测试。C++ 的黄金标准是 `test/timedemo_test
 
 ## 规模（2026-07-07 核实）
 
-- Rust: 317 文件 / 173,704 行 / 2,131 个 `#[test]`（lib+bin 合计 ~3,264 测试）
+- Rust: 320 文件 / ~174,500 行 / 2,172 个 `#[test]`（lib 1826 + bins 1479 + 集成 8，合计 ~3,313 测试）
 - C++ 参考: ~250 文件 / 143,170 行
 - 自报完成度: ~38%（注：自报数字普遍虚高，见"已知技术债务"#5）
 
@@ -95,8 +97,9 @@ Rust 端没有确定性回放测试。C++ 的黄金标准是 `test/timedemo_test
 
 ```bash
 cd devilutionx-rs
-cargo check                          # ✅ green (145 warnings, 0 errors)
-cargo test --lib                     # ✅ 1804 passed / 0 failed
-cargo test --bins                    # ✅ 1460 passed / 0 failed
+cargo check                          # ✅ green (146 warnings, 0 errors)
+cargo test --lib                     # ✅ 1826 passed / 0 failed
+cargo test --bins                    # ✅ 1479 passed / 0 failed
+cargo test --test archive_manager    # ✅ 8 passed（真实 MPQ 端到端）
 cargo test --lib game::monster       # 分模块跑
 ```
