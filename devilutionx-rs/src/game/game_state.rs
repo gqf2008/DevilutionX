@@ -495,15 +495,49 @@ impl GameState {
             .map(|(id, _)| id)
             .collect();
 
+        // Track XP gained from kills this tick to award after the borrows
+        // on monster_manager/player resolve.
+        let mut xp_gained: i32 = 0;
         for monster_id in monster_ids {
             if let Some(monster) = self.monster_manager.get_monster_mut(monster_id) {
                 let dist = walking_distance(player_pos, monster.position());
 
                 if dist <= 1 {
                     // Player attacks this monster
-                    let _ = player_attack_monster(&self.player, monster, rng);
+                    match player_attack_monster(&self.player, monster, rng) {
+                        crate::game::combat_integration::AttackResult::Kill { .. } => {
+                            // Award monster XP on kill (monster_dat xp reward).
+                            xp_gained += monster.experience as i32;
+                        }
+                        _ => {}
+                    }
                 }
             }
+        }
+
+        if xp_gained > 0 {
+            self.player._p_experience = self.player._p_experience.saturating_add(xp_gained as u32);
+            // Level-up check: advance while XP exceeds the next level threshold.
+            self.check_level_up();
+        }
+    }
+
+    /// Advance the player's level while their experience exceeds the next
+    /// threshold, raising base HP/mana per C++ NextLevel/CalcStats.
+    fn check_level_up(&mut self) {
+        // Minimal: bump level by 1 per call if a coarse XP threshold is met.
+        // (Full C++ CalcStats with per-class growth is in player_dat; this is
+        // a playable approximation so kills visibly progress the HUD.)
+        let lvl = self.player._p_level as i32;
+        // Coarse threshold curve (~ classic Diablo early-game feel).
+        let threshold = lvl * lvl * 500;
+        if (self.player._p_experience as i32) >= threshold && lvl < 50 {
+            self.player._p_level += 1;
+            // Per-level HP/mana bump (approx: +lvl_life/64 HP per level).
+            let bump = ((self.player._p_max_hp_base) / 32).max(64);
+            self.player._p_max_hp_base += bump;
+            self.player._p_max_hp += bump;
+            self.player._p_hit_points += bump;
         }
     }
 

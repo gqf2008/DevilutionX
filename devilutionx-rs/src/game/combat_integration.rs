@@ -216,6 +216,10 @@ pub fn player_attack_monster(
     // 8. Check for death (C++ line 669)
     if monster.hp <= 0 {
         monster.mode = MonsterMode::Death;
+        // Keep the AI-state filter the renderer uses (MonsterAIState::Dead)
+        // in sync with the death mode, otherwise a slain monster keeps being
+        // drawn because only `mode` was updated.
+        monster.ai_state = crate::game::monster::MonsterAIState::Dead;
         return AttackResult::Kill { damage };
     }
 
