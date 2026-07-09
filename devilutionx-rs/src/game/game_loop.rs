@@ -12,7 +12,7 @@
 use crate::engine::timing::GameTiming;
 use crate::engine::window::{GameWindow, Color};
 use crate::engine::isometric::{IsoPoint, TILE_WIDTH, TILE_HEIGHT};
-use crate::engine::dungeon::{TileDecoder, TileType, DunTemplate};
+use crate::engine::dungeon::{TileDecoder, DunTemplate};
 use crate::engine::sprite_render::rgba_to_texture;
 use crate::game::input::InputSystem;
 use crate::game::network;
@@ -22,10 +22,8 @@ use anyhow::Result;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::rect::Rect;
-use sdl2::render::Texture;
 use rand::SeedableRng;
 use rand::Rng;
-use std::collections::HashMap;
 
 /// Interface mode for game initialization
 ///
@@ -744,58 +742,53 @@ fn draw_and_blit(window: &mut GameWindow, game_state: &GameState) {
     let cam_tile_x = game_state.camera.tile_x;
     let cam_tile_y = game_state.camera.tile_y;
 
-        // Set up the texture cache's "current creator" so cache-miss uploads inside
-        // the draw functions can borrow the canvas's TextureCreator. Cleared after.
-        {
-            let creator = window.canvas_mut().texture_creator();
-            set_current_creator(&creator);
-
-            if game_state.in_dungeon {
-                // DUNGEON MODE (L1 Cathedral). Requires the L1 level data + a
-                // generated dungeon_layout. Falls back gracefully if either is
-                // missing (e.g. shareware build without L1 art).
-                if let (Some(level), Some(layout)) = (&game_state.dungeon_level_data, &game_state.dungeon_layout) {
-                    // Collect the living dungeon monsters (id + position + type)
-                    // for the renderer. Borrowing through a small Vec avoids
-                    // holding a borrow on monster_manager across the draw call.
-                    let monsters: Vec<(usize, i32, i32, crate::game::monster::MonsterType, crate::game::monster::MonsterAIState)> =
-                        game_state.monster_manager.iter().map(|(id, m)| {
-                            (id, m.x, m.y, m.monster_type, m.ai_state)
-                        }).collect();
-                    let sprites = game_state.monster_sprites.as_ref();
-                    let _ = draw_dungeon(window, level, layout, cam_tile_x, cam_tile_y, screen_center_x, screen_center_y, &monsters, sprites);
-                } else if let Some(level) = &game_state.level_data {
-                    let _ = draw_checkerboard_fallback(window, level, cam_tile_x, cam_tile_y, screen_center_x, screen_center_y);
-                } else {
-                    let canvas = window.canvas_mut();
-                    draw_plain_checkerboard(canvas, screen_center_x, screen_center_y);
-                }
-            } else if let (Some(level), Some(layout)) = (&game_state.level_data, &game_state.town_layout) {
-                // Real Tristram art path: render the visible micro-tiles from dPiece.
-                let _ = draw_tristram(window, level, layout, cam_tile_x, cam_tile_y, screen_center_x, screen_center_y);
-            } else if let Some(level) = &game_state.level_data {
-                // Fallback: town data loaded but layout not built yet — draw a small
-                // checkerboard of real tile frames so the art chain is still visible.
-                let _ = draw_checkerboard_fallback(window, level, cam_tile_x, cam_tile_y, screen_center_x, screen_center_y);
-            } else {
-                // No art at all — draw a plain iso checkerboard.
-                let canvas = window.canvas_mut();
-                draw_plain_checkerboard(canvas, screen_center_x, screen_center_y);
-            }
-
-        // Draw the player at the viewport centre (camera == player position).
-        // Prefer the real Warrior town-walk sprite; fall back to the yellow
-        // marker if no sprite was loaded. Done inside the creator block so a
-        // cache-miss texture upload can borrow the TextureCreator.
-        draw_player_sprite(window, game_state, screen_center_x, screen_center_y);
-
-        clear_current_creator();
+    // Render the world. Each draw function now creates its own short-lived
+    // `TextureCreator` per texture it needs and blits immediately — no
+    // cross-frame texture cache and no `TextureCreator` borrow held across
+    // other `canvas_mut()` calls. This is Plan A from the bug report: every
+    // texture is rebuilt each frame, which is slower but provably safe (no
+    // dangling textures, no aliasing violations).
+    if game_state.in_dungeon {
+        // DUNGEON MODE (L1 Cathedral). Requires the L1 level data + a
+        // generated dungeon_layout. Falls back gracefully if either is
+        // missing (e.g. shareware build without L1 art).
+        if let (Some(level), Some(layout)) = (&game_state.dungeon_level_data, &game_state.dungeon_layout) {
+            // Collect the living dungeon monsters (id + position + type)
+            // for the renderer. Borrowing through a small Vec avoids
+            // holding a borrow on monster_manager across the draw call.
+            let monsters: Vec<(usize, i32, i32, crate::game::monster::MonsterType, crate::game::monster::MonsterAIState)> =
+                game_state.monster_manager.iter().map(|(id, m)| {
+                    (id, m.x, m.y, m.monster_type, m.ai_state)
+                }).collect();
+            let sprites = game_state.monster_sprites.as_ref();
+            let _ = draw_dungeon(window, level, layout, cam_tile_x, cam_tile_y, screen_center_x, screen_center_y, &monsters, sprites);
+        } else if let Some(level) = &game_state.level_data {
+            let _ = draw_checkerboard_fallback(window, level, cam_tile_x, cam_tile_y, screen_center_x, screen_center_y);
+        } else {
+            let canvas = window.canvas_mut();
+            draw_plain_checkerboard(canvas, screen_center_x, screen_center_y);
+        }
+    } else if let (Some(level), Some(layout)) = (&game_state.level_data, &game_state.town_layout) {
+        // Real Tristram art path: render the visible micro-tiles from dPiece.
+        let _ = draw_tristram(window, level, layout, cam_tile_x, cam_tile_y, screen_center_x, screen_center_y);
+    } else if let Some(level) = &game_state.level_data {
+        // Fallback: town data loaded but layout not built yet — draw a small
+        // checkerboard of real tile frames so the art chain is still visible.
+        let _ = draw_checkerboard_fallback(window, level, cam_tile_x, cam_tile_y, screen_center_x, screen_center_y);
+    } else {
+        // No art at all — draw a plain iso checkerboard.
+        let canvas = window.canvas_mut();
+        draw_plain_checkerboard(canvas, screen_center_x, screen_center_y);
     }
 
+    // Draw the player at the viewport centre (camera == player position).
+    // Prefer the real Warrior town-walk sprite; fall back to the yellow
+    // marker if no sprite was loaded. The sprite texture is rebuilt every
+    // frame (Plan A): safe, no dangling handles.
+    draw_player_sprite(window, game_state, screen_center_x, screen_center_y);
+
     // Draw the bottom HUD panel (life/mana spheres, XP bar, belt, stats) on top
-    // of the rendered world + player sprite. Pure canvas drawing (no texture
-    // creator needed), so it runs after the creator block above. This is the
-    // only addition to draw_and_blit — the rest of the function is unchanged.
+    // of the rendered world + player sprite. Pure canvas drawing (no textures).
     draw_simple_missiles(window, game_state, cam_tile_x, cam_tile_y, screen_center_x, screen_center_y);
     hud::draw_hud(window, game_state);
 
@@ -874,13 +867,17 @@ const VIEW_RADIUS_Y: i32 = 11;
 /// 2. Index into `level.min.mega_tiles[dPiece]` to get the two floor sub-tiles
 ///    (`blocks[0]` = left-bottom triangle, `blocks[1]` = right-top triangle).
 ///    Each block carries a CEL frame index + tile type.
-/// 3. Decode (or fetch from the texture cache) the frame into an SDL Texture.
+/// 3. Decode the frame to RGBA and upload it into a fresh SDL `Texture` via a
+///    short-lived `TextureCreator` borrowed from the canvas.
 /// 4. Blit the two 32x32 textures at the tile's screen position, offset so the
 ///    pair forms the 64x32 diamond.
 ///
-/// Textures are cached in `TILE_TEXTURE_CACHE` keyed by the raw `LevelCelBlock`
-/// data word (frame + type packed into a u16), so a given frame is decoded at
-/// most once for the lifetime of the game.
+/// **Safety note (Plan A rewrite):** textures are rebuilt every frame. The old
+/// code cached `Texture<'static>` in a thread-local via `transmute`, which was
+/// unsound (the `TextureCreator` it borrowed was dropped at the end of the
+/// block, leaving dangling SDL handles). Each draw now scopes its
+/// `TextureCreator` + `Texture` to a single `copy()` so the lifetimes are
+/// provably valid and there is no aliasing violation.
 fn draw_tristram(
     window: &mut GameWindow,
     level: &crate::engine::dungeon::DungeonLevelData,
@@ -932,29 +929,43 @@ fn draw_tristram(
 
             // Draw the two floor sub-tiles (left + right) that form the diamond.
             // blocks[0] => left triangle, blocks[1] => right triangle.
+            let canvas = window.canvas_mut();
             for (slot, block) in [(0usize, &mega.blocks[0]), (1, &mega.blocks[1])] {
                 if !block.has_value() {
                     continue;
                 }
-                if let Some(tex_ptr) = tile_texture_cache_get(block.data, block.frame(), block.tile_type(), level) {
-                    // SAFETY: see tile_texture_cache_get docstring. tex_ptr is a
-                    // valid raw pointer to a Texture in the thread-local cache,
-                    // which lives for the duration of the game window.
-                    let tex_ref = unsafe { tex_ptr.as_texture_ref() };
-                    // Anchor: left texture's right edge at dst_cx; right texture's
-                    // left edge at dst_cx. Both sit with their top at dst_cy-32.
-                    let (tx, ty) = if slot == 0 {
-                        (dst_cx - (TILE_WIDTH / 2), dst_cy - TILE_HEIGHT)
-                    } else {
-                        (dst_cx, dst_cy - TILE_HEIGHT)
-                    };
-                    let _ = window.canvas_mut().copy(
-                        tex_ref,
-                        None,
-                        Rect::new(tx, ty, (TILE_WIDTH / 2) as u32, TILE_HEIGHT as u32),
-                    );
-                    drawn += 1;
-                }
+                // Decode the CEL frame to RGBA, then upload via a short-lived
+                // TextureCreator + Texture scoped to this single copy. `creator`
+                // holds an Rc into the renderer, so it does NOT keep borrowing
+                // the canvas; `tex` borrows `creator`, and `copy` needs
+                // `&Texture` + `&mut Canvas`. The lifetimes line up soundly.
+                let rgba = match TileDecoder::decode_tile(
+                    &level.level_cel,
+                    block.frame(),
+                    block.tile_type(),
+                    &level.palette,
+                ) {
+                    Some(r) => r,
+                    None => continue,
+                };
+                let creator = canvas.texture_creator();
+                let tex = match rgba_to_texture(&creator, &rgba, 32, 32) {
+                    Ok(t) => t,
+                    Err(_) => continue,
+                };
+                // Anchor: left texture's right edge at dst_cx; right texture's
+                // left edge at dst_cx. Both sit with their top at dst_cy-32.
+                let (tx, ty) = if slot == 0 {
+                    (dst_cx - (TILE_WIDTH / 2), dst_cy - TILE_HEIGHT)
+                } else {
+                    (dst_cx, dst_cy - TILE_HEIGHT)
+                };
+                let _ = canvas.copy(
+                    &tex,
+                    None,
+                    Rect::new(tx, ty, (TILE_WIDTH / 2) as u32, TILE_HEIGHT as u32),
+                );
+                drawn += 1;
             }
         }
     }
@@ -977,8 +988,8 @@ fn draw_tristram(
 /// For each world tile `(wx, wy)` within the camera's view radius we look up
 /// `dPiece = layout.get(wx, wy)`, index into `level.min.mega_tiles[dPiece]` to
 /// get the two floor sub-tiles, and blit their decoded CEL frames at the tile's
-/// screen position. Textures are shared with the town path via the same
-/// `TILE_TEXTURE_CACHE` (keyed by raw `LevelCelBlock.data`).
+/// screen position. Textures are rebuilt every frame (Plan A — see
+/// `draw_tristram` for the safety rationale).
 fn draw_dungeon(
     window: &mut GameWindow,
     level: &crate::engine::dungeon::DungeonLevelData,
@@ -1023,25 +1034,37 @@ fn draw_dungeon(
                 continue;
             }
 
+            let canvas = window.canvas_mut();
             for (slot, block) in [(0usize, &mega.blocks[0]), (1, &mega.blocks[1])] {
                 if !block.has_value() {
                     continue;
                 }
-                if let Some(tex_ptr) = tile_texture_cache_get(block.data, block.frame(), block.tile_type(), level) {
-                    // SAFETY: see tile_texture_cache_get docstring.
-                    let tex_ref = unsafe { tex_ptr.as_texture_ref() };
-                    let (tx, ty) = if slot == 0 {
-                        (dst_cx - (TILE_WIDTH / 2), dst_cy - TILE_HEIGHT)
-                    } else {
-                        (dst_cx, dst_cy - TILE_HEIGHT)
-                    };
-                    let _ = window.canvas_mut().copy(
-                        tex_ref,
-                        None,
-                        Rect::new(tx, ty, (TILE_WIDTH / 2) as u32, TILE_HEIGHT as u32),
-                    );
-                    drawn += 1;
-                }
+                // Per-tile safe texture rebuild (Plan A). See draw_tristram.
+                let rgba = match TileDecoder::decode_tile(
+                    &level.level_cel,
+                    block.frame(),
+                    block.tile_type(),
+                    &level.palette,
+                ) {
+                    Some(r) => r,
+                    None => continue,
+                };
+                let creator = canvas.texture_creator();
+                let tex = match rgba_to_texture(&creator, &rgba, 32, 32) {
+                    Ok(t) => t,
+                    Err(_) => continue,
+                };
+                let (tx, ty) = if slot == 0 {
+                    (dst_cx - (TILE_WIDTH / 2), dst_cy - TILE_HEIGHT)
+                } else {
+                    (dst_cx, dst_cy - TILE_HEIGHT)
+                };
+                let _ = canvas.copy(
+                    &tex,
+                    None,
+                    Rect::new(tx, ty, (TILE_WIDTH / 2) as u32, TILE_HEIGHT as u32),
+                );
+                drawn += 1;
             }
         }
     }
@@ -1065,18 +1088,8 @@ fn draw_dungeon(
 }
 
 //------------------------------------------------------------------------------
-// Monster Sprite Cache + Rendering (Step 2)
+// Monster Sprite Rendering (Step 2)
 //------------------------------------------------------------------------------
-
-thread_local! {
-    /// Per-monster-type decoded-sprite textures, uploaded lazily from
-    /// `GameState::monster_sprites`. Keyed by `MonsterType`. Same lifetime-erase
-    /// rationale as `TILE_TEXTURE_CACHE` / `PLAYER_SPRITE_CACHE`: the underlying
-    /// SDL handle outlives the borrow because the `GameWindow` lives for the
-    /// whole game loop. Cleared on game-loop exit.
-    static MONSTER_SPRITE_CACHE: std::cell::RefCell<HashMap<crate::game::monster::MonsterType, Texture<'static>>> =
-        std::cell::RefCell::new(HashMap::new());
-}
 
 /// Draw all living dungeon monsters on top of the rendered floor.
 ///
@@ -1085,10 +1098,11 @@ thread_local! {
 /// minus the camera transform). Monsters off-screen are skipped.
 ///
 /// Rendering path per monster:
-/// 1. If `sprites` has a decoded sprite for the monster's type AND the texture
-///    is cached (or can be uploaded via the current creator), blit it anchored
-///    foot-first (bottom-centre on the tile centre) — exactly like the player
-///    sprite.
+/// 1. If `sprites` has a decoded sprite for the monster's type, rebuild its
+///    texture from the cached RGBA buffer and blit it anchored foot-first
+///    (bottom-centre on the tile centre) — exactly like the player sprite.
+///    The texture is created fresh each frame (Plan A); the RGBA decode lives
+///    in `MonsterSpriteSet` and is reused, only the SDL upload is repeated.
 /// 2. Otherwise draw a per-type coloured diamond block at the tile so the
 ///    monster is still visible.
 ///
@@ -1134,39 +1148,29 @@ fn draw_dungeon_monsters(
             continue;
         }
 
-        // Try the real sprite path first.
+        // Try the real sprite path first: rebuild the texture from the cached
+        // RGBA (Plan A — safe, no dangling handles). Scope the creator+texture
+        // to this single blit so the canvas borrow is released right after copy.
         let mut used_sprite = false;
         if let Some(set) = sprites {
             if let Some(sprite) = set.get(mtype) {
-                // Ensure this type's texture is uploaded.
-                let need_upload = MONSTER_SPRITE_CACHE.with(|c| c.borrow().get(mtype).is_none());
-                if need_upload {
-                    if let Some(creator) = current_creator() {
-                        if let Ok(tex) = rgba_to_texture(creator, &sprite.rgba, sprite.width, sprite.height) {
-                            // SAFETY: see Texture Cache module docstring.
-                            let tex_static: Texture<'static> = unsafe { std::mem::transmute(tex) };
-                            MONSTER_SPRITE_CACHE.with(|c| {
-                                c.borrow_mut().insert(*mtype, tex_static);
-                            });
-                        }
-                    }
-                }
-                let have = MONSTER_SPRITE_CACHE.with(|c| c.borrow().get(mtype).is_some());
-                if have {
-                    MONSTER_SPRITE_CACHE.with(|c| {
-                        let cache = c.borrow();
-                        let tex = cache.get(mtype).unwrap();
-                        // Anchor feet at the tile centre: bottom-centre of the
-                        // sprite on (dst_cx, dst_cy). Same convention as the
-                        // player sprite so monsters stand on their tile.
-                        let dst = Rect::new(
-                            dst_cx - sprite.width as i32 / 2,
-                            dst_cy - sprite.height as i32,
-                            sprite.width as u32,
-                            sprite.height as u32,
-                        );
-                        let _ = window.canvas_mut().copy(tex, None, dst);
-                    });
+                // Anchor feet at the tile centre: bottom-centre of the
+                // sprite on (dst_cx, dst_cy). Same convention as the
+                // player sprite so monsters stand on their tile.
+                let dst = Rect::new(
+                    dst_cx - sprite.width as i32 / 2,
+                    dst_cy - sprite.height as i32,
+                    sprite.width as u32,
+                    sprite.height as u32,
+                );
+                let canvas = window.canvas_mut();
+                let creator = canvas.texture_creator();
+                // Bind the Result first so the Texture's borrow of `creator`
+                // outlives the match temporaries (avoids E0597 drop-order).
+                let tex_result =
+                    rgba_to_texture(&creator, &sprite.rgba, sprite.width, sprite.height);
+                if let Ok(tex) = tex_result {
+                    let _ = canvas.copy(&tex, None, dst);
                     used_sprite = true;
                 }
             }
@@ -1196,20 +1200,20 @@ fn draw_dungeon_monsters(
     let _ = drawn;
 }
 
-/// Clear the monster-sprite texture cache. Called when leaving the dungeon
-/// (`return_to_town`) so a fresh monster pack re-uploads its textures on the
-/// next descent. Also safe to call on game-loop exit.
-pub fn clear_monster_sprite_cache() {
-    MONSTER_SPRITE_CACHE.with(|c| c.borrow_mut().clear());
-}
+/// Clear the monster-sprite texture cache. Retained as a public no-op for API
+/// compatibility with `return_to_town` / `main.rs` — there is no texture cache
+/// any more (textures are rebuilt every frame, Plan A), so this is a safe no-op.
+pub fn clear_monster_sprite_cache() {}
 
 /// Fallback renderer: draw a checkerboard of real town tile frames when the
-/// layout grid hasn't been built yet. Uses the texture cache.
+/// layout grid hasn't been built yet. Each visible tile decodes the first
+/// mega-tile's left block and uploads a fresh texture (Plan A — no cross-frame
+/// cache, no unsafe).
 fn draw_checkerboard_fallback(
     window: &mut GameWindow,
     level: &crate::engine::dungeon::DungeonLevelData,
-    cam_tile_x: i32,
-    cam_tile_y: i32,
+    _cam_tile_x: i32,
+    _cam_tile_y: i32,
     screen_center_x: i32,
     screen_center_y: i32,
 ) -> Result<()> {
@@ -1224,19 +1228,34 @@ fn draw_checkerboard_fallback(
             if let Some(mega) = level.min.mega_tiles.first() {
                 let block = &mega.blocks[0];
                 if block.has_value() {
-                    if let Some(tex_ptr) = tile_texture_cache_get(block.data, block.frame(), block.tile_type(), level) {
-                        let tex_ref = unsafe { tex_ptr.as_texture_ref() };
-                        let _ = window.canvas_mut().copy(
-                            tex_ref,
-                            None,
-                            Rect::new(
-                                dst_cx - (TILE_WIDTH / 2),
-                                dst_cy - TILE_HEIGHT,
-                                (TILE_WIDTH / 2) as u32,
-                                TILE_HEIGHT as u32,
-                            ),
-                        );
-                    }
+                    // Decode + upload per tile (Plan A). The same frame is
+                    // re-decoded/re-uploaded for every visible tile; acceptable
+                    // for this fallback path.
+                    let rgba = match TileDecoder::decode_tile(
+                        &level.level_cel,
+                        block.frame(),
+                        block.tile_type(),
+                        &level.palette,
+                    ) {
+                        Some(r) => r,
+                        None => continue,
+                    };
+                    let canvas = window.canvas_mut();
+                    let creator = canvas.texture_creator();
+                    let tex = match rgba_to_texture(&creator, &rgba, 32, 32) {
+                        Ok(t) => t,
+                        Err(_) => continue,
+                    };
+                    let _ = canvas.copy(
+                        &tex,
+                        None,
+                        Rect::new(
+                            dst_cx - (TILE_WIDTH / 2),
+                            dst_cy - TILE_HEIGHT,
+                            (TILE_WIDTH / 2) as u32,
+                            TILE_HEIGHT as u32,
+                        ),
+                    );
                 }
             } else {
                 // No mega tiles at all — draw a coloured diamond.
@@ -1296,167 +1315,55 @@ fn fill_diamond(
 }
 
 //------------------------------------------------------------------------------
-// Texture Cache (Step 1: performance)
+// Texture Creation (safe, per-frame — Plan A)
 //------------------------------------------------------------------------------
 //
-// SDL `Texture<'a>` borrows a `TextureCreator<'a>` which borrows the
-// `WindowContext`. The Rust binding models this lifetime, but the underlying
-// SDL texture is an opaque GPU handle valid as long as the renderer (the
-// `GameWindow`) is alive. Because the single `GameWindow` lives for the whole
-// game loop, we can soundly cache textures for the loop's duration.
+// Previous design (REMOVED — caused the segfault): textures were stored in
+// thread-local caches as `Texture<'static>` via `transmute`. The lifetime erase
+// was unsound for two reasons:
+//   1. The `TextureCreator` they borrowed was a local in `draw_and_blit` and
+//      was dropped at the end of its block, so cached textures pointed at
+//      destroyed/freed SDL state on the next frame (use-after-free → segfault).
+//   2. Holding the creator's `&mut Canvas` borrow while `draw_*` called
+//      `canvas_mut()` again was a Rust aliasing violation (runtime UB).
 //
-// To avoid fighting the borrow checker across the update/render split, we store
-// textures in a thread-local cache keyed by the raw `LevelCelBlock.data` word,
-// holding them as lifetime-erased `Texture<'static>`. The cache is cleared when
-// the game loop exits so we don't reuse stale SDL handles after the window is
-// destroyed.
+// New design (Plan A): each draw rebuilds its texture from the already-decoded
+// RGBA buffer (which is plain safe `Vec<u8>` data living in `GameState`) and
+// blits it immediately. The `TextureCreator`/`Texture` are short-lived locals
+// scoped to a single `canvas.copy(&tex, ...)`:
+//
+//     let canvas = window.canvas_mut();   // &mut Canvas
+//     let creator = canvas.texture_creator(); // owned TextureCreator (holds an
+//                                             //   Rc<RendererContext>, does NOT
+//                                             //   keep borrowing the canvas)
+//     let tex = rgba_to_texture(&creator, rgba, w, h)?; // tex borrows creator
+//     canvas.copy(&tex, None, dst)?;       // &Texture + &mut Canvas: the
+//                                             //   creator borrow is independent,
+//                                             //   so no aliasing violation.
+//     // tex, creator dropped here — handle freed, nothing to dangle.
+//
+// This is slower than caching (the RGBA→texture upload is repeated every
+// frame) but is provably safe and gets the game loop running.
 
-thread_local! {
-    /// Per-thread cache of decoded tile textures keyed by `LevelCelBlock.data`.
-    /// Values are `Texture<'static>` — the lifetime is erased with `transmute`
-    /// because the underlying SDL handle outlives the borrow (see module notes).
-    /// SDL textures are not `Sync`, so this is thread-local and only ever
-    /// touched from the render thread.
-    static TILE_TEXTURE_CACHE: std::cell::RefCell<HashMap<u16, Texture<'static>>> =
-        std::cell::RefCell::new(HashMap::new());
-}
-
-/// A handle returned by the texture cache. Carries a raw pointer into the
-/// thread-local cache; `as_texture_ref` reborrows it for the current draw.
-///
-/// The pointer is valid until the cache is mutated (cleared), which only
-/// happens at game-loop exit — never during a render call.
-pub struct TextureHandle {
-    raw: *const Texture<'static>,
-}
-
-impl TextureHandle {
-    /// Reborrow the cached texture as `&Texture` for the current draw call.
-    ///
-    /// # Safety
-    /// The caller must not mutate the thread-local `TILE_TEXTURE_CACHE` while
-    /// the returned reference is live, and must be on the render thread. Both
-    /// invariants hold during `draw_and_blit`.
-    pub unsafe fn as_texture_ref<'a>(&self) -> &'a Texture<'a> {
-        // SAFETY: the raw pointer points into the thread-local cache, which is
-        // stable for the duration of the render call (the cache is only cleared
-        // at game-loop exit). Reinterpreting the lifetime from 'static to 'a is
-        // sound because 'a is shorter than the texture's actual validity.
-        &*(self.raw as *const Texture<'a>)
-    }
-}
-
-/// Fetch a decoded tile texture from the cache, decoding + uploading on miss.
-///
-/// `key` is the `LevelCelBlock.data` word (frame + type); `frame`/`tile_type`
-/// are used for the actual CEL decode on a cache miss. The texture is uploaded
-/// using a `TextureCreator` borrowed from the canvas inside this call.
-fn tile_texture_cache_get(
-    key: u16,
-    frame: u16,
-    tile_type: TileType,
-    level: &crate::engine::dungeon::DungeonLevelData,
-) -> Option<TextureHandle> {
-    // Fast path: already cached. Return a handle to the existing entry.
-    let hit = TILE_TEXTURE_CACHE.with(|c| c.borrow().get(&key).map(|t| t as *const Texture<'static>));
-    if let Some(raw) = hit {
-        return Some(TextureHandle { raw });
-    }
-
-    // Cache miss: decode the CEL frame to RGBA, then upload via a texture
-    // creator borrowed from... we can't borrow the canvas here without passing
-    // it in. To keep the cache API canvas-free, the caller is responsible for
-    // the upload. Instead, we do a two-phase approach: the caller passes the
-    // creator via a thread-local "current creator" set at the start of the draw
-    // call. See `set_current_creator`.
-    let creator = match current_creator() {
-        Some(c) => c,
-        None => return None,
-    };
-
-    let rgba = TileDecoder::decode_tile(&level.level_cel, frame, tile_type, &level.palette)?;
-    let tex = rgba_to_texture(creator, &rgba, 32, 32).ok()?;
-
-    // Erase the lifetime: the texture's underlying SDL handle is valid as long
-    // as the GameWindow (and its renderer) is alive — the whole game loop.
-    // SAFETY: see the Texture Cache module docstring.
-    let tex_static: Texture<'static> = unsafe { std::mem::transmute(tex) };
-    let raw = TILE_TEXTURE_CACHE.with(|c| {
-        let mut cache = c.borrow_mut();
-        cache.entry(key).or_insert(tex_static) as *const Texture<'static>
-    });
-    Some(TextureHandle { raw })
-}
-
-thread_local! {
-    /// The texture creator currently in use for the render call, set via
-    /// `set_current_creator` at the start of `draw_and_blit`. Stored as a raw
-    /// pointer to avoid the lifetime in the cache API.
-    static CURRENT_CREATOR: std::cell::Cell<*const sdl2::render::TextureCreator<sdl2::video::WindowContext>> =
-        std::cell::Cell::new(std::ptr::null());
-}
-
-/// Set the texture creator used for cache-miss uploads during the current
-/// render call. Called once at the top of `draw_and_blit`.
-///
-/// # Safety
-/// The creator must outlive all cache-miss uploads performed before the next
-/// `clear_current_creator` call. This holds because the creator is borrowed
-/// from the canvas, which is alive for the whole draw call.
-fn set_current_creator(creator: &sdl2::render::TextureCreator<sdl2::video::WindowContext>) {
-    CURRENT_CREATOR.with(|c| c.set(creator as *const _));
-}
-
-/// Clear the current creator reference (end of draw call).
-fn clear_current_creator() {
-    CURRENT_CREATOR.with(|c| c.set(std::ptr::null()));
-}
-
-/// Get the current creator, or None if not in a draw call.
-fn current_creator() -> Option<&'static sdl2::render::TextureCreator<sdl2::video::WindowContext>> {
-    let ptr = CURRENT_CREATOR.with(|c| c.get());
-    if ptr.is_null() {
-        None
-    } else {
-        // SAFETY: the creator is alive for the duration of the draw call (set in
-        // set_current_creator, cleared in clear_current_creator). Returning a
-        // 'static reference is a simplification — callers only use it within the
-        // draw call, before clear_current_creator.
-        Some(unsafe { &*ptr })
-    }
-}
-
-/// Clear the tile texture cache. Called when the game loop exits so textures
-/// aren't reused across windows (which would point at destroyed SDL handles).
-pub fn clear_tile_texture_cache() {
-    TILE_TEXTURE_CACHE.with(|c| c.borrow_mut().clear());
-}
+/// Clear the tile texture cache. Retained as a public no-op for API
+/// compatibility with `main.rs` — there is no texture cache any more (Plan A),
+/// so this is a safe no-op.
+pub fn clear_tile_texture_cache() {}
 
 //------------------------------------------------------------------------------
-// Player Sprite Cache (Step 2)
+// Player Sprite Rendering (Step 2)
 //------------------------------------------------------------------------------
-
-thread_local! {
-    /// Cached player-sprite SDL texture, uploaded once from
-    /// `GameState::player_sprite`. Holds a `Texture<'static>` whose lifetime is
-    /// erased (see the Texture Cache module docstring for the safety rationale:
-    /// the underlying SDL handle outlives the borrow because the `GameWindow`
-    /// lives for the whole game loop). Cleared on game-loop exit alongside the
-    /// tile cache.
-    static PLAYER_SPRITE_CACHE: std::cell::RefCell<Option<Texture<'static>>> =
-        std::cell::RefCell::new(None);
-}
 
 /// Draw the player at the viewport centre.
 ///
 /// If `GameState::player_sprite` is set (a real Warrior town-walk sprite was
-/// decoded in `start_game`), upload it to a cached texture on first use and blit
-/// it anchored so the sprite's feet sit on the camera tile (top-left at
+/// decoded in `start_game`), rebuild its texture from the cached RGBA buffer and
+/// blit it anchored so the sprite's feet sit on the camera tile (top-left at
 /// `centre_x - width/2`, `centre_y - height`). Otherwise fall back to the old
 /// yellow marker so the game is still playable without assets.
 ///
-/// Must be called inside a `set_current_creator`/`clear_current_creator` block
-/// so the cache-miss upload can borrow the canvas's `TextureCreator`.
+/// The texture is rebuilt every frame (Plan A); the RGBA decode is cached in
+/// `GameState::player_sprite` and only the SDL upload is repeated.
 fn draw_player_sprite(
     window: &mut GameWindow,
     game_state: &GameState,
@@ -1464,29 +1371,16 @@ fn draw_player_sprite(
     centre_y: i32,
 ) {
     if let Some(sprite) = &game_state.player_sprite {
-        // Ensure the texture is uploaded (once per window lifetime).
-        let need_upload = PLAYER_SPRITE_CACHE.with(|c| c.borrow().is_none());
-        if need_upload {
-            if let Some(creator) = current_creator() {
-                match rgba_to_texture(creator, &sprite.rgba, sprite.width, sprite.height) {
-                    Ok(tex) => {
-                        // SAFETY: see Texture Cache module docstring. The texture's
-                        // SDL handle is valid for the GameWindow's lifetime.
-                        let tex_static: Texture<'static> = unsafe { std::mem::transmute(tex) };
-                        PLAYER_SPRITE_CACHE.with(|c| *c.borrow_mut() = Some(tex_static));
-                    }
-                    Err(e) => {
-                        eprintln!("[PlayerSprite] texture upload failed: {:?}", e);
-                    }
-                }
-            }
-        }
-
-        let blit = PLAYER_SPRITE_CACHE.with(|c| c.borrow().is_some());
-        if blit {
-            PLAYER_SPRITE_CACHE.with(|c| {
-                let cache = c.borrow();
-                let tex = cache.as_ref().unwrap();
+        // Rebuild the texture from the cached RGBA each frame (Plan A). The
+        // creator holds an Rc into the renderer and does not keep borrowing the
+        // canvas, so `creator` + `tex` + `canvas.copy(&tex, ...)` is sound.
+        let canvas = window.canvas_mut();
+        let creator = canvas.texture_creator();
+        // Bind the Result to a local first so the Texture's borrow of `creator`
+        // outlives the match temporaries (avoids the E0597 drop-order problem).
+        let tex_result = rgba_to_texture(&creator, &sprite.rgba, sprite.width, sprite.height);
+        match tex_result {
+            Ok(tex) => {
                 // Anchor feet at the tile centre: bottom-centre of the sprite on
                 // (centre_x, centre_y). This matches how Diablo positions actor
                 // sprites on their tile.
@@ -1496,9 +1390,12 @@ fn draw_player_sprite(
                     sprite.width as u32,
                     sprite.height as u32,
                 );
-                let _ = window.canvas_mut().copy(tex, None, dst);
-            });
-            return;
+                let _ = canvas.copy(&tex, None, dst);
+                return;
+            }
+            Err(e) => {
+                eprintln!("[PlayerSprite] texture upload failed: {:?}", e);
+            }
         }
     }
 
@@ -1510,12 +1407,9 @@ fn draw_player_sprite(
     let _ = canvas.draw_rect(Rect::new(centre_x - 5, centre_y - 5, 10, 10));
 }
 
-/// Clear the player-sprite texture cache. Called on game-loop exit (alongside
-/// `clear_tile_texture_cache`) so a stale SDL handle isn't reused with a new
-/// window.
-pub fn clear_player_sprite_cache() {
-    PLAYER_SPRITE_CACHE.with(|c| *c.borrow_mut() = None);
-}
+/// Clear the player-sprite texture cache. Retained as a public no-op for API
+/// compatibility with `main.rs` — there is no texture cache any more (Plan A).
+pub fn clear_player_sprite_cache() {}
 
 /// Build the geographically-correct town layout (`dPiece` grid) from the four
 /// sector `.dun` templates + the `town.til` mega definitions.
@@ -1780,7 +1674,7 @@ mod tests {
     use super::*;
     use crate::engine::dungeon::{
         DungeonLevelData, DungeonType, LevelCelBlock, MegaTile, MinData, PaletteData, SolData,
-        TilData, TilEntry,
+        TilData, TileType, TilEntry,
     };
 
     #[test]

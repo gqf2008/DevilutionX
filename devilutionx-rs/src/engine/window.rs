@@ -94,12 +94,30 @@ impl GameWindow {
             .build()
             .context("Failed to create window")?;
 
-        let canvas = window
-            .into_canvas()
-            .accelerated()
-            .present_vsync()
-            .build()
-            .context("Failed to create canvas")?;
+        // Detect headless/no-GPU video drivers (e.g. SDL_VIDEODRIVER=dummy
+        // used in CI / smoke tests). Such drivers have no GPU to accelerate
+        // against, so requesting SDL_RENDERER_ACCELERATED would either fail or,
+        // in the dummy driver's case, segfault inside SDL_CreateRenderer. For
+        // those drivers we build a plain software canvas, which is always
+        // available. On a real desktop driver we keep the accelerated + vsync
+        // path for the best performance/tearing behaviour.
+        let driver = video_subsystem.current_video_driver();
+        let headless = matches!(driver, "dummy" | "DUMMY" | "offscreen" | "OFFSCREEN");
+
+        let canvas = if headless {
+            window
+                .into_canvas()
+                .software()
+                .build()
+                .context("Failed to create software canvas")?
+        } else {
+            window
+                .into_canvas()
+                .accelerated()
+                .present_vsync()
+                .build()
+                .context("Failed to create canvas")?
+        };
 
         Ok(Self {
             _sdl_context: sdl_context,
