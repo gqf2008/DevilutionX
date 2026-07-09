@@ -1382,6 +1382,388 @@ pub fn quick_load() -> Result<GameSave> {
     manager.load_game(0)
 }
 
+// ============================================================================
+// SaveSlot - practical round-trippable snapshot of the live GameState
+// ============================================================================
+//
+// The legacy `GameSave`/`SavedPlayer` types above were modelled on the *simple*
+// `game::player::Player` struct and a JSON view of the inventory, which do not
+// match the rich `player_exact::Player` that the live `GameState` actually
+// holds (~150 fields, 64x fixed-point HP/Mana, etc.). Rather than mutate the
+// read-only `player_exact` module, `SaveSlot` captures the player's *observable*
+// gameplay state (identity, progression, 64x vitals, position, level) as plain
+// serde-friendly primitives, so it can round-trip cleanly through bincode/JSON
+// without depending on internal engine types.
+//
+// This is what F5 (save) / F9 (load) in the game loop use.
+
+/// Snapshotted player vitals. All HP/Mana values are stored in their **native
+/// 64x fixed-point** representation (as held by `player_exact::Player`), so the
+/// save/restore is lossless — we never divide/multiply and lose precision.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SlotPlayer {
+    pub name: String,
+    /// Hero class as u8 (matches `HeroClass`'s `From<HeroClass> for u8`).
+    pub class: u8,
+    /// Player level (1-50).
+    pub level: u8,
+    /// Current dungeon/town level id.
+    pub plr_level: u8,
+
+    // --- Attributes (current + base) ---
+    pub strength: i32,
+    pub base_str: i32,
+    pub magic: i32,
+    pub base_mag: i32,
+    pub dexterity: i32,
+    pub base_dex: i32,
+    pub vitality: i32,
+    pub base_vit: i32,
+    pub stat_pts: i32,
+
+    // --- HP (64x fixed-point, stored as-is) ---
+    pub hp_base: i32,
+    pub max_hp_base: i32,
+    pub hit_points: i32,
+    pub max_hp: i32,
+
+    // --- Mana (64x fixed-point, stored as-is) ---
+    pub mana_base: i32,
+    pub max_mana_base: i32,
+    pub mana: i32,
+    pub max_mana: i32,
+
+    // --- Progression ---
+    pub experience: u32,
+    pub gold: i32,
+
+    // --- Position ---
+    pub pos_x: i32,
+    pub pos_y: i32,
+}
+
+/// World/level context captured alongside the player.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SlotWorld {
+    /// `DungeonType` as u8 (None=0, Town=1, Cathedral=2, ...).
+    pub dungeon_type: u8,
+    /// Whether the player is currently inside the dungeon (vs. town).
+    pub in_dungeon: bool,
+    pub is_town: bool,
+    /// Current game tick.
+    pub game_tick: u32,
+    /// Camera position.
+    pub cam_x: i32,
+    pub cam_y: i32,
+}
+
+/// A practical save slot: a header + the player snapshot + the world snapshot.
+///
+/// Serialized to disk as JSON (human-readable, matches the existing
+/// `SaveManager` format) via `SaveManager::save_slot`/`load_slot`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SaveSlot {
+    pub magic: u32,
+    pub version: u32,
+    /// Unix timestamp of the save.
+    pub save_time: u64,
+    pub player: SlotPlayer,
+    pub world: SlotWorld,
+}
+
+impl SaveSlot {
+    /// Current on-disk save format version.
+    pub const MAGIC: u32 = 0x53415645; // "SAVE"
+    pub const VERSION: u32 = 2;
+
+    /// Validate magic + version.
+    pub fn is_valid(&self) -> bool {
+        self.magic == Self::MAGIC && self.version == Self::VERSION
+    }
+}
+
+impl SaveManager {
+    /// Path for a `SaveSlot` file (kept separate from the legacy `save_{n}.json`
+    /// files so they never collide).
+    fn slot_path(&self, slot: u32) -> std::path::PathBuf {
+        Path::new(&self.save_dir).join(format!("slot_{}.sv", slot))
+    }
+
+    /// Public accessor for the on-disk path of a slot (used for logging).
+    pub fn slot_path_public(&self, slot: u32) -> String {
+        self.slot_path(slot).to_string_lossy().to_string()
+    }
+
+    /// Save a `SaveSlot` to the given slot number as pretty JSON. Returns the
+    /// path that was written (for logging).
+    pub fn save_slot(&self, slot: u32, data: &SaveSlot) -> Result<String> {
+        self.ensure_dir()?;
+        let path = self.slot_path(slot);
+        let file = File::create(&path)?;
+        let writer = BufWriter::new(file);
+        serde_json::to_writer_pretty(writer, data)?;
+        Ok(path.to_string_lossy().to_string())
+    }
+
+    /// Load a `SaveSlot` from the given slot number.
+    pub fn load_slot(&self, slot: u32) -> Result<SaveSlot> {
+        let path = self.slot_path(slot);
+        if !path.exists() {
+            return Err(anyhow!("Save slot does not exist: {:?}", path));
+        }
+        let file = File::open(&path)?;
+        let reader = BufReader::new(file);
+        let slot_data: SaveSlot = serde_json::from_reader(reader)?;
+        if !slot_data.is_valid() {
+            return Err(anyhow!(
+                "Save slot {:?} is invalid (magic=0x{:X}, version={})",
+                path, slot_data.magic, slot_data.version
+            ));
+        }
+        Ok(slot_data)
+    }
+
+    /// Does a `SaveSlot` exist for this slot number?
+    pub fn slot_exists_v2(&self, slot: u32) -> bool {
+        self.slot_path(slot).exists()
+    }
+}
+
+/// Convenience helpers: build a `SlotPlayer`/`SlotWorld`/`SaveSlot` directly
+/// from the live engine types, with no engine-side serialization coupling.
+impl SlotPlayer {
+    /// Capture a `player_exact::Player` into a serialisable snapshot.
+    ///
+    /// We take the player as a type-erased `&dyn PlayerSnapshot` so `save.rs`
+    /// does not depend on `player_exact` (which is a read-only module in this
+    /// task). `GameState` implements `PlayerSnapshot` for its player in
+    /// `game_state.rs`.
+    pub fn from_snapshot(p: &dyn PlayerSnapshot) -> Self {
+        Self {
+            name: p.name(),
+            class: p.class_u8(),
+            level: p.level(),
+            plr_level: p.plr_level(),
+            strength: p.strength(),
+            base_str: p.base_str(),
+            magic: p.magic(),
+            base_mag: p.base_mag(),
+            dexterity: p.dexterity(),
+            base_dex: p.base_dex(),
+            vitality: p.vitality(),
+            base_vit: p.base_vit(),
+            stat_pts: p.stat_pts(),
+            hp_base: p.hp_base(),
+            max_hp_base: p.max_hp_base(),
+            hit_points: p.hit_points(),
+            max_hp: p.max_hp(),
+            mana_base: p.mana_base(),
+            max_mana_base: p.max_mana_base(),
+            mana: p.mana(),
+            max_mana: p.max_mana(),
+            experience: p.experience(),
+            gold: p.gold(),
+            pos_x: p.pos_x(),
+            pos_y: p.pos_y(),
+        }
+    }
+}
+
+/// Type-erased read-only view of the engine's Player, used so `save.rs` can
+/// serialise player state without importing the (read-only) `player_exact`
+/// module. `GameState` (which owns the real `Player`) implements this.
+pub trait PlayerSnapshot {
+    fn name(&self) -> String;
+    fn class_u8(&self) -> u8;
+    fn level(&self) -> u8;
+    fn plr_level(&self) -> u8;
+    fn strength(&self) -> i32;
+    fn base_str(&self) -> i32;
+    fn magic(&self) -> i32;
+    fn base_mag(&self) -> i32;
+    fn dexterity(&self) -> i32;
+    fn base_dex(&self) -> i32;
+    fn vitality(&self) -> i32;
+    fn base_vit(&self) -> i32;
+    fn stat_pts(&self) -> i32;
+    fn hp_base(&self) -> i32;
+    fn max_hp_base(&self) -> i32;
+    fn hit_points(&self) -> i32;
+    fn max_hp(&self) -> i32;
+    fn mana_base(&self) -> i32;
+    fn max_mana_base(&self) -> i32;
+    fn mana(&self) -> i32;
+    fn max_mana(&self) -> i32;
+    fn experience(&self) -> u32;
+    fn gold(&self) -> i32;
+    fn pos_x(&self) -> i32;
+    fn pos_y(&self) -> i32;
+}
+
+/// Apply a `SlotPlayer` snapshot back onto a `PlayerSnapshot`-mutable view.
+/// `GameState` provides a mutable impl that writes into its real `Player`.
+pub trait PlayerSnapshotMut {
+    fn apply_slot(&mut self, s: &SlotPlayer);
+}
+
+/// Build a fresh `SaveSlot` (header + player + world) from snapshots + tick.
+pub fn build_save_slot(
+    player: &dyn PlayerSnapshot,
+    world: &dyn WorldSnapshot,
+) -> SaveSlot {
+    let save_time = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    SaveSlot {
+        magic: SaveSlot::MAGIC,
+        version: SaveSlot::VERSION,
+        save_time,
+        player: SlotPlayer::from_snapshot(player),
+        world: SlotWorld {
+            dungeon_type: world.dungeon_type_u8(),
+            in_dungeon: world.in_dungeon(),
+            is_town: world.is_town(),
+            game_tick: world.game_tick(),
+            cam_x: world.cam_x(),
+            cam_y: world.cam_y(),
+        },
+    }
+}
+
+/// Type-erased read-only view of `GameState` world fields.
+pub trait WorldSnapshot {
+    fn dungeon_type_u8(&self) -> u8;
+    fn in_dungeon(&self) -> bool;
+    fn is_town(&self) -> bool;
+    fn game_tick(&self) -> u32;
+    fn cam_x(&self) -> i32;
+    fn cam_y(&self) -> i32;
+}
+
+#[cfg(test)]
+mod slot_tests {
+    use super::*;
+
+    /// Round-trip a `SaveSlot` through JSON to prove the format is stable and
+    /// lossless (including the 64x fixed-point HP/Mana values).
+    #[test]
+    fn test_save_slot_json_roundtrip() {
+        let slot = SaveSlot {
+            magic: SaveSlot::MAGIC,
+            version: SaveSlot::VERSION,
+            save_time: 12345,
+            player: SlotPlayer {
+                name: "Aidan".to_string(),
+                class: 0,
+                level: 7,
+                plr_level: 3,
+                strength: 30,
+                base_str: 25,
+                magic: 10,
+                base_mag: 10,
+                dexterity: 20,
+                base_dex: 20,
+                vitality: 25,
+                base_vit: 25,
+                stat_pts: 5,
+                hp_base: 64 * 50,
+                max_hp_base: 64 * 60,
+                hit_points: 64 * 45,
+                max_hp: 64 * 60,
+                mana_base: 64 * 10,
+                max_mana_base: 64 * 12,
+                mana: 64 * 8,
+                max_mana: 64 * 12,
+                experience: 5000,
+                gold: 750,
+                pos_x: 56,
+                pos_y: 56,
+            },
+            world: SlotWorld {
+                dungeon_type: 2,
+                in_dungeon: true,
+                is_town: false,
+                game_tick: 999,
+                cam_x: 56,
+                cam_y: 56,
+            },
+        };
+
+        let json = serde_json::to_string(&slot).unwrap();
+        let back: SaveSlot = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(slot, back);
+        assert!(back.is_valid());
+        // Spot-check a 64x value survived intact.
+        assert_eq!(back.player.hit_points, 64 * 45);
+        assert_eq!(back.player.max_mana, 64 * 12);
+    }
+
+    /// Round-trip a `SaveSlot` through the `SaveManager` on disk (slot 0 in a
+    /// temp dir).
+    #[test]
+    fn test_save_slot_disk_roundtrip() {
+        let tmp = std::env::temp_dir().join(format!(
+            "devilutionx_rs_save_test_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let mgr = SaveManager::with_dir(tmp.to_str().unwrap());
+
+        let slot = SaveSlot {
+            magic: SaveSlot::MAGIC,
+            version: SaveSlot::VERSION,
+            save_time: 1,
+            player: SlotPlayer {
+                name: "Test".to_string(),
+                class: 1,
+                level: 2,
+                plr_level: 1,
+                strength: 1,
+                base_str: 1,
+                magic: 1,
+                base_mag: 1,
+                dexterity: 1,
+                base_dex: 1,
+                vitality: 1,
+                base_vit: 1,
+                stat_pts: 0,
+                hp_base: 64,
+                max_hp_base: 64,
+                hit_points: 64,
+                max_hp: 64,
+                mana_base: 0,
+                max_mana_base: 0,
+                mana: 0,
+                max_mana: 0,
+                experience: 0,
+                gold: 0,
+                pos_x: 1,
+                pos_y: 2,
+            },
+            world: SlotWorld {
+                dungeon_type: 1,
+                in_dungeon: false,
+                is_town: true,
+                game_tick: 5,
+                cam_x: 75,
+                cam_y: 68,
+            },
+        };
+
+        mgr.save_slot(0, &slot).unwrap();
+        assert!(mgr.slot_exists_v2(0));
+        let back = mgr.load_slot(0).unwrap();
+        assert_eq!(slot, back);
+
+        // Cleanup.
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+}
+
 /// Format play time as HH:MM:SS
 pub fn format_play_time(seconds: u64) -> String {
     let hours = seconds / 3600;

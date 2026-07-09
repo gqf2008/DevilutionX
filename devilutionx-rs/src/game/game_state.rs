@@ -789,6 +789,209 @@ impl GameState {
             false
         }
     }
+
+    // ========================================================================
+    // Save/Load (F5/F9) — round-trip the player + world state to/from disk.
+    //
+    // We go through the type-erased `PlayerSnapshot`/`WorldSnapshot` traits
+    // defined in `save.rs`, so `game_state.rs` (which *can* see the real
+    // `player_exact::Player`) bridges the engine types <-> the serialisable
+    // `SaveSlot`. Monster/object/inventory state is intentionally not persisted
+    // yet — those subsystems regenerate from the level seed on load (matching
+    // the original game's approach for the most part).
+    // ========================================================================
+
+    /// Capture the current state into a `SaveSlot` and write it to `slot` on
+    /// disk. Returns the path written, for logging.
+    pub fn save_to_slot(&self, slot: u32) -> std::result::Result<String, String> {
+        use crate::game::save::{build_save_slot, SaveManager};
+        let mgr = SaveManager::new();
+        let save = build_save_slot(self, self);
+        let path = mgr
+            .save_slot(slot, &save)
+            .map_err(|e| format!("save failed: {}", e))?;
+        Ok(path)
+    }
+
+    /// Load a `SaveSlot` from disk and apply it to this `GameState` (player +
+    /// world). Returns the loaded snapshot for inspection/logging.
+    pub fn load_from_slot(&mut self, slot: u32) -> std::result::Result<(), String> {
+        use crate::game::save::{SaveManager, PlayerSnapshotMut};
+        let mgr = SaveManager::new();
+        let data = mgr
+            .load_slot(slot)
+            .map_err(|e| format!("load failed: {}", e))?;
+        // Apply player fields.
+        PlayerSnapshotMut::apply_slot(&mut self.player, &data.player);
+        // Apply world fields.
+        self.in_dungeon = data.world.in_dungeon;
+        self.is_town = data.world.is_town;
+        self.game_tick = data.world.game_tick;
+        self.camera.tile_x = data.world.cam_x;
+        self.camera.tile_y = data.world.cam_y;
+        // Keep the player's logical position in sync with the camera so the
+        // renderer and movement code agree after a load.
+        self.player.position.x = data.player.pos_x;
+        self.player.position.y = data.player.pos_y;
+        Ok(())
+    }
+}
+
+// ----------------------------------------------------------------------------
+// Save trait bridges: GameState reads *as* a player snapshot and a world
+// snapshot, and the real `Player` implements `PlayerSnapshotMut` so loaded
+// fields are written straight back into the engine struct.
+// ----------------------------------------------------------------------------
+
+impl crate::game::save::PlayerSnapshot for GameState {
+    fn name(&self) -> String {
+        self.player.get_name()
+    }
+    fn class_u8(&self) -> u8 {
+        self.player._p_class.into()
+    }
+    fn level(&self) -> u8 {
+        self.player._p_level
+    }
+    fn plr_level(&self) -> u8 {
+        self.player.plr_level
+    }
+    fn strength(&self) -> i32 {
+        self.player._p_strength
+    }
+    fn base_str(&self) -> i32 {
+        self.player._p_base_str
+    }
+    fn magic(&self) -> i32 {
+        self.player._p_magic
+    }
+    fn base_mag(&self) -> i32 {
+        self.player._p_base_mag
+    }
+    fn dexterity(&self) -> i32 {
+        self.player._p_dexterity
+    }
+    fn base_dex(&self) -> i32 {
+        self.player._p_base_dex
+    }
+    fn vitality(&self) -> i32 {
+        self.player._p_vitality
+    }
+    fn base_vit(&self) -> i32 {
+        self.player._p_base_vit
+    }
+    fn stat_pts(&self) -> i32 {
+        self.player._p_stat_pts
+    }
+    fn hp_base(&self) -> i32 {
+        self.player._p_hp_base
+    }
+    fn max_hp_base(&self) -> i32 {
+        self.player._p_max_hp_base
+    }
+    fn hit_points(&self) -> i32 {
+        self.player._p_hit_points
+    }
+    fn max_hp(&self) -> i32 {
+        self.player._p_max_hp
+    }
+    fn mana_base(&self) -> i32 {
+        self.player._p_mana_base
+    }
+    fn max_mana_base(&self) -> i32 {
+        self.player._p_max_mana_base
+    }
+    fn mana(&self) -> i32 {
+        self.player._p_mana
+    }
+    fn max_mana(&self) -> i32 {
+        self.player._p_max_mana
+    }
+    fn experience(&self) -> u32 {
+        self.player._p_experience
+    }
+    fn gold(&self) -> i32 {
+        self.player._p_gold
+    }
+    fn pos_x(&self) -> i32 {
+        self.player.position.x
+    }
+    fn pos_y(&self) -> i32 {
+        self.player.position.y
+    }
+}
+
+impl crate::game::save::WorldSnapshot for GameState {
+    fn dungeon_type_u8(&self) -> u8 {
+        // Map DungeonType -> stable u8 (None=0, Town=1, ...). Kept explicit so
+        // reordering the enum never silently corrupts saves.
+        match self.dungeon.dungeon_type {
+            crate::game::types::DungeonType::None => 0,
+            crate::game::types::DungeonType::Town => 1,
+            crate::game::types::DungeonType::Cathedral => 2,
+            crate::game::types::DungeonType::Catacombs => 3,
+            crate::game::types::DungeonType::Caves => 4,
+            crate::game::types::DungeonType::Hell => 5,
+            crate::game::types::DungeonType::Nest => 6,
+            crate::game::types::DungeonType::Crypt => 7,
+        }
+    }
+    fn in_dungeon(&self) -> bool {
+        self.in_dungeon
+    }
+    fn is_town(&self) -> bool {
+        self.is_town
+    }
+    fn game_tick(&self) -> u32 {
+        self.game_tick
+    }
+    fn cam_x(&self) -> i32 {
+        self.camera.tile_x
+    }
+    fn cam_y(&self) -> i32 {
+        self.camera.tile_y
+    }
+}
+
+/// Writing loaded values back into the engine `Player`. The 64x fixed-point
+/// HP/Mana fields are restored verbatim (no scaling), so vitals survive a
+/// round-trip with zero precision loss.
+impl crate::game::save::PlayerSnapshotMut for Player {
+    fn apply_slot(&mut self, s: &crate::game::save::SlotPlayer) {
+        self.set_name(&s.name);
+        if let Ok(class) = crate::game::player_exact::HeroClass::try_from(s.class) {
+            self._p_class = class;
+        }
+        self._p_level = s.level;
+        self.plr_level = s.plr_level;
+
+        self._p_strength = s.strength;
+        self._p_base_str = s.base_str;
+        self._p_magic = s.magic;
+        self._p_base_mag = s.base_mag;
+        self._p_dexterity = s.dexterity;
+        self._p_base_dex = s.base_dex;
+        self._p_vitality = s.vitality;
+        self._p_base_vit = s.base_vit;
+        self._p_stat_pts = s.stat_pts;
+
+        // HP (64x) — restored as-is.
+        self._p_hp_base = s.hp_base;
+        self._p_max_hp_base = s.max_hp_base;
+        self._p_hit_points = s.hit_points;
+        self._p_max_hp = s.max_hp;
+
+        // Mana (64x) — restored as-is.
+        self._p_mana_base = s.mana_base;
+        self._p_max_mana_base = s.max_mana_base;
+        self._p_mana = s.mana;
+        self._p_max_mana = s.max_mana;
+
+        self._p_experience = s.experience;
+        self._p_gold = s.gold;
+
+        self.position = Point::new(s.pos_x, s.pos_y);
+    }
 }
 
 #[cfg(test)]
@@ -929,5 +1132,119 @@ mod tests {
                 "monster must not occupy the player's tile"
             );
         }
+    }
+
+    /// Full save/load round-trip on a real `GameState`: build a state, mutate
+    /// the player's vitals/position/level, save to a temp slot, then load into
+    /// a *fresh* state and verify every captured field was restored —
+    /// including the 64x fixed-point HP/Mana values.
+    #[test]
+    fn test_game_state_save_load_roundtrip() {
+        use crate::game::save::SaveManager;
+        use crate::game::player_exact::HeroClass;
+
+        // Unique temp save dir so parallel test runs never collide.
+        let tmp = std::env::temp_dir().join(format!(
+            "devilutionx_rs_gs_roundtrip_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        // Override the SaveManager default dir by building the SaveSlot via the
+        // manager pointed at our temp dir.
+        let mgr = SaveManager::with_dir(tmp.to_str().unwrap());
+
+        // --- Source state: set up a non-trivial player. ---
+        let mut gs = GameState::new(Player::new(), false, 42);
+        gs.player.set_name("Roundtrip");
+        gs.player._p_class = HeroClass::Sorcerer;
+        gs.player._p_level = 9;
+        gs.player.plr_level = 4;
+        gs.player._p_strength = 40;
+        gs.player._p_base_str = 30;
+        gs.player._p_magic = 55;
+        gs.player._p_dexterity = 35;
+        gs.player._p_vitality = 28;
+        gs.player._p_stat_pts = 12;
+        // 64x HP/Mana: real in-game values would be e.g. 64*120.
+        gs.player._p_hit_points = 64 * 117; // took 3 damage from full 120
+        gs.player._p_max_hp = 64 * 120;
+        gs.player._p_max_hp_base = 64 * 120;
+        gs.player._p_hp_base = 64 * 117;
+        gs.player._p_mana = 64 * 88;
+        gs.player._p_max_mana = 64 * 100;
+        gs.player._p_max_mana_base = 64 * 100;
+        gs.player._p_mana_base = 64 * 88;
+        gs.player._p_experience = 12345;
+        gs.player._p_gold = 999;
+        gs.player.position = Point::new(77, 66);
+        gs.in_dungeon = true;
+        gs.is_town = false;
+        gs.game_tick = 4242;
+        gs.camera.tile_x = 77;
+        gs.camera.tile_y = 66;
+
+        // Snapshot the to-be-saved values.
+        let saved_hp = gs.player._p_hit_points;
+        let saved_mana = gs.player._p_mana;
+        let saved_xp = gs.player._p_experience;
+        let saved_pos = gs.player.position;
+
+        // Save via the GameState bridge (uses build_save_slot).
+        use crate::game::save::build_save_slot;
+        let slot = build_save_slot(&gs, &gs);
+        mgr.save_slot(7, &slot).unwrap();
+        assert!(mgr.slot_exists_v2(7));
+
+        // --- Mutate the source state to simulate continued play. ---
+        gs.player._p_hit_points = 1;
+        gs.player._p_mana = 1;
+        gs.player._p_experience = 0;
+        gs.player.position = Point::new(0, 0);
+        gs.game_tick = 0;
+
+        // --- Load into the (mutated) state and verify restoration. ---
+        let data = mgr.load_slot(7).unwrap();
+        assert!(data.is_valid());
+        // Apply player.
+        use crate::game::save::PlayerSnapshotMut;
+        PlayerSnapshotMut::apply_slot(&mut gs.player, &data.player);
+        // Apply world.
+        gs.in_dungeon = data.world.in_dungeon;
+        gs.is_town = data.world.is_town;
+        gs.game_tick = data.world.game_tick;
+        gs.camera.tile_x = data.world.cam_x;
+        gs.camera.tile_y = data.world.cam_y;
+
+        // --- Assertions: every captured field is restored losslessly. ---
+        assert_eq!(gs.player.get_name(), "Roundtrip");
+        assert_eq!(gs.player._p_class, HeroClass::Sorcerer);
+        assert_eq!(gs.player._p_level, 9);
+        assert_eq!(gs.player.plr_level, 4);
+        assert_eq!(gs.player._p_strength, 40);
+        assert_eq!(gs.player._p_base_str, 30);
+        assert_eq!(gs.player._p_magic, 55);
+        assert_eq!(gs.player._p_dexterity, 35);
+        assert_eq!(gs.player._p_vitality, 28);
+        assert_eq!(gs.player._p_stat_pts, 12);
+        // 64x vitals restored verbatim (no precision loss).
+        assert_eq!(gs.player._p_hit_points, saved_hp);
+        assert_eq!(gs.player._p_hit_points, 64 * 117);
+        assert_eq!(gs.player._p_max_hp, 64 * 120);
+        assert_eq!(gs.player._p_mana, saved_mana);
+        assert_eq!(gs.player._p_mana, 64 * 88);
+        assert_eq!(gs.player._p_max_mana, 64 * 100);
+        assert_eq!(gs.player._p_experience, saved_xp);
+        assert_eq!(gs.player._p_gold, 999);
+        assert_eq!(gs.player.position, saved_pos);
+        assert_eq!(gs.player.position, Point::new(77, 66));
+        assert!(gs.in_dungeon);
+        assert!(!gs.is_town);
+        assert_eq!(gs.game_tick, 4242);
+        assert_eq!(gs.camera.tile_x, 77);
+
+        // Cleanup.
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

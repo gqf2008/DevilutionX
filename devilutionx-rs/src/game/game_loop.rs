@@ -145,6 +145,44 @@ pub fn run_game_loop(mode: InterfaceMode, window: &mut GameWindow, game_state: &
             return_to_town(game_state);
         }
 
+        // F5 = quick-save the current game to slot 0, F9 = quick-load from
+        // slot 0. These exercise the full save/load round-trip (player vitals
+        // in 64x fixed-point, position, level, tick). Used edge-triggered so a
+        // single key tap saves/loads exactly once.
+        if input.is_key_pressed(Keycode::F5) {
+            match game_state.save_to_slot(0) {
+                Ok(path) => {
+                    println!(
+                        "[Save] saved hero '{}' (L{}, XP {}, HP {}/{}) to {}",
+                        game_state.player.get_name(),
+                        game_state.player._p_level,
+                        game_state.player._p_experience,
+                        game_state.player._p_hit_points,
+                        game_state.player._p_max_hp,
+                        path
+                    );
+                }
+                Err(e) => println!("[Save] FAILED: {}", e),
+            }
+        }
+        if input.is_key_pressed(Keycode::F9) {
+            match game_state.load_from_slot(0) {
+                Ok(()) => {
+                    println!(
+                        "[Load] restored hero '{}' (L{}, XP {}, HP {}/{}) @ ({},{})",
+                        game_state.player.get_name(),
+                        game_state.player._p_level,
+                        game_state.player._p_experience,
+                        game_state.player._p_hit_points,
+                        game_state.player._p_max_hp,
+                        game_state.player.position.x,
+                        game_state.player.position.y,
+                    );
+                }
+                Err(e) => println!("[Load] FAILED: {}", e),
+            }
+        }
+
         // Apply continuous movement (held arrow/WASD keys) to the player/camera.
         apply_movement(game_state, &input);
 
