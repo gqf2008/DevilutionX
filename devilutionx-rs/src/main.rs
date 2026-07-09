@@ -1350,6 +1350,7 @@ fn render_main_menu(
     Ok(())
 }
 
+
 fn render_title_screen(
     canvas: &mut sdl2::render::Canvas<sdl2::video::Window>,
     font: &mut PixelFont,

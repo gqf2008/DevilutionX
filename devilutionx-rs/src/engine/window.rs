@@ -104,7 +104,7 @@ impl GameWindow {
         let driver = video_subsystem.current_video_driver();
         let headless = matches!(driver, "dummy" | "DUMMY" | "offscreen" | "OFFSCREEN");
 
-        let canvas = if headless {
+        let mut canvas = if headless {
             window
                 .into_canvas()
                 .software()
@@ -118,6 +118,12 @@ impl GameWindow {
                 .build()
                 .context("Failed to create canvas")?
         };
+
+        // Explicitly show/raise the window after creating the canvas. SDL2
+        // may leave the window in a state where the renderer's present() does
+        // not reach the screen until the window is shown/raised.
+        canvas.window_mut().show();
+        canvas.window_mut().raise();
 
         Ok(Self {
             _sdl_context: sdl_context,
