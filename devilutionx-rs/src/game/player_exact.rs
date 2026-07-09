@@ -689,6 +689,65 @@ impl Player {
         self._p_hp_per = self.get_hp_percentage();
     }
 
+    /// Initialise stats/HP/mana for a class. `Player::new()` zeroes every
+    /// field (including HP), so without this a freshly-created hero starts
+    /// at 0 HP and is instantly dead. Uses the per-class base attributes
+    /// from `player_dat::get_class_attributes` (sourced from the TSVs) and
+    /// the Diablo fixed-point HP/mana formulas:
+    ///
+    /// C++ `CreatePlayer`: `max_hp_base = (vit + adj_life) * lvl_life`,
+    /// stored as 64x fixed-point; mana is `(mag + adj_mana) * lvl_mana`.
+    /// `_p_hit_points`/`_p_mana` start full.
+    pub fn init_class_stats(&mut self) {
+        // `player_exact::HeroClass` and `player_dat::HeroClass` are two
+        // separate enums with identical discriminants; bridge via u8.
+        let pd_class = match self._p_class {
+            HeroClass::Warrior => crate::game::player_dat::HeroClass::Warrior,
+            HeroClass::Rogue => crate::game::player_dat::HeroClass::Rogue,
+            HeroClass::Sorcerer => crate::game::player_dat::HeroClass::Sorcerer,
+            HeroClass::Monk => crate::game::player_dat::HeroClass::Monk,
+            HeroClass::Bard => crate::game::player_dat::HeroClass::Bard,
+            HeroClass::Barbarian => crate::game::player_dat::HeroClass::Barbarian,
+        };
+        let attrs = crate::game::player_dat::get_class_attributes(pd_class);
+        // Base attributes
+        self._p_base_str = attrs.base_str as i32;
+        self._p_strength = attrs.base_str as i32;
+        self._p_base_mag = attrs.base_mag as i32;
+        self._p_magic = attrs.base_mag as i32;
+        self._p_base_dex = attrs.base_dex as i32;
+        self._p_dexterity = attrs.base_dex as i32;
+        self._p_base_vit = attrs.base_vit as i32;
+        self._p_vitality = attrs.base_vit as i32;
+
+        // HP: (vit + adj_life) * lvl_life, all in 64x fixed-point. adj_life/
+        // lvl_life are already 64x (fixed6(...) values, i16), and vit is a
+        // plain integer that we shift into 64x before combining. Result
+        // stays 64x.
+        let vit_64x = (attrs.base_vit as i32) << 6;
+        let adj_life = attrs.adj_life as i32;
+        let lvl_life = attrs.lvl_life as i32;
+        let max_hp_base = (vit_64x + adj_life) * lvl_life >> 6;
+        self._p_max_hp_base = max_hp_base;
+        self._p_max_hp = max_hp_base;
+        self._p_hit_points = max_hp_base;
+        self._p_hp_per = 100 << 6; // full
+
+        // Mana: (mag + adj_mana) * lvl_mana, same fixed-point scheme.
+        let mag_64x = (attrs.base_mag as i32) << 6;
+        let adj_mana = attrs.adj_mana as i32;
+        let lvl_mana = attrs.lvl_mana as i32;
+        let max_mana_base = ((mag_64x + adj_mana) * lvl_mana) >> 6;
+        self._p_max_mana_base = max_mana_base;
+        self._p_max_mana = max_mana_base;
+        self._p_mana = max_mana_base;
+        self._p_mana_per = 100 << 6;
+
+        // Level 1 start.
+        self._p_level = 1;
+    }
+
+
     /// Modify HP by delta (display value)
     ///
     /// Returns true if player died from this change

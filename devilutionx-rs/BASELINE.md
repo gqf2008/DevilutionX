@@ -20,12 +20,14 @@
 
 ## 测试基线: ✅ GREEN（2026-07-09 更新）
 
-`cargo test --lib` → **1850 passed; 0 failed; 2 ignored**
-`cargo test --bins` → **1496 passed; 0 failed**（+1 flaky `test_ai_counselor_ranged_attack`，单独跑通过，是既有 static_mut_refs 全局污染，非新引入）
+`cargo test --lib` → **1882 passed; 0 failed; 2 ignored**
+`cargo test --bins` → **1783 passed; 0 failed**（levels/ 接入后 bins 暴露了 levels/* 的测试，计数大涨）
 `cargo test --test archive_manager` → 8 passed（真实 MPQ 解压/优先级覆盖）
-`cargo build --release` → 792KB exe，能启动→主菜单→选角色→进入 Tristram→方向键走动
+`cargo build --release` → ~863KB exe
 
-**可玩性里程碑**：渲染桥（CLX/CEL→RGBA→SDL Texture）已端到端验证；进入游戏后看到地理正确的 Tristram 布局（4 个 sector 模板 + town.til mega-tile 映射驱动 dPiece 网格），方向键/WASD 移动相机+玩家，纹理缓存避免每帧重解码。
+**可玩性里程碑（已达成）**：启动→主菜单→选角色→进入 Tristram（地理正确 town 布局）→按 D 进入 L1 Cathedral 地牢（忠实 drlg_l1 DRLG 生成）→看到怪物（真实 CL2 精灵，待机/追击 AI）→HUD 面板（生命/法力球、经验条、技能槽、腰带、文字）→方向键走动。按 T 回城。
+
+**渲染管线**：CLX/CEL/CL2 → RGBA → SDL Texture 全链路验证（sprite_render + cl2_sheet + cel）。纹理缓存避免每帧重解码。玩家用真实 Warrior 精灵（spawn.mpq plrgfx）。
 
 此前基线为 🔴 RED（全量并行运行以 `STATUS_STACK_BUFFER_OVERRUN` 崩溃，且 `drlg_l2::test_create_dungeon_with_fill_voids` 死循环卡死）。多轮并行推进：测试清理 → RNG/常量/MPQ 基础设施 → drlg_l4 循环修正+DMAXX=40+ConnectHall 终止性 → 渲染桥+死代码清理 → walkable Tristram。
 

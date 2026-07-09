@@ -101,10 +101,13 @@ pub fn monster_attack_player(
     let armor_reduction = (armor_class / 2) << 6;
     let final_damage_64x = raw_damage_64x.saturating_sub(armor_reduction).max(64); // Min 1 damage
 
-    // 6. Apply damage to player (C++ line 1228)
-    player.modify_hp(-final_damage_64x);
-
+    // 6. Apply damage to player (C++ line 1228).
+    // `final_damage_64x` is in 64x fixed-point, but `modify_hp` takes a
+    // display-scale delta and re-applies the 64x factor internally, so we
+    // must pass the display value (final_damage_64x >> 6) to avoid a
+    // double 64x scaling that would deal 64x the intended damage.
     let final_damage = final_damage_64x >> 6; // Convert back to normal scale
+    player.modify_hp(-final_damage);
 
     AttackResult::Hit { damage: final_damage }
 }

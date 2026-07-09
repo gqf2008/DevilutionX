@@ -1789,6 +1789,9 @@ fn start_game(ctx: &mut DiabloContext, class: game::player::PlayerClass) -> Resu
         game::player::PlayerClass::Bard => game::player_exact::HeroClass::Bard,
         game::player::PlayerClass::Barbarian => game::player_exact::HeroClass::Barbarian,
     };
+    // Player::new() zeroes all stats including HP; seed the per-class base
+    // attributes + HP/mana so the hero doesn't start dead.
+    player.init_class_stats();
     player.plr_active = true;
 
     // Initialize GameState. We enter Tristram (town) directly so the player sees
