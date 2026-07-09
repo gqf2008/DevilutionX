@@ -20,14 +20,47 @@
 
 ## 测试基线: ✅ GREEN（2026-07-09 更新）
 
-`cargo test --lib` → **1882 passed; 0 failed; 2 ignored**
-`cargo test --bins` → **1783 passed; 0 failed**（levels/ 接入后 bins 暴露了 levels/* 的测试，计数大涨）
+`cargo test --lib` → **1885 passed; 0 failed; 2 ignored**
+`cargo test --bins` → **1786 passed; 0 failed**（levels/ 接入后 bins 暴露了 levels/* 的测试，计数大涨）
 `cargo test --test archive_manager` → 8 passed（真实 MPQ 解压/优先级覆盖）
-`cargo build --release` → ~863KB exe
+`cargo build --release` → ~1.06 MB exe
 
-**可玩性里程碑（已达成）**：启动→主菜单→选角色→进入 Tristram（地理正确 town 布局）→按 D 进入 L1 Cathedral 地牢（忠实 drlg_l1 DRLG 生成）→看到怪物（真实 CL2 精灵，待机/追击 AI）→HUD 面板（生命/法力球、经验条、技能槽、腰带、文字）→方向键走动。按 T 回城。
+**可玩性里程碑（已达成 — 功能完整的可玩 demo）**：
+启动→主菜单（真实 PCX 背景）→选角色（Warrior/Rogue/Sorcerer，正确起始 HP/法力）→进入 Tristram（地理正确 town 布局）→按 D 进入 L1 Cathedral 地牢（忠实 drlg_l1 DRLG 生成）→怪物（真实 CL2 精灵，待机/追击 AI）→近战自动战斗（攻击/伤害/死亡/经验/升级）→按 F 施放 Firebolt 法术（消耗法力，飞行，命中伤害）→HUD 面板（生命/法力球、经验条、技能槽、腰带、文字）→F5 存档/F9 读档（完整 GameState 往返）→方向键走动，按 T 回城。
 
-**渲染管线**：CLX/CEL/CL2 → RGBA → SDL Texture 全链路验证（sprite_render + cl2_sheet + cel）。纹理缓存避免每帧重解码。玩家用真实 Warrior 精灵（spawn.mpq plrgfx）。
+**渲染管线**：CLX/CEL/CL2 → RGBA → SDL Texture 全链路验证（sprite_render + cl2_sheet + cel）。纹理缓存避免每帧重解码。玩家用真实 Warrior 精灵，怪物用真实 CL2 精灵（均从 spawn.mpq）。
+
+## 本轮（2026-07-07 ~ 07-09）工作总结
+
+16 个提交，从"15 个失败测试 + 1 卡死、游戏流程层 0%"推进到**功能完整的可玩 demo**。关键里程碑按顺序：
+
+1. **测试全绿**（ba7fa6ad1）：修 15 失败 + 1 卡死（sha 位移溢出/pack SIZE/drlg_l4 坐标映射/ConnectHall 死循环等）
+2. **基础设施**（bcde69287）：确定性 PRNG 移植 + 维度常量去重 + MPQ ArchiveManager
+3. **地牢生成修复**（c3687e5fe）：drlg_l4 循环范围（0..MAXDUNX→0..DMAXX）+ DMAXX=112→40 + ConnectHall 终止性根治（X/Y 轴 bug）
+4. **死代码清理**（338d60532）：删 playerdat.rs 错误副本 + SpellId 文档化
+5. **RNG 接入**（4de73bc8f）：drlg_l1/l3 接入确定性 PRNG（drlg_l3 原用错误 LCG）
+6. **渲染桥**（ce05b02a9）：CLX/CEL→SDL Texture 端到端验证（R1 桥打通）
+7. **walkable Tristram**（062d7df89）：地理正确 town 布局 + 相机/移动
+8. **玩家精灵**（7ec0d2d16）：真实 Warrior CL2 + isometric 逻辑坐标修复 + flaky 测试根治
+9. **levels 接入 + L1 地牢**（469f7195f）：mod levels 零成本接入 + drlg_l1 真实生成 Cathedral
+10. **怪物 + HUD**（b0983a907）：地牢怪物（真 CL2 + AI）+ HUD 面板
+11. **战斗可玩**（56fad2c9e）：玩家 HP 初始化 + 64x 伤害双重缩放修复
+12. **战斗循环完整**（53cae5fd0）：死亡同步 + 经验/升级
+13. **存档系统**（f851b7d3f）：F5/F9 + GameState 往返
+14. **法术系统**（b62e8274c）：Firebolt（F 键）自包含导弹
+
+侦察文档：`PORTING/200.GAMEFLOW-RECON-2026.md`（流程层）、`PORTING/201.LEVELS-INTEGRATION-DECISION.md`（levels 接入决策）。
+
+## 仍待完成（通往"移植完成"）
+
+- **物品系统**：掉落/拾取/背包/装备（inventory.rs 框架在但未接入游戏循环）
+- **tile 索引精确化**：drlg_l1 逻辑 Tile→L1 TIL mega 映射是经验值，墙壁/角落变体可能视觉不准
+- **多关卡**：目前只 L1 Cathedral；L2-L4 + town 楼梯衔接
+- **音频**：AudioManager 是 stub（无真实音效/音乐）
+- **NPC/任务/商店**：towner.rs/store.rs/dialogue.rs 框架在但未接入
+- **法术扩展**：仅 Firebolt；完整法术书（spelldat 有 52 法术）
+- **存档完整性**：怪物/物品/地牢布局未持久化（Diablo 从 seed 重生成）
+- **网络多人**：net/ 全 stub
 
 此前基线为 🔴 RED（全量并行运行以 `STATUS_STACK_BUFFER_OVERRUN` 崩溃，且 `drlg_l2::test_create_dungeon_with_fill_voids` 死循环卡死）。多轮并行推进：测试清理 → RNG/常量/MPQ 基础设施 → drlg_l4 循环修正+DMAXX=40+ConnectHall 终止性 → 渲染桥+死代码清理 → walkable Tristram。
 
