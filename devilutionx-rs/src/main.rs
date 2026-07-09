@@ -586,7 +586,10 @@ struct UiAssetsSnapshot {
     mainmenu_bg: Option<UiArtImage>,
     title_bg: Option<UiArtImage>,
     selhero_bg: Option<UiArtImage>,
-    logo: Option<UiArtImage>,
+    /// Animated logo (Diablo fire logo). C++ `ArtLogo` is a PcxSpriteList:
+    /// 16 frames for Hellfire (`hf_logo2`), 15 frames for the original
+    /// (`smlogo`). Rendered as an animated sprite, NOT a static image.
+    logo: Vec<UiArtImage>,
     cursor: Option<UiArtImage>,
     focus_small: Vec<UiArtImage>,
     focus_med: Vec<UiArtImage>,
@@ -689,10 +692,14 @@ fn load_ui_assets(res: &mut UiResources, mpq: &mut MpqAssetManager) {
     assets.title_bg = load_pcx_image(mpq, title_path, None).ok();
     assets.selhero_bg = load_pcx_image(mpq, "ui_art\\selhero.pcx", None).ok();
 
-    // Hellfire 优先，其次原版 LOGO
-    assets.logo = load_pcx_image(mpq, "ui_art\\hf_logo2.pcx", Some(0))
-        .or_else(|_| load_pcx_image(mpq, "ui_art\\smlogo.pcx", Some(250)))
-        .ok();
+    // Animated logo. C++ `ArtLogo` is a PcxSpriteList: Hellfire `hf_logo2`
+    // (16 frames, transparent=0) else original `smlogo` (15 frames,
+    // transparent=250). Rendered frame-cycled, NOT a static image.
+    let mut logo = load_pcx_strip(mpq, "ui_art\\hf_logo2.pcx", 16, Some(0));
+    if logo.is_empty() {
+        logo = load_pcx_strip(mpq, "ui_art\\smlogo.pcx", 15, Some(250));
+    }
+    assets.logo = logo;
 
     assets.cursor = load_pcx_image(mpq, "ui_art\\cursor.pcx", Some(0)).ok();
 
@@ -700,6 +707,12 @@ fn load_ui_assets(res: &mut UiResources, mpq: &mut MpqAssetManager) {
     assets.focus_small = load_pcx_strip(mpq, "ui_art\\focus16.pcx", 8, Some(250));
     assets.focus_med = load_pcx_strip(mpq, "ui_art\\focus.pcx", 8, Some(250));
     assets.focus_big = load_pcx_strip(mpq, "ui_art\\focus42.pcx", 8, Some(250));
+
+    // Debug: confirm logo loaded as multi-frame animation
+    if let Some(f) = assets.logo.first() {
+        println!("[UiAssets] logo: {} frames, frame size {}x{}",
+            assets.logo.len(), f.width, f.height);
+    }
 
     // Debug: print actual frame sizes loaded
     if let Some(f) = assets.focus_med.first() {
@@ -717,7 +730,7 @@ fn load_ui_assets(res: &mut UiResources, mpq: &mut MpqAssetManager) {
         "[UiAssets] mainmenu={} title={} logo={} cursor={} focus16={} focus={} focus42={}",
         assets.mainmenu_bg.is_some(),
         assets.title_bg.is_some(),
-        assets.logo.is_some(),
+        !assets.logo.is_empty(),
         assets.cursor.is_some(),
         assets.focus_small.len(),
         assets.focus_med.len(),
@@ -1121,7 +1134,7 @@ fn diablo_splash(ctx: &mut DiabloContext, flags: &CmdFlags, is_hellfire: bool, o
     if matches!(splash_pref, StartUpSplash::LogoAndTitleDialog | StartUpSplash::TitleDialog) {
         println!("  Entering title screen loop...");
         let assets = snapshot_ui_assets();
-        println!("  title_bg={} logo={}", assets.title_bg.is_some(), assets.logo.is_some());
+        println!("  title_bg={} logo={}", assets.title_bg.is_some(), !assets.logo.is_empty());
         let timeout = Duration::from_secs(7);
         let start = Instant::now();
         let mut fade_ctx = UiContext::new();
@@ -1259,7 +1272,13 @@ fn render_main_menu(
         canvas.clear();
     }
 
-    if let Some(logo) = &assets.logo {
+    // Animated logo (Diablo fire logo). C++ renders `ArtLogo` via
+    // UiImageAnimatedClx, cycling frames from the PcxSpriteList. We pick a
+    // frame from the current SDL ticks (~10 fps, matching the original feel).
+    if !assets.logo.is_empty() {
+        let ticks = unsafe { sdl2::sys::SDL_GetTicks() };
+        let frame_idx = ((ticks / 100) as usize) % assets.logo.len();
+        let logo = &assets.logo[frame_idx];
         let x = ui_x + (640 - logo.width as i32) / 2;
         render_ui_image(canvas, &creator, logo, x, ui_y + 30, fade)?;
     }
@@ -1362,7 +1381,10 @@ fn render_title_screen(
         canvas.clear();
     }
 
-    if let Some(logo) = &assets.logo {
+    if !assets.logo.is_empty() {
+        let ticks = unsafe { sdl2::sys::SDL_GetTicks() };
+        let frame_idx = ((ticks / 100) as usize) % assets.logo.len();
+        let logo = &assets.logo[frame_idx];
         let x = ui_x + (640 - logo.width as i32) / 2;
         let y = ui_y + 180;
         render_ui_image(canvas, &creator, logo, x, y, fade)?;
@@ -1401,7 +1423,10 @@ fn render_selhero(
         canvas.clear();
     }
 
-    if let Some(logo) = &assets.logo {
+    if !assets.logo.is_empty() {
+        let ticks = unsafe { sdl2::sys::SDL_GetTicks() };
+        let frame_idx = ((ticks / 100) as usize) % assets.logo.len();
+        let logo = &assets.logo[frame_idx];
         let x = ui_x + (640 - logo.width as i32) / 2;
         render_ui_image(canvas, &creator, logo, x, ui_y + 40, fade)?;
     }
