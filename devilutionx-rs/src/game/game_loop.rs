@@ -17,12 +17,14 @@ use crate::engine::sprite_render::rgba_to_texture;
 use crate::game::input::InputSystem;
 use crate::game::network;
 use crate::game::game_state::{GameState, TownLayout, TOWN_MAX_X, TOWN_MAX_Y};
+use crate::game::hud;
 use anyhow::Result;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::rect::Rect;
 use sdl2::render::Texture;
 use rand::SeedableRng;
+use rand::Rng;
 use std::collections::HashMap;
 
 /// Interface mode for game initialization
@@ -437,7 +439,159 @@ pub fn descend_to_dungeon(game_state: &mut GameState) -> Result<(), String> {
     game_state.player.position.y = center_y;
 
     println!("[Descend] Entered L1 Cathedral at ({}, {})", center_x, center_y);
+
+    // Step 1: place monsters on the dungeon floor. We clear any stale monsters
+    // (e.g. from a previous descent) and scatter a small pack across walkable
+    // floor tiles away from the player spawn. Also pre-load their stand sprites
+    // so the renderer can draw real CL2 art (with a coloured-block fallback).
+    place_dungeon_monsters(game_state, center_x, center_y);
+
     Ok(())
+}
+
+/// Number of monsters to scatter across an L1 Cathedral level. Kept small so
+/// the dungeon feels populated without crowding the shareware-sized rooms.
+const DUNGEON_MONSTER_COUNT: usize = 8;
+
+/// Place a small pack of monsters on the dungeon floor, away from the player
+/// spawn, and pre-load their stand sprites for rendering.
+///
+/// Monsters are drawn from the Cathedral-appropriate types (Zombie, Fallen One,
+/// Skeleton, Scavenger, ...). Each is placed on a random walkable floor tile
+/// (from `dungeon_layout.floor_tiles`) at least ~8 micro-tiles from the spawn
+/// point so the player doesn't immediately aggro the whole pack. The monsters
+/// live in `game_state.monster_manager`; their sprites are cached in
+/// `game_state.monster_sprites`.
+///
+/// Non-fatal: if the layout has no floor tiles or the MPQ can't be opened, we
+/// simply place fewer/no monsters and the renderer falls back to coloured blocks.
+fn place_dungeon_monsters(game_state: &mut GameState, spawn_x: i32, spawn_y: i32) {
+    // Start each descent with a clean monster roster.
+    game_state.monster_manager.clear();
+    game_state.monster_sprites = None;
+
+    // Candidate spawn tiles: floor tiles far enough from the player spawn.
+    let floor_tiles: Vec<(i32, i32)> = match &game_state.dungeon_layout {
+        Some(l) => l
+            .floor_tiles
+            .iter()
+            .copied()
+            .filter(|(x, y)| (x - spawn_x).abs() + (y - spawn_y).abs() >= 8)
+            .collect(),
+        None => Vec::new(),
+    };
+
+    if floor_tiles.is_empty() {
+        println!("[Monsters] no floor tiles available; placing no monsters");
+        return;
+    }
+
+    // Cathedral-appropriate monster types (matches MonsterType::for_dungeon).
+    use crate::game::monster::MonsterType;
+    let types = [
+        MonsterType::Zombie,
+        MonsterType::FallenOne,
+        MonsterType::Skeleton,
+        MonsterType::Scavenger,
+        MonsterType::SkeletonArcher,
+    ];
+
+    let mut rng = rand::rng();
+    let mut placed = 0usize;
+    let mut used_types: Vec<MonsterType> = Vec::new();
+    let mut occupied: Vec<(i32, i32)> = Vec::new();
+
+    for _ in 0..DUNGEON_MONSTER_COUNT {
+        // Pick a random floor tile not already occupied by another monster.
+        let mut attempts = 0;
+        let (tx, ty) = loop {
+            let idx = rng.random_range(0..floor_tiles.len());
+            let p = floor_tiles[idx];
+            if !occupied.contains(&p) {
+                break p;
+            }
+            attempts += 1;
+            if attempts > 16 {
+                break p;
+            }
+        };
+        occupied.push((tx, ty));
+
+        let monster_type = types[rng.random_range(0..types.len())];
+        // Build the monster on its spawn tile. `Monster::new` seeds enemy/target
+        // with the monster's own tile (a safe no-op until `update_ai` repoints
+        // them at the player) and home_x/home_y with the spawn tile (used to
+        // bound idle wandering).
+        let mut m = crate::game::monster::Monster::new(
+            placed as u32 + 1,
+            monster_type,
+            tx,
+            ty,
+            1, // level modifier
+        );
+        // Seed the enemy position with the player spawn so the first AI tick can
+        // compute distance to the player.
+        m.enemy_position = crate::game::types::Point::new(spawn_x, spawn_y);
+        // Start idle (stand) — the AI step flips to Chasing when the player is
+        // within aggro_range (8 tiles).
+        m.ai_state = crate::game::monster::MonsterAIState::Idle;
+        m.mode = crate::game::monster::MonsterMode::Stand;
+
+        game_state.monster_manager.add_monster(m);
+        used_types.push(monster_type);
+        placed += 1;
+    }
+
+    println!(
+        "[Monsters] placed {} monsters on floor tiles (types: {:?})",
+        placed,
+        used_types
+            .iter()
+            .map(|t| t.name())
+            .collect::<std::collections::BTreeSet<_>>()
+    );
+
+    // Pre-load stand sprites for the placed types. Opens the local MPQ directly
+    // (spawn.mpq / diabdat.mpq) since the game loop doesn't own the asset
+    // manager. Non-fatal: if it fails, the renderer uses coloured blocks.
+    if let Some(sheet) = load_monster_sprite_set(&used_types) {
+        game_state.monster_sprites = Some(sheet);
+    } else {
+        println!("[Monsters] monster sprites unavailable; renderer will use coloured blocks");
+    }
+}
+
+/// Open the local game MPQ (spawn.mpq shareware, or diabdat.mpq full) and load
+/// the stand sprites for the given monster types into a [`MonsterSpriteSet`].
+///
+/// Searches a few candidate paths (cargo root, parent dir, current dir) so this
+/// works whether the binary runs from the cargo root or a build output dir.
+/// Returns `None` if no MPQ can be opened.
+fn load_monster_sprite_set(types: &[crate::game::monster::MonsterType]) -> Option<crate::game::monster_sprites::MonsterSpriteSet> {
+    use std::path::PathBuf;
+
+    // Candidate MPQ locations. The binary may run from the cargo root, a
+    // subdirectory, or an absolute install path.
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join("spawn.mpq"));
+            candidates.push(dir.join("diabdat.mpq"));
+            candidates.push(dir.join("DIABDAT.MPQ"));
+        }
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        candidates.push(cwd.join("spawn.mpq"));
+        candidates.push(cwd.join("diabdat.mpq"));
+        candidates.push(cwd.join("DIABDAT.MPQ"));
+    }
+
+    let mpq_path = candidates.into_iter().find(|p| p.exists())?;
+    let mut archive = crate::engine::mpq::MpqArchive::open(&mpq_path).ok()?;
+    Some(crate::game::monster_sprites::MonsterSpriteSet::load(
+        &mut archive,
+        types,
+    ))
 }
 
 /// Return from the dungeon to Tristram town. Restores the town camera spawn
@@ -447,6 +601,13 @@ pub fn return_to_town(game_state: &mut GameState) {
     game_state.in_dungeon = false;
     game_state.is_town = true;
     game_state.dungeon_layout = None;
+    // Clear dungeon monsters + their sprites so a fresh pack is generated on the
+    // next descent.
+    game_state.monster_manager.clear();
+    game_state.monster_sprites = None;
+    // Drop the uploaded monster-sprite textures so a fresh pack re-uploads on
+    // the next descent (the monsters may be different types).
+    clear_monster_sprite_cache();
     // Restore the town spawn (C++ ENTRY_MAIN ViewPosition {75, 68}).
     game_state.init_town_camera();
 }
@@ -549,7 +710,15 @@ fn draw_and_blit(window: &mut GameWindow, game_state: &GameState) {
                 // generated dungeon_layout. Falls back gracefully if either is
                 // missing (e.g. shareware build without L1 art).
                 if let (Some(level), Some(layout)) = (&game_state.dungeon_level_data, &game_state.dungeon_layout) {
-                    let _ = draw_dungeon(window, level, layout, cam_tile_x, cam_tile_y, screen_center_x, screen_center_y);
+                    // Collect the living dungeon monsters (id + position + type)
+                    // for the renderer. Borrowing through a small Vec avoids
+                    // holding a borrow on monster_manager across the draw call.
+                    let monsters: Vec<(usize, i32, i32, crate::game::monster::MonsterType, crate::game::monster::MonsterAIState)> =
+                        game_state.monster_manager.iter().map(|(id, m)| {
+                            (id, m.x, m.y, m.monster_type, m.ai_state)
+                        }).collect();
+                    let sprites = game_state.monster_sprites.as_ref();
+                    let _ = draw_dungeon(window, level, layout, cam_tile_x, cam_tile_y, screen_center_x, screen_center_y, &monsters, sprites);
                 } else if let Some(level) = &game_state.level_data {
                     let _ = draw_checkerboard_fallback(window, level, cam_tile_x, cam_tile_y, screen_center_x, screen_center_y);
                 } else {
@@ -578,6 +747,11 @@ fn draw_and_blit(window: &mut GameWindow, game_state: &GameState) {
         clear_current_creator();
     }
 
+    // Draw the bottom HUD panel (life/mana spheres, XP bar, belt, stats) on top
+    // of the rendered world + player sprite. Pure canvas drawing (no texture
+    // creator needed), so it runs after the creator block above. This is the
+    // only addition to draw_and_blit — the rest of the function is unchanged.
+    hud::draw_hud(window, game_state);
 
     // Debug status line (throttled: only every 30 ticks to avoid log spam).
     if game_state.game_tick % 30 == 0 {
@@ -738,6 +912,8 @@ fn draw_dungeon(
     cam_tile_y: i32,
     screen_center_x: i32,
     screen_center_y: i32,
+    monsters: &[(usize, i32, i32, crate::game::monster::MonsterType, crate::game::monster::MonsterAIState)],
+    sprites: Option<&crate::game::monster_sprites::MonsterSpriteSet>,
 ) -> Result<()> {
     let mut drawn = 0u32;
     let mut skipped = 0u32;
@@ -802,7 +978,154 @@ fn draw_dungeon(
             skipped, cam_tile_x, cam_tile_y
         );
     }
+
+    // Step 2: draw the living dungeon monsters on top of the floor. Each
+    // monster is placed at its world tile's screen position, with its sprite
+    // anchored foot-first (like the player sprite). Monsters with a loaded CL2
+    // sprite use it; the rest fall back to a per-type coloured block so every
+    // monster still has a visible presence.
+    draw_dungeon_monsters(window, monsters, sprites, cam_tile_x, cam_tile_y, screen_center_x, screen_center_y);
+
     Ok(())
+}
+
+//------------------------------------------------------------------------------
+// Monster Sprite Cache + Rendering (Step 2)
+//------------------------------------------------------------------------------
+
+thread_local! {
+    /// Per-monster-type decoded-sprite textures, uploaded lazily from
+    /// `GameState::monster_sprites`. Keyed by `MonsterType`. Same lifetime-erase
+    /// rationale as `TILE_TEXTURE_CACHE` / `PLAYER_SPRITE_CACHE`: the underlying
+    /// SDL handle outlives the borrow because the `GameWindow` lives for the
+    /// whole game loop. Cleared on game-loop exit.
+    static MONSTER_SPRITE_CACHE: std::cell::RefCell<HashMap<crate::game::monster::MonsterType, Texture<'static>>> =
+        std::cell::RefCell::new(HashMap::new());
+}
+
+/// Draw all living dungeon monsters on top of the rendered floor.
+///
+/// For each monster we compute its world-tile → screen position using the same
+/// isometric transform as the tiles (`rel_x = (wx-wy)*32`, `rel_y = (wx+wy)*16`,
+/// minus the camera transform). Monsters off-screen are skipped.
+///
+/// Rendering path per monster:
+/// 1. If `sprites` has a decoded sprite for the monster's type AND the texture
+///    is cached (or can be uploaded via the current creator), blit it anchored
+///    foot-first (bottom-centre on the tile centre) — exactly like the player
+///    sprite.
+/// 2. Otherwise draw a per-type coloured diamond block at the tile so the
+///    monster is still visible.
+///
+/// Monsters are drawn in order of increasing `(wx+wy)` so lower (further-down)
+/// monsters correctly overlap monsters above them (painter's order).
+fn draw_dungeon_monsters(
+    window: &mut GameWindow,
+    monsters: &[(usize, i32, i32, crate::game::monster::MonsterType, crate::game::monster::MonsterAIState)],
+    sprites: Option<&crate::game::monster_sprites::MonsterSpriteSet>,
+    cam_tile_x: i32,
+    cam_tile_y: i32,
+    screen_center_x: i32,
+    screen_center_y: i32,
+) {
+    if monsters.is_empty() {
+        return;
+    }
+
+    // Sort by depth (wx+wy ascending) so monsters further down the screen are
+    // drawn last and overlap monsters behind them.
+    let mut order: Vec<&(usize, i32, i32, crate::game::monster::MonsterType, crate::game::monster::MonsterAIState)> =
+        monsters.iter().collect();
+    order.sort_by_key(|m| m.1 + m.2);
+
+    let mut drawn = 0u32;
+    for (_, wx, wy, mtype, aistate) in order {
+        // Skip dead monsters — they're not rendered (no corpse art yet).
+        if *aistate == crate::game::monster::MonsterAIState::Dead {
+            continue;
+        }
+
+        let wx = *wx;
+        let wy = *wy;
+        let rel_x = (wx - cam_tile_x - (wy - cam_tile_y)) * (TILE_WIDTH / 2);
+        let rel_y = (wx - cam_tile_x + (wy - cam_tile_y)) * (TILE_HEIGHT / 2);
+        let dst_cx = screen_center_x + rel_x;
+        let dst_cy = screen_center_y + rel_y;
+
+        // Cull off-screen monsters.
+        if dst_cx < -(TILE_WIDTH * 2) || dst_cx > (LOGICAL_WIDTH as i32 + TILE_WIDTH * 2)
+            || dst_cy < -(TILE_HEIGHT * 6) || dst_cy > (LOGICAL_HEIGHT as i32 + TILE_HEIGHT * 4)
+        {
+            continue;
+        }
+
+        // Try the real sprite path first.
+        let mut used_sprite = false;
+        if let Some(set) = sprites {
+            if let Some(sprite) = set.get(mtype) {
+                // Ensure this type's texture is uploaded.
+                let need_upload = MONSTER_SPRITE_CACHE.with(|c| c.borrow().get(mtype).is_none());
+                if need_upload {
+                    if let Some(creator) = current_creator() {
+                        if let Ok(tex) = rgba_to_texture(creator, &sprite.rgba, sprite.width, sprite.height) {
+                            // SAFETY: see Texture Cache module docstring.
+                            let tex_static: Texture<'static> = unsafe { std::mem::transmute(tex) };
+                            MONSTER_SPRITE_CACHE.with(|c| {
+                                c.borrow_mut().insert(*mtype, tex_static);
+                            });
+                        }
+                    }
+                }
+                let have = MONSTER_SPRITE_CACHE.with(|c| c.borrow().get(mtype).is_some());
+                if have {
+                    MONSTER_SPRITE_CACHE.with(|c| {
+                        let cache = c.borrow();
+                        let tex = cache.get(mtype).unwrap();
+                        // Anchor feet at the tile centre: bottom-centre of the
+                        // sprite on (dst_cx, dst_cy). Same convention as the
+                        // player sprite so monsters stand on their tile.
+                        let dst = Rect::new(
+                            dst_cx - sprite.width as i32 / 2,
+                            dst_cy - sprite.height as i32,
+                            sprite.width as u32,
+                            sprite.height as u32,
+                        );
+                        let _ = window.canvas_mut().copy(tex, None, dst);
+                    });
+                    used_sprite = true;
+                }
+            }
+        }
+
+        if !used_sprite {
+            // Coloured-block fallback: a small filled diamond in the monster
+            // type's colour, plus a darker outline so it reads against the floor.
+            let (r, g, b) = crate::game::monster_sprites::monster_display_color(mtype);
+            let canvas = window.canvas_mut();
+            fill_diamond(canvas, dst_cx, dst_cy, sdl2::pixels::Color::RGB(r, g, b));
+            canvas.set_draw_color(sdl2::pixels::Color::RGB(
+                r / 3,
+                g / 3,
+                b / 3,
+            ));
+            // Outline the diamond for contrast.
+            let half_w = TILE_WIDTH / 2;
+            let half_h = TILE_HEIGHT / 2;
+            let _ = canvas.draw_line((dst_cx, dst_cy - half_h), (dst_cx + half_w, dst_cy));
+            let _ = canvas.draw_line((dst_cx + half_w, dst_cy), (dst_cx, dst_cy + half_h));
+            let _ = canvas.draw_line((dst_cx, dst_cy + half_h), (dst_cx - half_w, dst_cy));
+            let _ = canvas.draw_line((dst_cx - half_w, dst_cy), (dst_cx, dst_cy - half_h));
+        }
+        drawn += 1;
+    }
+    let _ = drawn;
+}
+
+/// Clear the monster-sprite texture cache. Called when leaving the dungeon
+/// (`return_to_town`) so a fresh monster pack re-uploads its textures on the
+/// next descent. Also safe to call on game-loop exit.
+pub fn clear_monster_sprite_cache() {
+    MONSTER_SPRITE_CACHE.with(|c| c.borrow_mut().clear());
 }
 
 /// Fallback renderer: draw a checkerboard of real town tile frames when the

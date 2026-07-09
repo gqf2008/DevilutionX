@@ -7,6 +7,7 @@ pub mod player;
 pub mod monster;
 pub mod monster_exact; // Adapter: re-exports + MonsterManager (consolidation shim)
 pub mod monster_object_interaction; // Monster ⟷ door/blocking interaction
+pub mod monster_sprites; // Monster CL2 sprite loading + caching for dungeon rendering
 pub mod items;
 pub mod spells;
 pub mod world;
@@ -52,6 +53,7 @@ pub mod towner; // NPC/Towner system (M12 Day 89-91)
 pub mod store; // Store/Shop system (M13 Day 92+)
 pub mod dialogue; // Dialogue system (M14 Day 96+)
 pub mod game_loop; // Complete C++ aligned game loop (M80)
+pub mod hud; // In-game HUD panel (life/mana spheres, XP bar, belt) (M-HUD)
 pub mod network;   // Network stubs (M80)
 pub mod lighting; // Lighting system (M17)
 pub mod automap; // Automap system (M20)

@@ -43,7 +43,7 @@ pub const TEXT_BANNER11: i32 = 40;  // Banner quest text 11
 pub const TEXT_BANNER12: i32 = 41;  // Banner quest text 12
 
 /// Monster type enumeration
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MonsterType {
     // Cathedral (L1)
     Zombie,
@@ -458,6 +458,12 @@ pub struct Monster {
     pub x: i32,
     pub y: i32,
     pub facing: Direction,
+    /// Spawn/home tile. Set at placement; idle monsters wander within a small
+    /// radius of this point, and it doubles as a return anchor if the monster
+    /// ever loses the player. (Not present in C++ — Rust-side addition for the
+    /// minimal dungeon-population AI.)
+    pub home_x: i32,
+    pub home_y: i32,
 
     // === AI State (C++ alignment) ===
     pub ai_state: MonsterAIState,
@@ -560,6 +566,8 @@ impl Monster {
             x,
             y,
             facing: Direction::South,
+            home_x: x,
+            home_y: y,
             ai_state: MonsterAIState::Idle,
             goal: MonsterGoal::Normal,
             mode: MonsterMode::Stand,

@@ -187,6 +187,13 @@ pub struct GameState {
     /// can swap between town and dungeon art without reloading. `None` if the
     /// L1 assets are unavailable (e.g. shareware build without L1 data).
     pub dungeon_level_data: Option<DungeonLevelData>,
+
+    /// Decoded stand sprites for the monster types currently in the dungeon,
+    /// indexed by `MonsterType`. Built by `monster_sprites::MonsterSpriteSet`
+    /// when descending. The dungeon renderer uses these to draw each living
+    /// monster as a real CL2 sprite (with a coloured-block fallback per type).
+    /// `None`/empty when no sprites loaded (town, or asset-less build).
+    pub monster_sprites: Option<crate::game::monster_sprites::MonsterSpriteSet>,
 }
 
 /// L1 Cathedral dungeon layout, the dungeon-mode analogue of `TownLayout`.
@@ -201,6 +208,11 @@ pub struct DungeonLayout {
     pub d_piece: Vec<u16>,
     pub width: usize,
     pub height: usize,
+    /// Micro-tile coordinates of walkable *floor* tiles inside the active
+    /// dungeon region, populated by `generate_l1_cathedral`. Used by monster
+    /// spawning to pick valid, open spawn positions away from walls. Each entry
+    /// is `(x, y)` in the same micro-tile space as `d_piece`/the camera.
+    pub floor_tiles: Vec<(i32, i32)>,
 }
 
 impl Default for DungeonLayout {
@@ -211,6 +223,7 @@ impl Default for DungeonLayout {
             d_piece: vec![0; MAXDUNX * MAXDUNY],
             width: MAXDUNX,
             height: MAXDUNY,
+            floor_tiles: Vec::new(),
         }
     }
 }
@@ -244,6 +257,21 @@ pub struct PlayerSprite {
     pub rgba: Vec<u8>,
 }
 
+/// A decoded monster sprite ready for texture upload. Same shape as
+/// [`PlayerSprite`] — RGBA buffer + dimensions — kept as a distinct type so the
+/// monster sprite cache (`MONSTER_SPRITE_CACHE` in `game_loop`) is keyed and
+/// rendered separately from the player sprite. Built by `monster_sprites.rs`
+/// from the per-type monster CL2 files in the MPQ archives.
+#[derive(Debug, Clone)]
+pub struct MonsterSprite {
+    /// Pixel width.
+    pub width: u16,
+    /// Pixel height.
+    pub height: u16,
+    /// Top-to-bottom RGBA bytes (`width * height * 4`).
+    pub rgba: Vec<u8>,
+}
+
 impl GameState {
     /// Create a new game state
     pub fn new(player: Player, is_town: bool, seed: u64) -> Self {
@@ -265,6 +293,7 @@ impl GameState {
             in_dungeon: false,
             dungeon_layout: None,
             dungeon_level_data: None,
+            monster_sprites: None,
         }
     }
 
@@ -404,6 +433,11 @@ impl GameState {
 
             // Process doors if monster can open them (C++ via MonstCheckDoors)
             self.process_monster_doors(monster_id);
+
+            // Simple AI movement (M-monsters): idle/wander in place, or chase the
+            // player when within aggro range. Updates the monster's world tile so
+            // the renderer follows. No attack here (combat handled above).
+            self.update_monster_movement(monster_id);
         }
     }
 
@@ -477,6 +511,87 @@ impl GameState {
     fn process_monster_doors(&mut self, monster_id: usize) {
         if let Some(monster) = self.monster_manager.get_monster(monster_id) {
             let _ = monster_check_doors(monster, &mut self.objects);
+        }
+    }
+
+    /// Simple monster AI movement (M-monsters): idle/wander in place, or chase
+    /// the player when within the monster's `aggro_range` (default 8 tiles).
+    ///
+    /// This is a deliberately minimal AI for the dungeon-population task:
+    ///   * `Monster::update_ai` flips the monster between `Idle` (out of range)
+    ///     and `Chasing`/`Attacking` (in range), updating its target tile.
+    ///   * When `Chasing`/`Wandering`, `Monster::try_move` steps one tile toward
+    ///     the target using a greedy 8-direction nudge, gated by a walkability
+    ///     check (must be a dungeon floor tile, and must not be the player's
+    ///     tile).
+    ///
+    /// No pathfinding/A* is used here (the framework supports it via
+    /// `try_move_pathfind`, but a greedy step is sufficient to demonstrate
+    /// "monsters move toward the player"). Attack/damage is handled separately
+    /// in `check_monster_combat`; this method only moves the monster.
+    ///
+    /// Monsters are allowed to overlap each other (monster-monster collision is
+    /// a known remaining risk — see task notes).
+    fn update_monster_movement(&mut self, monster_id: usize) {
+        // Snapshot the player position (owned, so the closure can capture it
+        // without borrowing self).
+        let player_pos = self.player.position;
+
+        // Build the walkable floor set once per monster from the dungeon layout.
+        // (A per-call build is cheap: floor_tiles is a few thousand entries and
+        // this runs at the 2 Hz logic tick.)
+        let walkable: std::collections::HashSet<(i32, i32)> = match &self.dungeon_layout {
+            Some(l) => l.floor_tiles.iter().copied().collect(),
+            None => return, // no dungeon → no movement
+        };
+
+        if let Some(monster) = self.monster_manager.get_monster_mut(monster_id) {
+            if !monster.is_alive() {
+                return;
+            }
+
+            // Distance-based line-of-sight proxy: in range and (trivially) visible.
+            let dist = monster.distance_to(player_pos.x, player_pos.y);
+            let can_see = dist <= monster.aggro_range;
+
+            // Update AI state (Idle ↔ Chasing ↔ Attacking) based on range.
+            monster.update_ai(player_pos.x, player_pos.y, can_see);
+
+            // Idle monsters get a small random wander every few ticks so the
+            // dungeon feels alive even before the player aggros anything.
+            if monster.ai_state == crate::game::monster::MonsterAIState::Idle {
+                // ~10% chance per logic tick to nudge one tile, only if the
+                // move timer is ready. We pick a random adjacent floor tile.
+                if monster.move_timer == 0 {
+                    let mut rng = rand::rng();
+                    if rng.random_range(0..10) == 0 {
+                        let dirs: [(i32, i32); 8] = [
+                            (1, 0), (-1, 0), (0, 1), (0, -1),
+                            (1, 1), (1, -1), (-1, 1), (-1, -1),
+                        ];
+                        let (dx, dy) = dirs[rng.random_range(0..dirs.len())];
+                        let nx = monster.x + dx;
+                        let ny = monster.y + dy;
+                        if walkable.contains(&(nx, ny)) && (nx != player_pos.x || ny != player_pos.y) {
+                            // Don't wander more than ~4 tiles from the spawn
+                            // (home) tile, so idle monsters stay near their spot.
+                            if (nx - monster.home_x).abs() + (ny - monster.home_y).abs() <= 4 {
+                                monster.x = nx;
+                                monster.y = ny;
+                                monster.move_timer = monster.move_delay;
+                            }
+                        }
+                    }
+                }
+                return;
+            }
+
+            // Chasing/Attacking monsters step toward the player. The walkability
+            // closure allows any dungeon floor tile that isn't the player's tile
+            // (so monsters stop adjacent instead of walking onto the player).
+            monster.try_move(|x, y| {
+                walkable.contains(&(x, y)) && (x != player_pos.x || y != player_pos.y)
+            });
         }
     }
 
@@ -693,5 +808,92 @@ mod tests {
         assert_eq!(gs.camera.tile_y, 68);
         assert_eq!(gs.player.position.x, 75);
         assert_eq!(gs.player.position.y, 68);
+    }
+
+    /// Build a GameState with a dungeon layout whose `floor_tiles` form a
+    /// straight corridor along y=10, x in [10..30], and place a monster on it.
+    fn dungeon_gs_with_corridor(monster_type: crate::game::monster::MonsterType, mx: i32, my: i32) -> GameState {
+        let player = Player::new();
+        let mut gs = GameState::new(player, true, 42);
+        gs.is_town = false;
+        gs.in_dungeon = true;
+        let mut layout = DungeonLayout::default();
+        // Floor corridor: tiles (x, 10) for x in 10..=30.
+        for x in 10..=30 {
+            layout.floor_tiles.push((x, 10));
+        }
+        gs.dungeon_layout = Some(layout);
+
+        // Place one monster.
+        let mut m = crate::game::monster::Monster::new(1, monster_type, mx, my, 1);
+        m.mode = crate::game::monster::MonsterMode::Stand;
+        gs.add_monster(m);
+        gs
+    }
+
+    #[test]
+    fn test_dungeon_layout_has_floor_tiles_field() {
+        let layout = DungeonLayout::default();
+        assert!(layout.floor_tiles.is_empty(), "default layout has no floor tiles");
+    }
+
+    #[test]
+    fn test_monster_chases_player_when_in_range() {
+        use crate::game::monster::{MonsterAIState, MonsterType};
+        // Monster at (10,10), player at (15,10) on the same corridor: distance
+        // 5, within the default aggro range (8). The monster should switch to
+        // Chasing and step toward the player (never away).
+        let mut gs = dungeon_gs_with_corridor(MonsterType::Zombie, 10, 10);
+        gs.player.position = Point::new(15, 10);
+
+        gs.update_monster_movement(0);
+
+        let m = gs.get_monster(0).expect("monster present");
+        assert!(
+            m.ai_state == MonsterAIState::Chasing || m.ai_state == MonsterAIState::Attacking,
+            "monster in range should be chasing/attacking, got {:?}",
+            m.ai_state
+        );
+        // The monster should not have moved away from the player.
+        assert!(m.x >= 10, "monster should not move away from player, x={}", m.x);
+    }
+
+    #[test]
+    fn test_monster_idles_when_out_of_range() {
+        use crate::game::monster::{MonsterAIState, MonsterType};
+        // Monster at (10,10), player at (100,100): far out of aggro range.
+        let mut gs = dungeon_gs_with_corridor(MonsterType::Zombie, 10, 10);
+        gs.player.position = Point::new(100, 100);
+
+        gs.update_monster_movement(0);
+
+        let m = gs.get_monster(0).expect("monster present");
+        assert_eq!(
+            m.ai_state,
+            MonsterAIState::Idle,
+            "monster out of range should stay idle"
+        );
+        // Idle monsters may wander up to 4 tiles from home (10,10), but should
+        // never wander far away.
+        let wander = (m.x - 10).abs() + (m.y - 10).abs();
+        assert!(wander <= 4, "idle monster should stay near home, wandered {}", wander);
+    }
+
+    #[test]
+    fn test_monster_does_not_walk_onto_player() {
+        use crate::game::monster::MonsterType;
+        // Monster adjacent to the player should approach but never land on the
+        // player's tile.
+        let mut gs = dungeon_gs_with_corridor(MonsterType::Zombie, 10, 10);
+        gs.player.position = Point::new(11, 10); // adjacent, distance 1
+
+        for _ in 0..20 {
+            gs.update_monster_movement(0);
+            let m = gs.get_monster(0).unwrap();
+            assert!(
+                !(m.x == gs.player.position.x && m.y == gs.player.position.y),
+                "monster must not occupy the player's tile"
+            );
+        }
     }
 }

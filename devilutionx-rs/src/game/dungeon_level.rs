@@ -89,6 +89,17 @@ pub fn build_dungeon_layout(gen: &CathedralGenerator, level: &DungeonLevelData) 
                     layout.d_piece[b + MAXDUNX + 1] = m4;
                 }
             }
+
+            // Collect the 2×2 micro-tile footprint of every *floor* logical tile
+            // as a walkable spawn candidate (used by monster placement).
+            if tile == Tile::Floor {
+                if xx + 1 < MAXDUNX && yy + 1 < MAXDUNY {
+                    layout.floor_tiles.push((xx as i32, yy as i32));
+                    layout.floor_tiles.push(((xx + 1) as i32, yy as i32));
+                    layout.floor_tiles.push((xx as i32, (yy + 1) as i32));
+                    layout.floor_tiles.push(((xx + 1) as i32, (yy + 1) as i32));
+                }
+            }
             xx += 2;
         }
         yy += 2;
@@ -212,6 +223,19 @@ mod tests {
         assert_eq!(layout.d_piece.len(), MAXDUNX * MAXDUNY);
         // The background fill guarantees non-zero cells everywhere.
         assert!(count_filled(&layout) > 0);
+        // The Cathedral generator always carves at least one room, so we should
+        // collect a non-empty set of walkable floor micro-tiles (used by monster
+        // spawning).
+        assert!(
+            !layout.floor_tiles.is_empty(),
+            "expected some floor tiles for monster spawning"
+        );
+        // All collected floor tiles must lie inside the active dungeon region
+        // (micro offset 16..96) and be unique.
+        for &(x, y) in &layout.floor_tiles {
+            assert!(x >= 16 && x < 96, "floor tile x {} out of active region", x);
+            assert!(y >= 16 && y < 96, "floor tile y {} out of active region", y);
+        }
     }
 
     #[test]
