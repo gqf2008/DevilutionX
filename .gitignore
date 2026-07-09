@@ -480,3 +480,8 @@ devilutionx-rs/check_output_entry.txt
 devilutionx-rs/game_output.txt
 devilutionx-rs/run_log.txt
 devilutionx-rs/test_output*.txt
+devilutionx-rs/screenshot_*.png
+devilutionx-rs/menu_*.png
+devilutionx-rs/menu_*.rgba
+devilutionx-rs/desk_dump.*
+devilutionx-rs/frame_dump_*
