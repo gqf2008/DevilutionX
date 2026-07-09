@@ -21,6 +21,82 @@ use crate::game::types::Point;
 use crate::engine::dungeon::DungeonLevelData;
 use rand::Rng;
 
+/// Town world dimensions (in micro-tiles / dPiece grid).
+///
+/// These mirror the C++ `MAXDUNX`/`MAXDUNY` constants. The Tristram town is a
+/// 112×112 grid of micro-tiles. Each visible isometric diamond on screen
+/// corresponds to one micro-tile in this grid.
+pub const TOWN_MAX_X: usize = 112;
+pub const TOWN_MAX_Y: usize = 112;
+
+/// Camera in world tile coordinates. The renderer centres the viewport on this
+/// point. Kept as fixed-point-ish integers for simplicity; smooth sub-tile
+/// movement can be added later by switching to pixel coordinates.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Camera {
+    /// World tile X the viewport is centred on.
+    pub tile_x: i32,
+    /// World tile Y the viewport is centred on.
+    pub tile_y: i32,
+    /// Fractional sub-tile movement accumulator (Q8.8 fixed point, /256 = 1 tile).
+    /// Lets held movement keys produce smooth, sub-tile-precise scrolling while
+    /// `tile_x`/`tile_y` stay on whole tiles for the renderer.
+    pub sub_x: i32,
+    /// Fractional sub-tile movement accumulator (Y axis).
+    pub sub_y: i32,
+}
+
+/// Geographically-correct town layout.
+///
+/// `d_piece[x][y]` holds the "level piece id" (a 1-based index into the MIN
+/// mega-tile table, matching C++ `dPiece[x][y]`). It is built once from the
+/// four `sector*s.dun` templates + `town.til` mega definitions, following
+/// `Source/levels/town.cpp` `DrlgTPass3` / `FillSector`.
+///
+/// The renderer reads this grid to decide which CEL frame to draw for each
+/// micro-tile. Out-of-bounds / unset tiles default to `0` (rendered empty).
+#[derive(Debug, Clone)]
+pub struct TownLayout {
+    pub d_piece: Vec<u16>,
+    pub width: usize,
+    pub height: usize,
+}
+
+impl Default for TownLayout {
+    fn default() -> Self {
+        Self {
+            d_piece: vec![0; TOWN_MAX_X * TOWN_MAX_Y],
+            width: TOWN_MAX_X,
+            height: TOWN_MAX_Y,
+        }
+    }
+}
+
+impl TownLayout {
+    /// Get the dPiece value at world tile (x, y). Returns 0 when out of bounds.
+    pub fn get(&self, x: i32, y: i32) -> u16 {
+        if x < 0 || y < 0 {
+            return 0;
+        }
+        let (x, y) = (x as usize, y as usize);
+        if x >= self.width || y >= self.height {
+            return 0;
+        }
+        self.d_piece[y * self.width + x]
+    }
+
+    /// Set the dPiece value at world tile (x, y). No-op if out of bounds.
+    pub fn set(&mut self, x: i32, y: i32, value: u16) {
+        if x < 0 || y < 0 {
+            return;
+        }
+        let (x, y) = (x as usize, y as usize);
+        if x < self.width && y < self.height {
+            self.d_piece[y * self.width + x] = value;
+        }
+    }
+}
+
 /// Game logic processing steps
 ///
 /// **C++ Reference**: `Source/diablo.h` - `GameLogicStep` enum
@@ -75,6 +151,16 @@ pub struct GameState {
     /// data from MPQ. The renderer (`draw_and_blit`) reads it to draw the
     /// isometric floor. It is `None` in tests that don't need real assets.
     pub level_data: Option<DungeonLevelData>,
+
+    /// Geographically-correct town layout (`dPiece` grid), if a town has been
+    /// generated. Built from the sector `*.dun` templates by `build_town_layout`
+    /// in the game loop. `None` until town data is assembled.
+    pub town_layout: Option<TownLayout>,
+
+    /// Camera position in world tile coordinates. The renderer centres the
+    /// viewport on this point. Initialised to the town spawn (75, 68) which is
+    /// the C++ `ViewPosition` for `ENTRY_MAIN`.
+    pub camera: Camera,
 }
 
 impl GameState {
@@ -92,7 +178,18 @@ impl GameState {
             game_tick: 0,
             is_town,
             level_data: None,
+            town_layout: None,
+            camera: Camera::default(),
         }
+    }
+
+    /// Initialise the camera/player position to the town spawn (C++ `ViewPosition`
+    /// for `ENTRY_MAIN` = {75, 68}). Called by `start_game` after town data is
+    /// loaded.
+    pub fn init_town_camera(&mut self) {
+        // C++ CreateTown ENTRY_MAIN: ViewPosition = { 75, 68 }
+        self.camera = Camera { tile_x: 75, tile_y: 68, sub_x: 0, sub_y: 0 };
+        self.player.position = Point::new(75, 68);
     }
 
     /// Main game logic update (one frame)
@@ -457,5 +554,59 @@ impl GameState {
         } else {
             false
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_town_layout_default() {
+        let layout = TownLayout::default();
+        assert_eq!(layout.width, TOWN_MAX_X);
+        assert_eq!(layout.height, TOWN_MAX_Y);
+        assert_eq!(layout.d_piece.len(), TOWN_MAX_X * TOWN_MAX_Y);
+        // All zeros initially
+        assert_eq!(layout.get(0, 0), 0);
+        assert_eq!(layout.get(75, 68), 0);
+    }
+
+    #[test]
+    fn test_town_layout_set_get() {
+        let mut layout = TownLayout::default();
+        layout.set(10, 20, 426);
+        assert_eq!(layout.get(10, 20), 426);
+        // Other tiles unaffected
+        assert_eq!(layout.get(11, 20), 0);
+    }
+
+    #[test]
+    fn test_town_layout_bounds() {
+        let layout = TownLayout::default();
+        // Out of bounds returns 0, never panics
+        assert_eq!(layout.get(-1, 0), 0);
+        assert_eq!(layout.get(0, -1), 0);
+        assert_eq!(layout.get(TOWN_MAX_X as i32, 0), 0);
+        assert_eq!(layout.get(0, TOWN_MAX_Y as i32), 0);
+
+        // Set out of bounds is a no-op
+        let mut layout = TownLayout::default();
+        layout.set(-1, 0, 999);
+        layout.set(TOWN_MAX_X as i32, 0, 999);
+        assert_eq!(layout.get(0, 0), 0);
+    }
+
+    #[test]
+    fn test_init_town_camera() {
+        let player = Player::new();
+        let mut gs = GameState::new(player, true, 42);
+        assert_eq!(gs.camera.tile_x, 0);
+        gs.init_town_camera();
+        // C++ ENTRY_MAIN spawn = {75, 68}
+        assert_eq!(gs.camera.tile_x, 75);
+        assert_eq!(gs.camera.tile_y, 68);
+        assert_eq!(gs.player.position.x, 75);
+        assert_eq!(gs.player.position.y, 68);
     }
 }

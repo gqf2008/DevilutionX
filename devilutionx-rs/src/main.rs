@@ -1801,10 +1801,39 @@ fn start_game(ctx: &mut DiabloContext, class: game::player::PlayerClass) -> Resu
     ) {
         Ok(level) => {
             println!(
-                "[StartGame] Loaded Tristram town data: {} CEL bytes, {} TIL entries",
+                "[StartGame] Loaded Tristram town data: {} CEL bytes, {} TIL entries, {} MIN mega-tiles",
                 level.level_cel.len(),
-                level.til.len()
+                level.til.len(),
+                level.min.mega_tiles.len()
             );
+
+            // Build the geographically-correct town layout (dPiece grid) from
+            // the four sector templates + town.til, following C++ CreateTown /
+            // DrlgTPass3. This is what drives which CEL frame each visible
+            // micro-tile renders.
+            let sector1s = read_dun_template(&mut ctx.mpq_manager, "levels\\towndata\\sector1s.dun");
+            let sector2s = read_dun_template(&mut ctx.mpq_manager, "levels\\towndata\\sector2s.dun");
+            let sector3s = read_dun_template(&mut ctx.mpq_manager, "levels\\towndata\\sector3s.dun");
+            let sector4s = read_dun_template(&mut ctx.mpq_manager, "levels\\towndata\\sector4s.dun");
+            println!(
+                "[StartGame] Town sectors: s1={} s2={} s3={} s4={}",
+                sector1s.is_some(), sector2s.is_some(), sector3s.is_some(), sector4s.is_some()
+            );
+
+            let layout = game::game_loop::build_town_layout(
+                &level,
+                sector1s.as_ref(),
+                sector2s.as_ref(),
+                sector3s.as_ref(),
+                sector4s.as_ref(),
+            );
+            // Count non-zero dPiece cells for a sanity log.
+            let filled = layout.d_piece.iter().filter(|&&v| v != 0).count();
+            println!(
+                "[StartGame] Built town layout: {}x{}, {} non-zero dPiece cells",
+                layout.width, layout.height, filled
+            );
+            game_state.town_layout = Some(layout);
             game_state.level_data = Some(level);
         }
         Err(e) => {
@@ -1814,9 +1843,15 @@ fn start_game(ctx: &mut DiabloContext, class: game::player::PlayerClass) -> Resu
         }
     }
 
+    // Centre the camera on the town spawn (C++ ENTRY_MAIN: ViewPosition {75,68}).
+    game_state.init_town_camera();
+
     // Run the real game loop
     match run_game_loop(InterfaceMode::NewGame, &mut ctx.window, &mut game_state) {
         Ok(_) => {
+            // Clear the tile-texture cache so stale SDL handles aren't reused
+            // if the player starts another game (which gets a fresh window).
+            game::game_loop::clear_tile_texture_cache();
             net_close();
             // Recreate UI when returning to main menu
             ui_initialize(ctx);
@@ -1824,9 +1859,31 @@ fn start_game(ctx: &mut DiabloContext, class: game::player::PlayerClass) -> Resu
             Ok(())
         },
         Err(e) => {
+            game::game_loop::clear_tile_texture_cache();
             net_close();
             Err(e.to_string())
         },
+    }
+}
+
+/// Read and parse a town sector `.dun` template from MPQ.
+///
+/// Returns `None` (and logs) if the file is missing or unparseable. Used by
+/// `start_game` to assemble the four sectors into the town layout.
+fn read_dun_template(mpq: &mut MpqAssetManager, path: &str) -> Option<engine::dungeon::DunTemplate> {
+    let data = match mpq.read_file(path) {
+        Ok(d) => d,
+        Err(e) => {
+            println!("[DunTemplate] {} not loaded: {}", path, e);
+            return None;
+        }
+    };
+    match engine::dungeon::DunTemplate::from_bytes(&data) {
+        Some(t) => Some(t),
+        None => {
+            println!("[DunTemplate] {} failed to parse ({} bytes)", path, data.len());
+            None
+        }
     }
 }
 

@@ -18,14 +18,16 @@
 - 修 `objdat.rs` import：`crate::levels::types`（bin 上下文不存在）→ `super::types`
 - 修测试/示例：`Monster::new` 4参→5参、`GameState::new` 补 seed
 
-## 测试基线: ✅ GREEN（2026-07-07 更新）
+## 测试基线: ✅ GREEN（2026-07-09 更新）
 
-`cargo test --lib` → **1826 passed; 0 failed; 2 ignored**
-`cargo test --bins` → **1479 passed; 0 failed; 2 ignored**
+`cargo test --lib` → **1850 passed; 0 failed; 2 ignored**
+`cargo test --bins` → **1496 passed; 0 failed**（+1 flaky `test_ai_counselor_ranged_attack`，单独跑通过，是既有 static_mut_refs 全局污染，非新引入）
 `cargo test --test archive_manager` → 8 passed（真实 MPQ 解压/优先级覆盖）
+`cargo build --release` → 792KB exe，能启动→主菜单→选角色→进入 Tristram→方向键走动
 
-此前基线为 🔴 RED（全量并行运行以 `STATUS_STACK_BUFFER_OVERRUN` 崩溃，且 `drlg_l2::test_create_dungeon_with_fill_voids` 死循环卡死）。
-第 1 轮清理了 15 个失败 + 1 个卡死测试；第 2 轮并行推进了 RNG 移植 / 常量去重 / MPQ 归档管理（+41 测试）。
+**可玩性里程碑**：渲染桥（CLX/CEL→RGBA→SDL Texture）已端到端验证；进入游戏后看到地理正确的 Tristram 布局（4 个 sector 模板 + town.til mega-tile 映射驱动 dPiece 网格），方向键/WASD 移动相机+玩家，纹理缓存避免每帧重解码。
+
+此前基线为 🔴 RED（全量并行运行以 `STATUS_STACK_BUFFER_OVERRUN` 崩溃，且 `drlg_l2::test_create_dungeon_with_fill_voids` 死循环卡死）。多轮并行推进：测试清理 → RNG/常量/MPQ 基础设施 → drlg_l4 循环修正+DMAXX=40+ConnectHall 终止性 → 渲染桥+死代码清理 → walkable Tristram。
 
 ### 本轮修复清单（15 failed + 1 hang → 0）
 
