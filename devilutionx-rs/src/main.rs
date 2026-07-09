@@ -12,6 +12,7 @@ use sdl2::video::WindowContext;
 mod data;
 mod engine;
 mod game;
+mod levels;
 mod net;
 mod ui;
 mod utils;
@@ -1854,6 +1855,32 @@ fn start_game(ctx: &mut DiabloContext, class: game::player::PlayerClass) -> Resu
 
     // Centre the camera on the town spawn (C++ ENTRY_MAIN: ViewPosition {75,68}).
     game_state.init_town_camera();
+
+    // Pre-load the L1 Cathedral art (l1.cel/l1.min/l1.til/l1.sol/l1.pal) so the
+    // player can descend into the dungeon at runtime (key 'D' in the game loop)
+    // without a blocking MPQ read. Non-fatal: if the shareware build lacks the L1
+    // data, `dungeon_level_data` stays `None` and descending logs a graceful
+    // failure instead of panicking.
+    match engine::dungeon::DungeonLevelData::load_from_asset_manager(
+        &mut ctx.mpq_manager,
+        engine::dungeon::DungeonType::Cathedral,
+    ) {
+        Ok(level) => {
+            println!(
+                "[StartGame] Loaded L1 Cathedral data: {} CEL bytes, {} TIL megas, {} MIN megas",
+                level.level_cel.len(),
+                level.til.tiles.len(),
+                level.min.mega_tiles.len()
+            );
+            game_state.dungeon_level_data = Some(level);
+        }
+        Err(e) => {
+            println!(
+                "[StartGame] Could not load L1 Cathedral data ({}); dungeon descent will be unavailable",
+                e
+            );
+        }
+    }
 
     // Run the real game loop
     match run_game_loop(InterfaceMode::NewGame, &mut ctx.window, &mut game_state) {

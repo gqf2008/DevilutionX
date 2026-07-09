@@ -130,6 +130,19 @@ pub fn run_game_loop(mode: InterfaceMode, window: &mut GameWindow, game_state: &
             break;
         }
 
+        // Town <-> Dungeon toggle keys. 'D' descends into L1 Cathedral (only
+        // when currently in town); 'T' returns to town (only when in the
+        // dungeon). These are the simplified staircase triggers; once true
+        // stair-tile detection is wired in they can be replaced by it.
+        if input.is_key_pressed(Keycode::D) && !game_state.in_dungeon {
+            if let Err(e) = descend_to_dungeon(game_state) {
+                println!("[GameLoop] descend_to_dungeon failed: {}", e);
+            }
+        }
+        if input.is_key_pressed(Keycode::T) && game_state.in_dungeon {
+            return_to_town(game_state);
+        }
+
         // Apply continuous movement (held arrow/WASD keys) to the player/camera.
         apply_movement(game_state, &input);
 
@@ -380,6 +393,64 @@ fn process_input(_input: &mut InputSystem) -> Result<()> {
     Ok(())
 }
 
+/// Descend from town into the L1 Cathedral dungeon.
+///
+/// Generates the Cathedral layout from `game_state.dungeon_level_data` (loaded
+/// once in `start_game`) using the faithful `drlg_l1::CathedralGenerator`, sets
+/// `in_dungeon = true`, and re-centres the camera on the generated dungeon.
+/// Prints diagnostics about the generation. Returns an error string if the L1
+/// art is unavailable.
+pub fn descend_to_dungeon(game_state: &mut GameState) -> Result<(), String> {
+    println!("[Descend] Generating L1 Cathedral...");
+    let level = match &game_state.dungeon_level_data {
+        Some(l) => l,
+        None => return Err("L1 Cathedral art not loaded (dungeon_level_data is None)".to_string()),
+    };
+
+    // Generate + map to dPiece grid. Use the game seed so the level is stable.
+    let seed = (game_state.game_tick as u32).wrapping_add(0xC0FFEE);
+    let layout = crate::game::dungeon_level::generate_l1_cathedral(seed, level);
+    let filled = crate::game::dungeon_level::count_filled(&layout);
+    println!(
+        "[Descend] L1 Cathedral generated (seed {}): {}x{}, {} non-zero dPiece cells, {} TIL megas",
+        seed, layout.width, layout.height, filled, level.til.tiles.len()
+    );
+
+    game_state.dungeon_layout = Some(layout);
+    game_state.in_dungeon = true;
+    // Keep is_town in sync so GameState::update's monster/item logic matches the
+    // active mode (dungeon processes monsters; town skips them).
+    game_state.is_town = false;
+
+    // Centre the camera on the middle of the 40×40 dungeon active region. The
+    // DRLG_LPass3 stamping starts at micro offset (16,16), so tile (20,20)
+    // (logical) maps to roughly (16 + 20*2, 16 + 20*2) = (56, 56) in micro
+    // space. We place the camera there so the player starts in the dungeon
+    // interior.
+    let center_x = 16 + 20 * 2;
+    let center_y = 16 + 20 * 2;
+    game_state.camera.tile_x = center_x;
+    game_state.camera.tile_y = center_y;
+    game_state.camera.sub_x = 0;
+    game_state.camera.sub_y = 0;
+    game_state.player.position.x = center_x;
+    game_state.player.position.y = center_y;
+
+    println!("[Descend] Entered L1 Cathedral at ({}, {})", center_x, center_y);
+    Ok(())
+}
+
+/// Return from the dungeon to Tristram town. Restores the town camera spawn
+/// and clears the dungeon layout so a fresh one is generated next descent.
+pub fn return_to_town(game_state: &mut GameState) {
+    println!("[Return] Leaving dungeon, returning to Tristram");
+    game_state.in_dungeon = false;
+    game_state.is_town = true;
+    game_state.dungeon_layout = None;
+    // Restore the town spawn (C++ ENTRY_MAIN ViewPosition {75, 68}).
+    game_state.init_town_camera();
+}
+
 /// Apply continuous movement from held movement keys to the player and camera.
 ///
 /// This reads the raw (dx, dy) movement direction from the InputSystem and maps
@@ -467,24 +538,36 @@ fn draw_and_blit(window: &mut GameWindow, game_state: &GameState) {
     let cam_tile_x = game_state.camera.tile_x;
     let cam_tile_y = game_state.camera.tile_y;
 
-    // Set up the texture cache's "current creator" so cache-miss uploads inside
-    // the draw functions can borrow the canvas's TextureCreator. Cleared after.
-    {
-        let creator = window.canvas_mut().texture_creator();
-        set_current_creator(&creator);
+        // Set up the texture cache's "current creator" so cache-miss uploads inside
+        // the draw functions can borrow the canvas's TextureCreator. Cleared after.
+        {
+            let creator = window.canvas_mut().texture_creator();
+            set_current_creator(&creator);
 
-        if let (Some(level), Some(layout)) = (&game_state.level_data, &game_state.town_layout) {
-            // Real Tristram art path: render the visible micro-tiles from dPiece.
-            let _ = draw_tristram(window, level, layout, cam_tile_x, cam_tile_y, screen_center_x, screen_center_y);
-        } else if let Some(level) = &game_state.level_data {
-            // Fallback: town data loaded but layout not built yet — draw a small
-            // checkerboard of real tile frames so the art chain is still visible.
-            let _ = draw_checkerboard_fallback(window, level, cam_tile_x, cam_tile_y, screen_center_x, screen_center_y);
-        } else {
-            // No art at all — draw a plain iso checkerboard.
-            let canvas = window.canvas_mut();
-            draw_plain_checkerboard(canvas, screen_center_x, screen_center_y);
-        }
+            if game_state.in_dungeon {
+                // DUNGEON MODE (L1 Cathedral). Requires the L1 level data + a
+                // generated dungeon_layout. Falls back gracefully if either is
+                // missing (e.g. shareware build without L1 art).
+                if let (Some(level), Some(layout)) = (&game_state.dungeon_level_data, &game_state.dungeon_layout) {
+                    let _ = draw_dungeon(window, level, layout, cam_tile_x, cam_tile_y, screen_center_x, screen_center_y);
+                } else if let Some(level) = &game_state.level_data {
+                    let _ = draw_checkerboard_fallback(window, level, cam_tile_x, cam_tile_y, screen_center_x, screen_center_y);
+                } else {
+                    let canvas = window.canvas_mut();
+                    draw_plain_checkerboard(canvas, screen_center_x, screen_center_y);
+                }
+            } else if let (Some(level), Some(layout)) = (&game_state.level_data, &game_state.town_layout) {
+                // Real Tristram art path: render the visible micro-tiles from dPiece.
+                let _ = draw_tristram(window, level, layout, cam_tile_x, cam_tile_y, screen_center_x, screen_center_y);
+            } else if let Some(level) = &game_state.level_data {
+                // Fallback: town data loaded but layout not built yet — draw a small
+                // checkerboard of real tile frames so the art chain is still visible.
+                let _ = draw_checkerboard_fallback(window, level, cam_tile_x, cam_tile_y, screen_center_x, screen_center_y);
+            } else {
+                // No art at all — draw a plain iso checkerboard.
+                let canvas = window.canvas_mut();
+                draw_plain_checkerboard(canvas, screen_center_x, screen_center_y);
+            }
 
         // Draw the player at the viewport centre (camera == player position).
         // Prefer the real Warrior town-walk sprite; fall back to the yellow
@@ -498,8 +581,16 @@ fn draw_and_blit(window: &mut GameWindow, game_state: &GameState) {
 
     // Debug status line (throttled: only every 30 ticks to avoid log spam).
     if game_state.game_tick % 30 == 0 {
-        let mode = if game_state.is_town { "Town (Tristram)" } else { "Dungeon" };
-        let has_art = if game_state.town_layout.is_some() {
+        let mode = if game_state.in_dungeon {
+            "Dungeon (L1 Cathedral)"
+        } else if game_state.is_town {
+            "Town (Tristram)"
+        } else {
+            "Dungeon"
+        };
+        let has_art = if game_state.in_dungeon && game_state.dungeon_layout.is_some() {
+            "Cathedral layout"
+        } else if game_state.town_layout.is_some() {
             "real Tristram layout"
         } else if game_state.level_data.is_some() {
             "tiles (no layout)"
@@ -623,6 +714,91 @@ fn draw_tristram(
         println!(
             "[DrawTristram] WARNING: drew 0 tiles ({} skipped) cam=({},{}). \
              Layout may be empty or dPiece indices out of MIN range.",
+            skipped, cam_tile_x, cam_tile_y
+        );
+    }
+    Ok(())
+}
+
+/// Render the visible L1 Cathedral micro-tiles from the dungeon dPiece grid.
+///
+/// Structurally identical to `draw_tristram`, but reads
+/// `game_state.dungeon_layout` (the L1 grid built by `dungeon_level`).
+///
+/// For each world tile `(wx, wy)` within the camera's view radius we look up
+/// `dPiece = layout.get(wx, wy)`, index into `level.min.mega_tiles[dPiece]` to
+/// get the two floor sub-tiles, and blit their decoded CEL frames at the tile's
+/// screen position. Textures are shared with the town path via the same
+/// `TILE_TEXTURE_CACHE` (keyed by raw `LevelCelBlock.data`).
+fn draw_dungeon(
+    window: &mut GameWindow,
+    level: &crate::engine::dungeon::DungeonLevelData,
+    layout: &crate::game::game_state::DungeonLayout,
+    cam_tile_x: i32,
+    cam_tile_y: i32,
+    screen_center_x: i32,
+    screen_center_y: i32,
+) -> Result<()> {
+    let mut drawn = 0u32;
+    let mut skipped = 0u32;
+
+    for wy_off in -VIEW_RADIUS_Y..=VIEW_RADIUS_Y {
+        for wx_off in -VIEW_RADIUS_X..=VIEW_RADIUS_X {
+            let wx = cam_tile_x + wx_off;
+            let wy = cam_tile_y + wy_off;
+            let dpiece = layout.get(wx, wy);
+            if dpiece == 0 {
+                skipped += 1;
+                continue;
+            }
+
+            let mega_idx = dpiece as usize;
+            let mega = match level.min.mega_tiles.get(mega_idx) {
+                Some(m) => m,
+                None => {
+                    skipped += 1;
+                    continue;
+                }
+            };
+
+            let rel_x = (wx_off - wy_off) * (TILE_WIDTH / 2);
+            let rel_y = (wx_off + wy_off) * (TILE_HEIGHT / 2);
+            let dst_cx = screen_center_x + rel_x;
+            let dst_cy = screen_center_y + rel_y;
+
+            if dst_cx < -(TILE_WIDTH) || dst_cx > (LOGICAL_WIDTH as i32 + TILE_WIDTH)
+                || dst_cy < -(TILE_HEIGHT * 2) || dst_cy > (LOGICAL_HEIGHT as i32 + TILE_HEIGHT)
+            {
+                continue;
+            }
+
+            for (slot, block) in [(0usize, &mega.blocks[0]), (1, &mega.blocks[1])] {
+                if !block.has_value() {
+                    continue;
+                }
+                if let Some(tex_ptr) = tile_texture_cache_get(block.data, block.frame(), block.tile_type(), level) {
+                    // SAFETY: see tile_texture_cache_get docstring.
+                    let tex_ref = unsafe { tex_ptr.as_texture_ref() };
+                    let (tx, ty) = if slot == 0 {
+                        (dst_cx - (TILE_WIDTH / 2), dst_cy - TILE_HEIGHT)
+                    } else {
+                        (dst_cx, dst_cy - TILE_HEIGHT)
+                    };
+                    let _ = window.canvas_mut().copy(
+                        tex_ref,
+                        None,
+                        Rect::new(tx, ty, (TILE_WIDTH / 2) as u32, TILE_HEIGHT as u32),
+                    );
+                    drawn += 1;
+                }
+            }
+        }
+    }
+
+    if drawn == 0 {
+        println!(
+            "[DrawDungeon] WARNING: drew 0 tiles ({} skipped) cam=({},{}). \
+             L1 layout may be empty or dPiece indices out of MIN range.",
             skipped, cam_tile_x, cam_tile_y
         );
     }
