@@ -87,12 +87,19 @@ impl GameWindow {
         let video_subsystem = sdl_context.video()
             .map_err(|e| anyhow::anyhow!("Video subsystem failed: {}", e))?;
 
-        let window = video_subsystem
+        let mut window = video_subsystem
             .window(title, width, height)
             .position_centered()
             .resizable()
             .build()
             .context("Failed to create window")?;
+
+        // CRITICAL: show the window BEFORE creating the canvas/renderer. SDL2's
+        // WindowBuilder::build() returns a hidden window; if we let into_canvas
+        // consume it without showing first, the resulting renderer presents to a
+        // backbuffer that never reaches the screen (verified: window stays
+        // visible=False, client 0x0, flat default colour on screen).
+        window.show();
 
         // Detect headless/no-GPU video drivers (e.g. SDL_VIDEODRIVER=dummy
         // used in CI / smoke tests). Such drivers have no GPU to accelerate
@@ -104,7 +111,7 @@ impl GameWindow {
         let driver = video_subsystem.current_video_driver();
         let headless = matches!(driver, "dummy" | "DUMMY" | "offscreen" | "OFFSCREEN");
 
-        let mut canvas = if headless {
+        let canvas = if headless {
             window
                 .into_canvas()
                 .software()
@@ -118,12 +125,6 @@ impl GameWindow {
                 .build()
                 .context("Failed to create canvas")?
         };
-
-        // Explicitly show/raise the window after creating the canvas. SDL2
-        // may leave the window in a state where the renderer's present() does
-        // not reach the screen until the window is shown/raised.
-        canvas.window_mut().show();
-        canvas.window_mut().raise();
 
         Ok(Self {
             _sdl_context: sdl_context,
