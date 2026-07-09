@@ -79,7 +79,7 @@ impl GameLoopState {
 /// * `Ok(true)` - Game exited normally
 /// * `Ok(false)` - Game quit via menu
 /// * `Err(_)` - Error occurred
-pub fn run_game_loop(mode: InterfaceMode, window: &mut GameWindow, game_state: &mut GameState) -> Result<bool> {
+pub fn run_game_loop(mode: InterfaceMode, window: &mut GameWindow, game_state: &mut GameState, event_pump: &mut sdl2::EventPump) -> Result<bool> {
     println!("Starting game loop (mode: {:?})", mode);
 
     // 1. Initialization sequence
@@ -114,7 +114,11 @@ pub fn run_game_loop(mode: InterfaceMode, window: &mut GameWindow, game_state: &
 
         // Event processing
         // C++: while (FetchMessage(&event, &modState))
-        for event in window.event_pump()?.poll_iter() {
+        // Reuse the single shared EventPump created at startup — SDL2 allows
+        // only one EventPump alive at a time, so we must not create another
+        // via window.event_pump() here (that was the cause of the "an
+        // EventPump instance is already alive" panic on entering the game).
+        for event in event_pump.poll_iter() {
             // Route keyboard/mouse events into the InputSystem for movement.
             match &event {
                 Event::KeyDown { keycode: Some(k), .. } => input.on_key_down(*k),

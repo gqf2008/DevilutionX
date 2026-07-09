@@ -1679,12 +1679,11 @@ fn init_single_player_menu(ctx: &mut DiabloContext, event_pump: &mut sdl2::Event
         println!("[InitSinglePlayerMenu] Selected class: {:?}", class);
 
         // C++: StartGame(WM_DIABNEWGAME)
-        start_game(ctx, class)?;
+        start_game(ctx, class, event_pump)?;
 
         // After game ends, return to menu
         return Ok(true);
     }
-
     // User cancelled, return to menu
     Ok(true)
 }
@@ -1780,7 +1779,7 @@ fn select_hero_dialog(ctx: &mut DiabloContext, event_pump: &mut sdl2::EventPump)
 
 /// Step 7: StartGame (C++: diablo.cpp line 178)
 /// Initialize game state and enter game loop
-fn start_game(ctx: &mut DiabloContext, class: game::player::PlayerClass) -> Result<(), String> {
+fn start_game(ctx: &mut DiabloContext, class: game::player::PlayerClass, event_pump: &mut sdl2::EventPump) -> Result<(), String> {
     println!("[StartGame] Starting game with class: {:?}", class);
 
     if !net_init_single_player() {
@@ -1903,7 +1902,7 @@ fn start_game(ctx: &mut DiabloContext, class: game::player::PlayerClass) -> Resu
     }
 
     // Run the real game loop
-    match run_game_loop(InterfaceMode::NewGame, &mut ctx.window, &mut game_state) {
+    match run_game_loop(InterfaceMode::NewGame, &mut ctx.window, &mut game_state, event_pump) {
         Ok(_) => {
             // Clear the tile-texture cache so stale SDL handles aren't reused
             // if the player starts another game (which gets a fresh window).
