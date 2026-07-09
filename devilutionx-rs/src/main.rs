@@ -1304,18 +1304,9 @@ fn render_main_menu(
     let item_h: i32 = 43;
     let text_v_offset = (item_h - font.line_height()) / 2;
 
-    // C++: PentSpn2Spin() => GetAnimationFrame(8, 50) => (SDL_GetTicks() / 50) % 8
-    // C++ GetAnimationFrame(frames, fps=60) => (SDL_GetTicks() / 60) % frames
+    // C++ PentSpn2Spin: GetAnimationFrame(8 frames) cycles at ~50ms/frame.
     let ticks = unsafe { sdl2::sys::SDL_GetTicks() };
-    let frame_idx = ((ticks / 60) as usize) % 8;
-
-    // DEBUG: 验证动画帧是否在变化
-    static LAST_FRAME_DEBUG: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(999);
-    let prev_frame = LAST_FRAME_DEBUG.swap(frame_idx, std::sync::atomic::Ordering::Relaxed);
-    if prev_frame != frame_idx && prev_frame != 999 {
-        eprintln!("[DEBUG] Focus frame: {} -> {} (ticks={}, delta={}ms)",
-            prev_frame, frame_idx, ticks, 60);
-    }
+    let frame_idx = ((ticks / 50) as usize) % 8;
 
     for (i, text) in menu_texts.iter().enumerate() {
         let item_y = list_y + i as i32 * item_h;
