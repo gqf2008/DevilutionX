@@ -183,6 +183,13 @@ pub fn run_game_loop(mode: InterfaceMode, window: &mut GameWindow, game_state: &
             }
         }
 
+        // 'F' = cast Firebolt toward the nearest monster (demo spell-casting).
+        // Edge-triggered so one tap fires one bolt. Mana cost is applied
+        // inside the cast; nothing happens if mana is insufficient.
+        if input.is_key_pressed(Keycode::F) && game_state.in_dungeon {
+            let _ = game_state.cast_firebolt_at_nearest();
+        }
+
         // Apply continuous movement (held arrow/WASD keys) to the player/camera.
         apply_movement(game_state, &input);
 
@@ -789,6 +796,7 @@ fn draw_and_blit(window: &mut GameWindow, game_state: &GameState) {
     // of the rendered world + player sprite. Pure canvas drawing (no texture
     // creator needed), so it runs after the creator block above. This is the
     // only addition to draw_and_blit — the rest of the function is unchanged.
+    draw_simple_missiles(window, game_state, cam_tile_x, cam_tile_y, screen_center_x, screen_center_y);
     hud::draw_hud(window, game_state);
 
     // Debug status line (throttled: only every 30 ticks to avoid log spam).
@@ -816,6 +824,35 @@ fn draw_and_blit(window: &mut GameWindow, game_state: &GameState) {
     }
 
     window.present();
+}
+
+/// Draw active spell projectiles (Firebolt) as small orange diamonds at their
+/// world-tile position projected through the same isometric transform the
+/// monsters use. Pure canvas drawing (no textures), so it runs outside the
+/// TextureCreator borrow block.
+fn draw_simple_missiles(
+    window: &mut GameWindow,
+    game_state: &GameState,
+    cam_tile_x: i32,
+    cam_tile_y: i32,
+    screen_center_x: i32,
+    screen_center_y: i32,
+) {
+    if game_state.simple_missiles.is_empty() {
+        return;
+    }
+    let canvas = window.canvas_mut();
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(255, 140, 0));
+    for m in &game_state.simple_missiles {
+        let rel_x = (m.x - cam_tile_x - (m.y - cam_tile_y)) * (TILE_WIDTH / 2);
+        let rel_y = (m.x - cam_tile_x + (m.y - cam_tile_y)) * (TILE_HEIGHT / 2);
+        let cx = screen_center_x + rel_x;
+        let cy = screen_center_y + rel_y;
+        // Draw a small diamond (4 triangles of 1px wide) as a stand-in sprite.
+        for (dx, dy) in [(-3, 0), (3, 0), (0, -3), (0, 3), (-2, -1), (2, -1), (-2, 1), (2, 1), (0, 0)] {
+            let _ = canvas.draw_point(sdl2::rect::Point::new(cx + dx, cy + dy));
+        }
+    }
 }
 
 /// Logical render resolution. The canvas is configured with

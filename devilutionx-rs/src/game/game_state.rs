@@ -114,6 +114,26 @@ pub enum GameLogicStep {
     ProcessMissilesTown,
 }
 
+/// A single player-cast fireball for the demo spell-casting path.
+///
+/// Travels one tile per logic tick in a fixed world direction, applies
+/// fire damage to the first monster it overlaps, and expires on hit or
+/// after a short range. Mana cost and damage follow spelldat's Firebolt
+/// (mana cost 6, damage scales with player level).
+#[derive(Debug, Clone, Copy)]
+pub struct SimpleMissile {
+    /// Current world tile position (micro-tile coords, matches monster/player).
+    pub x: i32,
+    pub y: i32,
+    /// Per-tick movement delta in world tiles (one of the 8 directions).
+    pub dx: i32,
+    pub dy: i32,
+    /// Damage applied on hit (display units, not 64x).
+    pub damage: i32,
+    /// Remaining tiles of travel before the missile fizzles.
+    pub range_left: i32,
+}
+
 /// Main game state integrating all subsystems
 ///
 /// **C++ Reference**: Global game state variables in `Source/diablo.cpp`
@@ -126,6 +146,16 @@ pub struct GameState {
 
     /// Missile manager
     pub missile_manager: MissileManager,
+
+    /// Lightweight player-cast spell projectiles (Firebolt etc.).
+    ///
+    /// This is a self-contained, minimal missile system used by the playable
+    /// demo's spell-casting path (the 'F' key). It intentionally does not go
+    /// through the full `missiles.rs` MissileManager (whose collision/damage
+    /// integration with the live `MonsterManager` is incomplete); instead it
+    /// moves, collides against monsters, and applies damage directly here.
+    /// Each entry is a single fireball travelling one tile per logic tick.
+    pub simple_missiles: Vec<SimpleMissile>,
 
     /// Item manager
     pub item_manager: ItemManager,
@@ -280,6 +310,7 @@ impl GameState {
             player,
             monster_manager: MonsterManager::new(200), // Max 200 monsters
             missile_manager: MissileManager::new(125), // Max 125 missiles
+            simple_missiles: Vec::new(),
             item_manager: ItemManager::new(127), // Max 127 items
             objects: Vec::new(),
             dungeon,
@@ -356,6 +387,8 @@ impl GameState {
             // Process missiles (C++ line 1528)
             self.logic_step = GameLogicStep::ProcessMissiles;
             self.process_missiles();
+            // Update demo spell projectiles (Firebolt) and resolve hits.
+            self.process_simple_missiles(rng);
 
             // Process items (C++ line 1531)
             self.logic_step = GameLogicStep::ProcessItems;
@@ -538,6 +571,116 @@ impl GameState {
             self.player._p_max_hp_base += bump;
             self.player._p_max_hp += bump;
             self.player._p_hit_points += bump;
+        }
+    }
+
+    /// Cast a Firebolt toward the nearest live monster. Convenience wrapper
+    /// around `cast_firebolt_toward` that resolves the target direction from
+    /// the monster manager (kept here to avoid borrow conflicts in the caller).
+    /// Falls back to south if no monster is present.
+    pub fn cast_firebolt_at_nearest(&mut self) -> bool {
+        let ppos = self.player.position;
+        let mut best_dx = 0i32;
+        let mut best_dy = 1i32; // default: south
+        let mut best_dist = i32::MAX;
+        for (id, _) in self.monster_manager.iter() {
+            if let Some(mon) = self.monster_manager.get_monster(id) {
+                if !mon.is_alive() {
+                    continue;
+                }
+                let mp = mon.position();
+                let d = (mp.x - ppos.x).abs() + (mp.y - ppos.y).abs();
+                if d < best_dist {
+                    best_dist = d;
+                    best_dx = mp.x - ppos.x;
+                    best_dy = mp.y - ppos.y;
+                }
+            }
+        }
+        self.cast_firebolt_toward(best_dx, best_dy)
+    }
+
+    /// Try to cast a Firebolt in the player's facing direction.
+    ///
+    /// Mana cost is 6 (spelldat Firebolt). On success the mana is spent and a
+    /// `SimpleMissile` is spawned at the player's tile. Damage scales gently
+    /// with level (base 6 + level, mirroring the early Firebolt feel). The
+    /// facing direction is inferred from the last movement delta stored on the
+    /// player's `position` history is unavailable, so we fall back to the
+    /// direction toward the nearest monster (or south if none).
+    pub fn cast_firebolt_toward(&mut self, target_dx: i32, target_dy: i32) -> bool {
+        const FIREBOLT_MANA_COST_64X: i32 = 6 << 6;
+        if self.player._p_mana < FIREBOLT_MANA_COST_64X {
+            return false;
+        }
+        // Normalise to a single-tile step in one of 8 directions.
+        let dx = target_dx.signum();
+        let dy = target_dy.signum();
+        if dx == 0 && dy == 0 {
+            return false; // no direction
+        }
+        self.player._p_mana -= FIREBOLT_MANA_COST_64X;
+        let p = self.player.position;
+        let damage = 6 + (self.player._p_level as i32);
+        self.simple_missiles.push(SimpleMissile {
+            x: p.x,
+            y: p.y,
+            dx,
+            dy,
+            damage,
+            range_left: 12,
+        });
+        true
+    }
+
+    /// Advance all active `SimpleMissile`s, resolve monster collisions, and
+    /// cull expired/out-of-range projectiles. Killed monsters award XP via
+    /// the same path as melee combat.
+    fn process_simple_missiles(&mut self, rng: &mut impl Rng) {
+        // Snapshot missile positions to iterate while mutating monsters.
+        let mut xp_gained: i32 = 0;
+        let mut alive: Vec<SimpleMissile> = Vec::with_capacity(self.simple_missiles.len());
+        for mut m in self.simple_missiles.drain(..) {
+            m.x += m.dx;
+            m.y += m.dy;
+            m.range_left -= 1;
+
+            // Out of range -> fizzle.
+            if m.range_left < 0 {
+                continue;
+            }
+
+            // Collide with the first live monster on this tile.
+            let mut hit = false;
+            let monster_ids: Vec<usize> = self.monster_manager.iter().map(|(id, _)| id).collect();
+            for mid in monster_ids {
+                if let Some(mon) = self.monster_manager.get_monster_mut(mid) {
+                    if mon.is_alive() {
+                        let mp = mon.position();
+                        if mp.x == m.x && mp.y == m.y {
+                            mon.hp -= m.damage << 6; // 64x, same scale as melee
+                            hit = true;
+                            if mon.hp <= 0 {
+                                mon.mode = crate::game::monster::MonsterMode::Death;
+                                mon.ai_state = crate::game::monster::MonsterAIState::Dead;
+                                xp_gained += mon.experience as i32;
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+            if !hit {
+                alive.push(m);
+            }
+        }
+        self.simple_missiles = alive;
+
+        if xp_gained > 0 {
+            let _ = rng; // RNG currently unused here; keep signature for parity.
+            self.player._p_experience =
+                self.player._p_experience.saturating_add(xp_gained as u32);
+            self.check_level_up();
         }
     }
 
