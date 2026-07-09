@@ -161,6 +161,30 @@ pub struct GameState {
     /// viewport on this point. Initialised to the town spawn (75, 68) which is
     /// the C++ `ViewPosition` for `ENTRY_MAIN`.
     pub camera: Camera,
+
+    /// Decoded player sprite (RGBA + dimensions), if a Warrior town-walk sprite
+    /// was loaded from MPQ in `start_game`. The renderer (`draw_and_blit`)
+    /// uploads this once into a cached SDL texture and blits it at the viewport
+    /// centre instead of the old yellow marker.
+    ///
+    /// `None` when no real sprite is available (e.g. assets missing); the
+    /// renderer then falls back to the marker.
+    pub player_sprite: Option<PlayerSprite>,
+}
+
+/// A decoded player sprite ready for texture upload.
+///
+/// Stores the RGBA pixel buffer plus its dimensions. The actual SDL `Texture`
+/// is created lazily inside the render thread (see `game_loop`'s
+/// `PLAYER_SPRITE_CACHE`) because textures borrow the canvas's `TextureCreator`.
+#[derive(Debug, Clone)]
+pub struct PlayerSprite {
+    /// Pixel width.
+    pub width: u16,
+    /// Pixel height.
+    pub height: u16,
+    /// Top-to-bottom RGBA bytes (`width * height * 4`).
+    pub rgba: Vec<u8>,
 }
 
 impl GameState {
@@ -180,6 +204,7 @@ impl GameState {
             level_data: None,
             town_layout: None,
             camera: Camera::default(),
+            player_sprite: None,
         }
     }
 

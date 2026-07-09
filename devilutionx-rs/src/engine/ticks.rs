@@ -2,26 +2,29 @@
 //!
 //! 移植自 Source/engine/ticks.hpp
 
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-/// 游戏开始时间（懒加载）
-static mut GAME_START_TIME: Option<Instant> = None;
+/// 游戏开始时间（懒加载）。
+///
+/// 使用 `Mutex<Option<Instant>>` 而非 `static mut`，以避免
+/// `static_mut_refs` 警告以及共享引用指向可变静态量的未定义行为。
+/// 锁仅在极短的读/写窗口内持有，不会跨 I/O，因此争用可忽略不计。
+static GAME_START_TIME: Mutex<Option<Instant>> = Mutex::new(None);
 
 /// 获取游戏运行时间（毫秒）
 pub fn get_ticks() -> u32 {
-    unsafe {
-        if GAME_START_TIME.is_none() {
-            GAME_START_TIME = Some(Instant::now());
-        }
-        GAME_START_TIME.unwrap().elapsed().as_millis() as u32
+    let mut guard = GAME_START_TIME.lock().expect("GAME_START_TIME mutex poisoned");
+    if guard.is_none() {
+        *guard = Some(Instant::now());
     }
+    guard.as_ref().unwrap().elapsed().as_millis() as u32
 }
 
 /// 重置游戏计时器
 pub fn reset_ticks() {
-    unsafe {
-        GAME_START_TIME = Some(Instant::now());
-    }
+    let mut guard = GAME_START_TIME.lock().expect("GAME_START_TIME mutex poisoned");
+    *guard = Some(Instant::now());
 }
 
 /// 获取动画帧索引

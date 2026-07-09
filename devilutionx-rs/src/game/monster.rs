@@ -4920,11 +4920,21 @@ mod tests {
 
         ai_counselor(&mut monster);
 
-        // Should attempt ranged attack or delay
+        // ai_counselor with Normal goal at range (distance 5 here) can, depending
+        // on the RNG rolls, take any of these actions:
+        //  * RangedAttack  — passes the spell-cast roll (`v < 5*(int+10)`).
+        //  * FadeOut       — fails the spell-cast roll but passes the teleport-
+        //                     away roll (`< 30`); start_fadeout sets mode=FadeOut.
+        //  * DelayedDeath  — `ai_delay` marker; sets var2 = len (> 0).
+        //  * Stand         — unchanged (no branch fired / mode left as-is).
+        // The previous assertion omitted the FadeOut path, so the test flaked
+        // (~12-30% of the time) whenever the teleport-away branch was taken.
         assert!(
             monster.mode == MonsterMode::RangedAttack ||
+            monster.mode == MonsterMode::FadeOut ||
+            monster.mode == MonsterMode::DelayedDeath ||
             monster.mode == MonsterMode::Stand ||
-            monster.var2 > 0 // AI delay
+            monster.var2 > 0
         );
     }
 

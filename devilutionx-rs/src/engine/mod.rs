@@ -11,6 +11,7 @@ pub mod mpq;
 pub mod archive; // Multi-MPQ ArchiveManager (load-order priority)
 pub mod clx;
 pub mod cel;  // CEL/CL2 decoder (M80)
+pub mod cl2_sheet;  // CL2 multi-group (directional) sprite-sheet loader
 pub mod explode;
 pub mod pcx;
 pub mod dungeon;

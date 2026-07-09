@@ -1843,6 +1843,15 @@ fn start_game(ctx: &mut DiabloContext, class: game::player::PlayerClass) -> Resu
         }
     }
 
+    // Load the Warrior town-walk sprite (CL2) and decode direction 0, frame 0
+    // (facing down) to RGBA so the renderer can blit a real player sprite at the
+    // viewport centre instead of the yellow marker. Non-fatal: if the asset is
+    // missing or fails to decode, `player_sprite` stays `None` and the renderer
+    // falls back to the marker.
+    if game_state.player_sprite.is_none() {
+        game_state.player_sprite = load_player_sprite(&mut ctx.mpq_manager);
+    }
+
     // Centre the camera on the town spawn (C++ ENTRY_MAIN: ViewPosition {75,68}).
     game_state.init_town_camera();
 
@@ -1852,6 +1861,7 @@ fn start_game(ctx: &mut DiabloContext, class: game::player::PlayerClass) -> Resu
             // Clear the tile-texture cache so stale SDL handles aren't reused
             // if the player starts another game (which gets a fresh window).
             game::game_loop::clear_tile_texture_cache();
+            game::game_loop::clear_player_sprite_cache();
             net_close();
             // Recreate UI when returning to main menu
             ui_initialize(ctx);
@@ -1860,6 +1870,7 @@ fn start_game(ctx: &mut DiabloContext, class: game::player::PlayerClass) -> Resu
         },
         Err(e) => {
             game::game_loop::clear_tile_texture_cache();
+            game::game_loop::clear_player_sprite_cache();
             net_close();
             Err(e.to_string())
         },
@@ -1885,6 +1896,74 @@ fn read_dun_template(mpq: &mut MpqAssetManager, path: &str) -> Option<engine::du
             None
         }
     }
+}
+
+/// Load the Warrior town-walk sprite (`plrgfx\warrior\wln\wlnwl.cl2`) and decode
+/// direction 0 (facing down), frame 0, to RGBA using the town palette.
+///
+/// C++ Reference: `Source/player.cpp::LoadPlrGFX` — for `player_graphic::Walk`
+/// in town the CEL suffix is `"wl"`, and the unarmoured/unarmed Warrior prefix
+/// is `wln`, giving `plrgfx\warrior\wln\wlnwl.cl2`. The Warrior walk frame
+/// width is 96 (from `txtdata/classes/warrior/sprites.tsv`).
+///
+/// Returns `None` (non-fatal) if the asset is missing or fails to decode; the
+/// renderer then falls back to the yellow marker.
+fn load_player_sprite(mpq: &mut MpqAssetManager) -> Option<game::game_state::PlayerSprite> {
+    // Town palette (768 bytes RGB). Read town.pal directly; it is the same
+    // palette used to render the floor tiles and the player sprite.
+    let pal_data = mpq.read_file("levels\\towndata\\town.pal").ok()?;
+    if pal_data.len() < 768 {
+        println!("[PlayerSprite] town.pal too short ({} bytes)", pal_data.len());
+        return None;
+    }
+    let mut palette = [0u8; 768];
+    palette.copy_from_slice(&pal_data[..768]);
+
+    // Read the Warrior town-walk CL2.
+    const WARRIOR_WALK_PATH: &str = "plrgfx\\warrior\\wln\\wlnwl.cl2";
+    const WARRIOR_WALK_WIDTH: u16 = 96;
+    let cl2_data = match mpq.read_file(WARRIOR_WALK_PATH) {
+        Ok(d) => d,
+        Err(e) => {
+            println!(
+                "[PlayerSprite] {} not loaded ({}); falling back to marker",
+                WARRIOR_WALK_PATH, e
+            );
+            return None;
+        }
+    };
+
+    // Parse the multi-group CL2 (8 directions) and take direction 0, frame 0.
+    let sheet = match engine::cl2_sheet::parse_cl2_sheet(&cl2_data, WARRIOR_WALK_WIDTH) {
+        Some(s) => s,
+        None => {
+            println!("[PlayerSprite] failed to parse {}; falling back to marker", WARRIOR_WALK_PATH);
+            return None;
+        }
+    };
+    let frame = match sheet.first_frame(0) {
+        Some(f) => f,
+        None => {
+            println!("[PlayerSprite] no direction-0 frame in {}; falling back to marker", WARRIOR_WALK_PATH);
+            return None;
+        }
+    };
+
+    let rgba = frame.decode_rgba(&palette);
+    let sprite = game::game_state::PlayerSprite {
+        width: frame.width,
+        height: frame.height,
+        rgba,
+    };
+    println!(
+        "[PlayerSprite] loaded {} ({} dirs, dir0 {}x{}, {} opaque px)",
+        WARRIOR_WALK_PATH,
+        sheet.num_lists(),
+        sprite.width,
+        sprite.height,
+        sprite.rgba.chunks_exact(4).filter(|c| c[3] > 0).count()
+    );
+    Some(sprite)
 }
 
 /// Step 8: RunGameLoop (C++: diablo.cpp line 857)

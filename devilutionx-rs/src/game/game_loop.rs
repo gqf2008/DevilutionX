@@ -486,16 +486,15 @@ fn draw_and_blit(window: &mut GameWindow, game_state: &GameState) {
             draw_plain_checkerboard(canvas, screen_center_x, screen_center_y);
         }
 
+        // Draw the player at the viewport centre (camera == player position).
+        // Prefer the real Warrior town-walk sprite; fall back to the yellow
+        // marker if no sprite was loaded. Done inside the creator block so a
+        // cache-miss texture upload can borrow the TextureCreator.
+        draw_player_sprite(window, game_state, screen_center_x, screen_center_y);
+
         clear_current_creator();
     }
 
-    // Draw the player marker at the viewport centre (camera == player position).
-    let canvas = window.canvas_mut();
-    canvas.set_draw_color(sdl2::pixels::Color::RGB(255, 220, 60));
-    let _ = canvas.fill_rect(Rect::new(screen_center_x - 4, screen_center_y - 4, 8, 8));
-    // A subtle outline so it reads on bright tiles.
-    canvas.set_draw_color(sdl2::pixels::Color::RGB(20, 20, 20));
-    let _ = canvas.draw_rect(Rect::new(screen_center_x - 5, screen_center_y - 5, 10, 10));
 
     // Debug status line (throttled: only every 30 ticks to avoid log spam).
     if game_state.game_tick % 30 == 0 {
@@ -857,6 +856,91 @@ fn current_creator() -> Option<&'static sdl2::render::TextureCreator<sdl2::video
 /// aren't reused across windows (which would point at destroyed SDL handles).
 pub fn clear_tile_texture_cache() {
     TILE_TEXTURE_CACHE.with(|c| c.borrow_mut().clear());
+}
+
+//------------------------------------------------------------------------------
+// Player Sprite Cache (Step 2)
+//------------------------------------------------------------------------------
+
+thread_local! {
+    /// Cached player-sprite SDL texture, uploaded once from
+    /// `GameState::player_sprite`. Holds a `Texture<'static>` whose lifetime is
+    /// erased (see the Texture Cache module docstring for the safety rationale:
+    /// the underlying SDL handle outlives the borrow because the `GameWindow`
+    /// lives for the whole game loop). Cleared on game-loop exit alongside the
+    /// tile cache.
+    static PLAYER_SPRITE_CACHE: std::cell::RefCell<Option<Texture<'static>>> =
+        std::cell::RefCell::new(None);
+}
+
+/// Draw the player at the viewport centre.
+///
+/// If `GameState::player_sprite` is set (a real Warrior town-walk sprite was
+/// decoded in `start_game`), upload it to a cached texture on first use and blit
+/// it anchored so the sprite's feet sit on the camera tile (top-left at
+/// `centre_x - width/2`, `centre_y - height`). Otherwise fall back to the old
+/// yellow marker so the game is still playable without assets.
+///
+/// Must be called inside a `set_current_creator`/`clear_current_creator` block
+/// so the cache-miss upload can borrow the canvas's `TextureCreator`.
+fn draw_player_sprite(
+    window: &mut GameWindow,
+    game_state: &GameState,
+    centre_x: i32,
+    centre_y: i32,
+) {
+    if let Some(sprite) = &game_state.player_sprite {
+        // Ensure the texture is uploaded (once per window lifetime).
+        let need_upload = PLAYER_SPRITE_CACHE.with(|c| c.borrow().is_none());
+        if need_upload {
+            if let Some(creator) = current_creator() {
+                match rgba_to_texture(creator, &sprite.rgba, sprite.width, sprite.height) {
+                    Ok(tex) => {
+                        // SAFETY: see Texture Cache module docstring. The texture's
+                        // SDL handle is valid for the GameWindow's lifetime.
+                        let tex_static: Texture<'static> = unsafe { std::mem::transmute(tex) };
+                        PLAYER_SPRITE_CACHE.with(|c| *c.borrow_mut() = Some(tex_static));
+                    }
+                    Err(e) => {
+                        eprintln!("[PlayerSprite] texture upload failed: {:?}", e);
+                    }
+                }
+            }
+        }
+
+        let blit = PLAYER_SPRITE_CACHE.with(|c| c.borrow().is_some());
+        if blit {
+            PLAYER_SPRITE_CACHE.with(|c| {
+                let cache = c.borrow();
+                let tex = cache.as_ref().unwrap();
+                // Anchor feet at the tile centre: bottom-centre of the sprite on
+                // (centre_x, centre_y). This matches how Diablo positions actor
+                // sprites on their tile.
+                let dst = Rect::new(
+                    centre_x - sprite.width as i32 / 2,
+                    centre_y - sprite.height as i32,
+                    sprite.width as u32,
+                    sprite.height as u32,
+                );
+                let _ = window.canvas_mut().copy(tex, None, dst);
+            });
+            return;
+        }
+    }
+
+    // Fallback: yellow marker (kept for asset-less runs / tests).
+    let canvas = window.canvas_mut();
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(255, 220, 60));
+    let _ = canvas.fill_rect(Rect::new(centre_x - 4, centre_y - 4, 8, 8));
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(20, 20, 20));
+    let _ = canvas.draw_rect(Rect::new(centre_x - 5, centre_y - 5, 10, 10));
+}
+
+/// Clear the player-sprite texture cache. Called on game-loop exit (alongside
+/// `clear_tile_texture_cache`) so a stale SDL handle isn't reused with a new
+/// window.
+pub fn clear_player_sprite_cache() {
+    PLAYER_SPRITE_CACHE.with(|c| *c.borrow_mut() = None);
 }
 
 /// Build the geographically-correct town layout (`dPiece` grid) from the four
