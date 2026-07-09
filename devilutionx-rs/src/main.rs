@@ -44,8 +44,21 @@ const SCREEN_WIDTH: u32 = 640;
 const SCREEN_HEIGHT: u32 = 480;
 
 /// Convert window pixel coordinates to logical coordinates (640x480)
-/// SDL2's mouse_state() returns window coordinates, not logical coordinates
+/// Convert a window-space mouse coordinate to logical 640x480 space.
+///
+/// SDL2's `set_logical_size(640,480)` is *supposed* to auto-convert mouse
+/// events to logical coordinates, but `mouse_state()` polling does not go
+/// through that path, and some driver/renderer combos don't honour it for
+/// events either. To be robust we convert defensively: if the incoming
+/// coordinate already looks logical (within 0..640 / 0..480) we leave it
+/// (avoids double-scaling when logical_size conversion already happened);
+/// otherwise we scale it from the physical window size with letterboxing.
 fn window_to_logical(canvas: &sdl2::render::Canvas<sdl2::video::Window>, x: i32, y: i32) -> (i32, i32) {
+    // Heuristic: if both coords already fit inside the logical rect, assume
+    // SDL already converted them (event path under a working logical_size).
+    if x >= 0 && x < SCREEN_WIDTH as i32 && y >= 0 && y < SCREEN_HEIGHT as i32 {
+        return (x, y);
+    }
     let (window_w, window_h) = canvas.window().size();
     let logical_w = SCREEN_WIDTH as f32;
     let logical_h = SCREEN_HEIGHT as f32;
@@ -1604,12 +1617,12 @@ fn ui_main_menu_dialog(
                 // Mouse button up triggers selection (like C++ HandleMouseEventList)
                 Event::MouseButtonUp { mouse_btn: sdl2::mouse::MouseButton::Left, x, y, .. } => {
                     last_input = Instant::now();
-                    // SDL2 with logical_size: event coords are already logical coords
-                    // Only mouse_state() needs conversion
-                    println!("[DEBUG] MouseButtonUp event: x={}, y={}", x, y);
-                    if let Some(idx) = hit_test_menu_item(x, y, menu_item_count) {
-                        // Only select if it matches the current selection (like C++ double-click behavior)
-                        // For simplicity, we select on single click
+                    // Convert defensively: window_to_logical handles both the
+                    // case where SDL already converted (logical_size) and where
+                    // it didn't (raw window coords).
+                    let (lx, ly) = window_to_logical(ctx.window.canvas_mut(), x, y);
+                    println!("[DEBUG] MouseButtonUp win=({}, {}) -> logical=({}, {})", x, y, lx, ly);
+                    if let Some(idx) = hit_test_menu_item(lx, ly, menu_item_count) {
                         if let Some(selection) = MainMenuSelection::from_index(idx) {
                             println!("[UiMainMenuDialog] Mouse clicked item {} => {:?}", idx, selection);
                             break 'dialog_loop selection;
@@ -1618,8 +1631,8 @@ fn ui_main_menu_dialog(
                 },
                 // Mouse motion updates hover selection
                 Event::MouseMotion { x, y, .. } => {
-                    // SDL2 with logical_size: event coords are already logical coords
-                    if let Some(idx) = hit_test_menu_item(x, y, menu_item_count) {
+                    let (lx, ly) = window_to_logical(ctx.window.canvas_mut(), x, y);
+                    if let Some(idx) = hit_test_menu_item(lx, ly, menu_item_count) {
                         // Update selection on hover (C++ UiFocus behavior)
                         if main_menu.selected_index() != idx {
                             main_menu.set_selection(idx);
@@ -2100,10 +2113,13 @@ fn main() -> Result<(), String> {
     let mut window = GameWindow::new("DevilutionX-RS", window_width, window_height)
         .map_err(|e| e.to_string())?;
     // Use 640x480 logical size so UI coordinates match original assets; SDL handles scaling/letterboxing
-    window
-        .canvas_mut()
-        .set_logical_size(SCREEN_WIDTH, SCREEN_HEIGHT)
-        .map_err(|e| e.to_string())?;
+    match window.canvas_mut().set_logical_size(SCREEN_WIDTH, SCREEN_HEIGHT) {
+        Ok(()) => {}
+        Err(e) => println!("[Window] set_logical_size failed: {}", e),
+    }
+    let ls = window.canvas_mut().logical_size();
+    let ws = window.canvas_mut().window().size();
+    println!("[Window] logical_size={:?} window_size={:?} (logical should be 640x480)", ls, ws);
     // Hide OS cursor because we draw our own
     window.set_cursor_visible(false);
     log_step("window created");
