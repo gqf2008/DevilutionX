@@ -1155,8 +1155,10 @@ fn diablo_splash(ctx: &mut DiabloContext, flags: &CmdFlags, is_hellfire: bool, o
 
         'title_loop: loop {
             let mouse = event_pump.mouse_state();
-            // Convert window coordinates to logical 640x480 coordinates
-            let mouse_pos = window_to_logical(ctx.window.canvas_mut(), mouse.x(), mouse.y());
+            // With set_logical_size(640,480) active, SDL2 delivers mouse coords
+            // already in logical space (events.cpp:408 "No-op in SDL2" in C++),
+            // so we use them directly — no manual conversion.
+            let mouse_pos = (mouse.x(), mouse.y());
             let now_ms = start.elapsed().as_millis() as u32;
             let _ = fade_ctx.update_fade(now_ms);
             let fade = fade_ctx.fade_value.min(255) as u8;
@@ -1614,26 +1616,20 @@ fn ui_main_menu_dialog(
                         _ => {}
                     }
                 },
-                // Mouse button up triggers selection (like C++ HandleMouseEventList)
+                // Mouse button up triggers selection (like C++ HandleMouseEventList).
+                // SDL2 logical_size(640,480) auto-converts event coords to logical
+                // space, so we use x,y directly.
                 Event::MouseButtonUp { mouse_btn: sdl2::mouse::MouseButton::Left, x, y, .. } => {
                     last_input = Instant::now();
-                    // Convert defensively: window_to_logical handles both the
-                    // case where SDL already converted (logical_size) and where
-                    // it didn't (raw window coords).
-                    let (lx, ly) = window_to_logical(ctx.window.canvas_mut(), x, y);
-                    println!("[DEBUG] MouseButtonUp win=({}, {}) -> logical=({}, {})", x, y, lx, ly);
-                    if let Some(idx) = hit_test_menu_item(lx, ly, menu_item_count) {
+                    if let Some(idx) = hit_test_menu_item(x, y, menu_item_count) {
                         if let Some(selection) = MainMenuSelection::from_index(idx) {
-                            println!("[UiMainMenuDialog] Mouse clicked item {} => {:?}", idx, selection);
                             break 'dialog_loop selection;
                         }
                     }
                 },
                 // Mouse motion updates hover selection
                 Event::MouseMotion { x, y, .. } => {
-                    let (lx, ly) = window_to_logical(ctx.window.canvas_mut(), x, y);
-                    if let Some(idx) = hit_test_menu_item(lx, ly, menu_item_count) {
-                        // Update selection on hover (C++ UiFocus behavior)
+                    if let Some(idx) = hit_test_menu_item(x, y, menu_item_count) {
                         if main_menu.selected_index() != idx {
                             main_menu.set_selection(idx);
                         }
@@ -1652,8 +1648,8 @@ fn ui_main_menu_dialog(
 
         // Render (C++: UiClearScreen + UiPollAndRender)
         let mouse = event_pump.mouse_state();
-        // Convert window coordinates to logical 640x480 coordinates
-        let mouse_pos = window_to_logical(ctx.window.canvas_mut(), mouse.x(), mouse.y());
+        // logical_size active → coords already logical
+        let mouse_pos = (mouse.x(), mouse.y());
         let now_ms = start_time.elapsed().as_millis() as u32;
         let _ = fade_ctx.update_fade(now_ms);
         let fade = fade_ctx.fade_value.min(255) as u8;
@@ -1769,8 +1765,8 @@ fn select_hero_dialog(ctx: &mut DiabloContext, event_pump: &mut sdl2::EventPump)
             .collect();
 
         let mouse = event_pump.mouse_state();
-        // Convert window coordinates to logical 640x480 coordinates
-        let mouse_pos = window_to_logical(ctx.window.canvas_mut(), mouse.x(), mouse.y());
+        // logical_size active → coords already logical
+        let mouse_pos = (mouse.x(), mouse.y());
         let now_ms = start_time.elapsed().as_millis() as u32;
         let _ = fade_ctx.update_fade(now_ms);
         let fade = fade_ctx.fade_value.min(255) as u8;
@@ -2112,15 +2108,16 @@ fn main() -> Result<(), String> {
     // Create window (C++: init_create_window in ApplicationInit)
     let mut window = GameWindow::new("DevilutionX-RS", window_width, window_height)
         .map_err(|e| e.to_string())?;
-    // Use 640x480 logical size so UI coordinates match original assets; SDL handles scaling/letterboxing
-    match window.canvas_mut().set_logical_size(SCREEN_WIDTH, SCREEN_HEIGHT) {
-        Ok(()) => {}
-        Err(e) => println!("[Window] set_logical_size failed: {}", e),
-    }
-    let ls = window.canvas_mut().logical_size();
-    let ws = window.canvas_mut().window().size();
-    println!("[Window] logical_size={:?} window_size={:?} (logical should be 640x480)", ls, ws);
-    // Hide OS cursor because we draw our own
+    // Use 640x480 logical size so UI coordinates match original assets; SDL
+    // handles scaling/letterboxing AND auto-converts mouse event coords into
+    // logical space (matching C++ events.cpp which is a no-op on SDL2 for
+    // exactly this reason). We must NOT add a manual conversion layer on top.
+    window
+        .canvas_mut()
+        .set_logical_size(SCREEN_WIDTH, SCREEN_HEIGHT)
+        .map_err(|e| e.to_string())?;
+    // Hide OS cursor because we draw our own in menus; the game loop restores
+    // it so the player has a visible cursor in-game.
     window.set_cursor_visible(false);
     log_step("window created");
 

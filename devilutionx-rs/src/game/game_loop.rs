@@ -50,6 +50,11 @@ struct GameLoopState {
     process_players: bool,
     /// Game result on exit
     result: bool,
+    /// Current mouse position in logical (640x480) coords. Updated from
+    /// MouseMotion events (SDL2 logical_size auto-converts them). Used to
+    /// draw the in-game cursor so the player can see where they're pointing.
+    /// C++ equivalent: `MousePosition` global (diablo.cpp:136).
+    mouse_pos: (i32, i32),
 }
 
 impl GameLoopState {
@@ -59,6 +64,7 @@ impl GameLoopState {
             startup: true,
             process_players: true,
             result: true,
+            mouse_pos: (320, 240),
         }
     }
 }
@@ -213,7 +219,7 @@ pub fn run_game_loop(mode: InterfaceMode, window: &mut GameWindow, game_state: &
             // Render if needed
             if draw_game {
                 redraw_viewport(window, game_state);
-                draw_and_blit(window, game_state);
+                draw_and_blit(window, game_state, state.mouse_pos);
             }
 
             continue;
@@ -236,7 +242,7 @@ pub fn run_game_loop(mode: InterfaceMode, window: &mut GameWindow, game_state: &
         // Render
         if draw_game {
             redraw_viewport(window, game_state);
-            draw_and_blit(window, game_state);
+            draw_and_blit(window, game_state, state.mouse_pos);
         }
     }
 
@@ -423,6 +429,22 @@ fn handle_event(event: &Event, state: &mut GameLoopState, input: &mut InputSyste
         }
         Event::KeyUp { keycode: Some(k), .. } => {
             input.on_key_up(*k);
+            true
+        }
+        // Track the mouse in logical coords so we can draw an in-game cursor.
+        // SDL2 logical_size auto-converts event coords, matching C++ (which
+        // is a no-op on SDL2 in events.cpp). C++ stores this in the global
+        // `MousePosition` (diablo.cpp:136) and uses it for click-to-move.
+        Event::MouseMotion { x, y, .. } => {
+            state.mouse_pos = (*x, *y);
+            true
+        }
+        Event::MouseButtonDown { x, y, .. } => {
+            state.mouse_pos = (*x, *y);
+            true
+        }
+        Event::MouseButtonUp { x, y, .. } => {
+            state.mouse_pos = (*x, *y);
             true
         }
         _ => {
@@ -724,7 +746,7 @@ fn redraw_viewport(_window: &mut GameWindow, _game_state: &GameState) {
     // frame. Kept as a hook for future partial-redraw optimisation.
 }
 
-fn draw_and_blit(window: &mut GameWindow, game_state: &GameState) {
+fn draw_and_blit(window: &mut GameWindow, game_state: &GameState, mouse_pos: (i32, i32)) {
     // C++: DrawAndBlit() - renders the dungeon viewport then flips the back
     // buffer.
     //
@@ -734,13 +756,19 @@ fn draw_and_blit(window: &mut GameWindow, game_state: &GameState) {
     // walk around with the arrow / WASD keys.
     //
     // Rendering uses logical 640x480 coordinates (the canvas has
-    // set_logical_size(640,480) applied in main.rs), so the viewport centre is
-    // (320, 240) regardless of the physical window size.
+    // set_logical_size(640,480) applied in main.rs).
 
     window.clear(Color::BLACK);
 
     let screen_center_x: i32 = LOGICAL_WIDTH as i32 / 2; // 320
-    let screen_center_y: i32 = LOGICAL_HEIGHT as i32 / 2; // 240
+    // C++ scrolls the dungeon so the player sits at the vertical centre of the
+    // *viewport* (screen height minus the bottom panel), not the screen centre
+    // (scrollrt.cpp CalcViewportGeometry: playerPosition.y = viewportHeight/2).
+    // Our HUD panel is 144px tall, so the viewport centre is (480-144)/2 = 168.
+    // Drawing the player at y=240 (screen centre) would leave it half-hidden
+    // behind the panel.
+    const PANEL_HEIGHT: i32 = 144;
+    let screen_center_y: i32 = (LOGICAL_HEIGHT as i32 - PANEL_HEIGHT) / 2; // 168
 
     // The camera is expressed in world tile coordinates.
     let cam_tile_x = game_state.camera.tile_x;
@@ -818,6 +846,19 @@ fn draw_and_blit(window: &mut GameWindow, game_state: &GameState) {
             "[DrawAndBlit] mode={} {} cam=({},{}) tick={}",
             mode, has_art, cam_tile_x, cam_tile_y, game_state.game_tick
         );
+    }
+
+    // Draw a simple in-game cursor so the player can see where they're
+    // pointing. (C++ uses a hardware cursor or drawn cursor sprite; we use a
+    // small crosshair for now. The OS cursor is hidden globally in main.rs
+    // for the menu's drawn cursor, so we must draw one here too.)
+    {
+        let canvas = window.canvas_mut();
+        canvas.set_draw_color(sdl2::pixels::Color::RGB(255, 255, 0));
+        let (mx, my) = mouse_pos;
+        for &(dx, dy) in &[(-5, 0), (5, 0), (0, -5), (0, 5), (-1, -1), (1, 1), (-1, 1), (1, -1)] {
+            let _ = canvas.draw_point(sdl2::rect::Point::new(mx + dx, my + dy));
+        }
     }
 
     window.present();
