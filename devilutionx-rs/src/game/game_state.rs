@@ -134,6 +134,53 @@ pub struct SimpleMissile {
     pub range_left: i32,
 }
 
+/// Kinds of ground item the demo loot pipeline can drop. Kept small and
+/// explicit so the renderer can map each to a distinct colour without pulling
+/// in the full `item_dat` ItemData table.
+///
+/// Distribution on a monster kill (see `GameState::roll_monster_drop`):
+///   * Gold         — 70%
+///   * HealingPotion — 20%
+///   * ManaPotion   — 10%
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GroundItemType {
+    Gold,
+    HealingPotion,
+    ManaPotion,
+}
+
+impl GroundItemType {
+    /// Human-readable name used by the pickup log ("[Pickup] picked up X").
+    pub fn display_name(self) -> &'static str {
+        match self {
+            GroundItemType::Gold => "Gold",
+            GroundItemType::HealingPotion => "Potion of Healing",
+            GroundItemType::ManaPotion => "Potion of Mana",
+        }
+    }
+
+    /// Gold amount granted when a `Gold` ground item is picked up. Matches the
+    /// small-pile feel of early Diablo (C++ `ItemCreateGoldItem` randomises
+    /// per monster level; we use a flat modest amount for the demo).
+    pub const GOLD_AMOUNT: i32 = 50;
+}
+
+/// A single item lying on the dungeon floor, dropped when a monster dies.
+///
+/// Coordinates are in the same micro-tile space as monsters/players/camera, so
+/// the renderer projects them with the same isometric transform. The player
+/// picks a ground item up by walking onto its tile (see
+/// `GameState::pickup_ground_items`).
+#[derive(Debug, Clone, Copy)]
+pub struct GroundItem {
+    /// World tile X (micro-tile coords).
+    pub x: i32,
+    /// World tile Y (micro-tile coords).
+    pub y: i32,
+    /// What kind of loot this is (gold / healing / mana).
+    pub item_type: GroundItemType,
+}
+
 /// Main game state integrating all subsystems
 ///
 /// **C++ Reference**: Global game state variables in `Source/diablo.cpp`
@@ -156,6 +203,12 @@ pub struct GameState {
     /// moves, collides against monsters, and applies damage directly here.
     /// Each entry is a single fireball travelling one tile per logic tick.
     pub simple_missiles: Vec<SimpleMissile>,
+
+    /// Items lying on the dungeon floor, dropped when monsters die. The player
+    /// picks these up by walking onto the same tile (see
+    /// `pickup_ground_items`). Rendered as small coloured icons by
+    /// `game_loop::draw_ground_items`.
+    pub ground_items: Vec<GroundItem>,
 
     /// Item manager
     pub item_manager: ItemManager,
@@ -224,6 +277,17 @@ pub struct GameState {
     /// monster as a real CL2 sprite (with a coloured-block fallback per type).
     /// `None`/empty when no sprites loaded (town, or asset-less build).
     pub monster_sprites: Option<crate::game::monster_sprites::MonsterSpriteSet>,
+
+    /// Pending SFX requests produced by gameplay (combat hits, monster deaths,
+    /// etc.). The game loop drains this each frame via [`drain_pending_sfx`]
+    /// and forwards each name to the global `AudioManager::play_sfx`.
+    ///
+    /// This decouples game-state code (which has no access to the audio
+    /// manager) from audio playback: gameplay code just pushes a logical SFX
+    /// name (`"swing"`, `"monster_death"`, ...) and the loop bridges it to the
+    /// audio system. Names map to MPQ files via
+    /// [`crate::engine::audio::SfxLibrary`].
+    pub pending_sfx: Vec<String>,
 }
 
 /// L1 Cathedral dungeon layout, the dungeon-mode analogue of `TownLayout`.
@@ -311,6 +375,7 @@ impl GameState {
             monster_manager: MonsterManager::new(200), // Max 200 monsters
             missile_manager: MissileManager::new(125), // Max 125 missiles
             simple_missiles: Vec::new(),
+            ground_items: Vec::new(),
             item_manager: ItemManager::new(127), // Max 127 items
             objects: Vec::new(),
             dungeon,
@@ -325,6 +390,7 @@ impl GameState {
             dungeon_layout: None,
             dungeon_level_data: None,
             monster_sprites: None,
+            pending_sfx: Vec::new(),
         }
     }
 
@@ -393,6 +459,10 @@ impl GameState {
             // Process items (C++ line 1531)
             self.logic_step = GameLogicStep::ProcessItems;
             self.process_items();
+
+            // Pick up any ground loot the player is standing on. Runs every
+            // logic tick so walking over a dropped item picks it up promptly.
+            self.pickup_ground_items();
         }
 
         self.logic_step = GameLogicStep::None;
@@ -529,8 +599,13 @@ impl GameState {
             .collect();
 
         // Track XP gained from kills this tick to award after the borrows
-        // on monster_manager/player resolve.
+        // on monster_manager/player resolve. Also collect the tile of each kill
+        // so we can roll a ground-item drop once the monster_manager borrow is
+        // released.
         let mut xp_gained: i32 = 0;
+        let mut kill_positions: Vec<(i32, i32)> = Vec::new();
+        let mut sfx_hits = 0u32;
+        let mut sfx_kills = 0u32;
         for monster_id in monster_ids {
             if let Some(monster) = self.monster_manager.get_monster_mut(monster_id) {
                 let dist = walking_distance(player_pos, monster.position());
@@ -541,6 +616,16 @@ impl GameState {
                         crate::game::combat_integration::AttackResult::Kill { .. } => {
                             // Award monster XP on kill (monster_dat xp reward).
                             xp_gained += monster.experience as i32;
+                            // Record the death tile for loot drop.
+                            let mp = monster.position();
+                            kill_positions.push((mp.x, mp.y));
+                            // Queue the monster-death SFX. The game loop drains
+                            // pending_sfx and forwards it to AudioManager.
+                            sfx_kills += 1;
+                        }
+                        crate::game::combat_integration::AttackResult::Hit { .. } => {
+                            // Queue the weapon-swing SFX for a non-killing hit.
+                            sfx_hits += 1;
                         }
                         _ => {}
                     }
@@ -548,16 +633,137 @@ impl GameState {
             }
         }
 
+        // Push the SFX requests once, after the monster_manager borrow ends.
+        // We collapse repeated identical sounds into a single play per tick so
+        // a multi-monster cleave doesn't spam the audio system.
+        if sfx_hits > 0 {
+            self.pending_sfx.push(
+                crate::engine::audio::SfxLibrary::for_combat(false).to_string(),
+            );
+        }
+        if sfx_kills > 0 {
+            self.pending_sfx.push(
+                crate::engine::audio::SfxLibrary::for_combat(true).to_string(),
+            );
+        }
+
         if xp_gained > 0 {
             self.player._p_experience = self.player._p_experience.saturating_add(xp_gained as u32);
             // Level-up check: advance while XP exceeds the next level threshold.
             self.check_level_up();
         }
+
+        // Roll loot drops for each kill (after the monster_manager borrow ends).
+        for (kx, ky) in kill_positions {
+            self.roll_monster_drop(kx, ky, rng);
+        }
+    }
+
+    /// Queue a sound-effect request by logical name.
+    ///
+    /// Gameplay code calls this when an audible event happens (item pickup,
+    /// spell cast, door open, ...). The game loop drains [`pending_sfx`] each
+    /// frame via [`drain_pending_sfx`] and forwards each name to the global
+    /// `AudioManager::play_sfx`, which resolves it to an MPQ file through
+    /// [`crate::engine::audio::SfxLibrary`].
+    ///
+    /// `name` may be a known alias (`"swing"`, `"monster_death"`, `"ui_click"`,
+    /// ...) or a raw MPQ path (`"sfx\\misc\\swing.mp3"`). Unknown aliases are
+    /// silently dropped by the audio manager.
+    pub fn queue_sfx(&mut self, name: &str) {
+        self.pending_sfx.push(name.to_string());
+    }
+
+    /// Drain all pending SFX requests, returning them as an owned `Vec`.
+    ///
+    /// Called by the game loop once per frame after `GameState::update`. The
+    /// returned names should be passed to `AudioManager::play_sfx` in order.
+    pub fn drain_pending_sfx(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.pending_sfx)
+    }
+
+    /// Roll a monster's death loot and, on a hit, push a `GroundItem` onto the
+    /// floor at the monster's tile.
+    ///
+    /// Drop chance is 40% per kill. On a successful drop the item type is chosen
+    /// by a second roll against the distribution:
+    ///   * Gold         — 70%
+    ///   * HealingPotion — 20%
+    ///   * ManaPotion   — 10%
+    ///
+    /// This mirrors the high-level shape of C++ `MonstDeath`/`SpawnItem`
+    /// (`Source/items.cpp`) while staying intentionally simple for the demo.
+    pub fn roll_monster_drop(&mut self, x: i32, y: i32, rng: &mut impl Rng) {
+        // 40% chance to drop anything at all.
+        if rng.random_range(0..100) >= 40 {
+            return;
+        }
+        let roll = rng.random_range(0..100);
+        let item_type = if roll < 70 {
+            GroundItemType::Gold
+        } else if roll < 90 {
+            GroundItemType::HealingPotion
+        } else {
+            GroundItemType::ManaPotion
+        };
+        self.ground_items.push(GroundItem { x, y, item_type });
+        println!(
+            "[Drop] spawned {:?} '{}' at ({}, {})",
+            item_type,
+            item_type.display_name(),
+            x,
+            y
+        );
+    }
+
+    /// Pick up any `GroundItem`s on the player's current tile.
+    ///
+    /// Called from `update()` so it runs every logic tick. Gold adds directly to
+    /// `player._p_gold`; potions are logged only for now (the inventory system
+    /// is more involved and is wired up separately). Picked-up items are removed
+    /// from `ground_items`.
+    pub fn pickup_ground_items(&mut self) {
+        if self.ground_items.is_empty() {
+            return;
+        }
+        let (px, py) = (self.player.position.x, self.player.position.y);
+        // Keep items not on the player's tile; collect the rest for processing.
+        let remaining: Vec<GroundItem> = self
+            .ground_items
+            .iter()
+            .copied()
+            .filter(|g| !(g.x == px && g.y == py))
+            .collect();
+        let picked_up: Vec<GroundItem> = self
+            .ground_items
+            .iter()
+            .copied()
+            .filter(|g| g.x == px && g.y == py)
+            .collect();
+        self.ground_items = remaining;
+        for g in picked_up {
+            match g.item_type {
+                GroundItemType::Gold => {
+                    self.player._p_gold =
+                        self.player._p_gold.saturating_add(GroundItemType::GOLD_AMOUNT);
+                    println!(
+                        "[Pickup] picked up {} gold (+{} -> {} total)",
+                        g.item_type.display_name(),
+                        GroundItemType::GOLD_AMOUNT,
+                        self.player._p_gold
+                    );
+                }
+                GroundItemType::HealingPotion | GroundItemType::ManaPotion => {
+                    // Inventory/belt integration is deferred; just log the pickup.
+                    println!("[Pickup] picked up {}", g.item_type.display_name());
+                }
+            }
+        }
     }
 
     /// Advance the player's level while their experience exceeds the next
-    /// threshold, raising base HP/mana per C++ NextLevel/CalcStats.
-    fn check_level_up(&mut self) {
+    /// level's XP threshold.
+    pub fn check_level_up(&mut self) {
         // Minimal: bump level by 1 per call if a coarse XP threshold is met.
         // (Full C++ CalcStats with per-class growth is in player_dat; this is
         // a playable approximation so kills visibly progress the HUD.)
@@ -639,6 +845,7 @@ impl GameState {
     fn process_simple_missiles(&mut self, rng: &mut impl Rng) {
         // Snapshot missile positions to iterate while mutating monsters.
         let mut xp_gained: i32 = 0;
+        let mut kill_positions: Vec<(i32, i32)> = Vec::new();
         let mut alive: Vec<SimpleMissile> = Vec::with_capacity(self.simple_missiles.len());
         for mut m in self.simple_missiles.drain(..) {
             m.x += m.dx;
@@ -664,6 +871,8 @@ impl GameState {
                                 mon.mode = crate::game::monster::MonsterMode::Death;
                                 mon.ai_state = crate::game::monster::MonsterAIState::Dead;
                                 xp_gained += mon.experience as i32;
+                                // Record the death tile for loot drop.
+                                kill_positions.push((mp.x, mp.y));
                             }
                             break;
                         }
@@ -677,10 +886,15 @@ impl GameState {
         self.simple_missiles = alive;
 
         if xp_gained > 0 {
-            let _ = rng; // RNG currently unused here; keep signature for parity.
             self.player._p_experience =
                 self.player._p_experience.saturating_add(xp_gained as u32);
             self.check_level_up();
+        }
+
+        // Roll loot drops for each spell kill (after the monster_manager borrow
+        // ends). The rng was previously unused here; it now drives the drop roll.
+        for (kx, ky) in kill_positions {
+            self.roll_monster_drop(kx, ky, rng);
         }
     }
 
@@ -1140,6 +1354,7 @@ impl crate::game::save::PlayerSnapshotMut for Player {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::SeedableRng;
 
     #[test]
     fn test_town_layout_default() {
@@ -1209,6 +1424,193 @@ mod tests {
         m.mode = crate::game::monster::MonsterMode::Stand;
         gs.add_monster(m);
         gs
+    }
+
+    // ========================================================================
+    // Ground item drop / pickup tests
+    // ========================================================================
+
+    #[test]
+    fn test_ground_item_struct_fields() {
+        // GroundItem carries tile coords + type and is Copy.
+        let g = GroundItem { x: 12, y: 7, item_type: GroundItemType::Gold };
+        assert_eq!(g.x, 12);
+        assert_eq!(g.y, 7);
+        assert_eq!(g.item_type, GroundItemType::Gold);
+    }
+
+    #[test]
+    fn test_ground_item_type_display_names() {
+        assert_eq!(GroundItemType::Gold.display_name(), "Gold");
+        assert_eq!(GroundItemType::HealingPotion.display_name(), "Potion of Healing");
+        assert_eq!(GroundItemType::ManaPotion.display_name(), "Potion of Mana");
+    }
+
+    #[test]
+    fn test_new_game_state_has_empty_ground_items() {
+        let gs = GameState::new(Player::new(), true, 1);
+        assert!(gs.ground_items.is_empty(), "fresh state has no ground items");
+    }
+
+    #[test]
+    fn test_roll_monster_drop_no_drop_seed() {
+        // With this RNG seed the first roll (0..100) is >= 40, so nothing drops.
+        let mut gs = GameState::new(Player::new(), false, 1);
+        let mut rng = rand::rngs::StdRng::seed_from_u64(1);
+        gs.roll_monster_drop(10, 10, &mut rng);
+        // We can't assert exact emptiness (seed-dependent), so instead we run
+        // many rolls and assert the drop rate stays within the expected band.
+        let mut drops = 0usize;
+        for _ in 0..1000 {
+            let before = gs.ground_items.len();
+            gs.roll_monster_drop(0, 0, &mut rng);
+            if gs.ground_items.len() > before {
+                drops += 1;
+            }
+        }
+        // ~40% drop chance => expect drops in [300, 500].
+        assert!(drops >= 300 && drops <= 500, "drop rate out of band: {}", drops);
+    }
+
+    #[test]
+    fn test_roll_monster_drop_forces_drop() {
+        // Use a seed where the first 0..100 roll is < 40 so a drop happens.
+        // We just try several seeds until one drops, then verify the spawned
+        // item lands at the requested tile with a valid type.
+        let mut gs = GameState::new(Player::new(), false, 1);
+        let mut placed = false;
+        for seed in 0..50u64 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let before = gs.ground_items.len();
+            gs.roll_monster_drop(21, 22, &mut rng);
+            if gs.ground_items.len() > before {
+                let g = gs.ground_items.last().unwrap();
+                assert_eq!(g.x, 21);
+                assert_eq!(g.y, 22);
+                assert!(g.item_type == GroundItemType::Gold
+                    || g.item_type == GroundItemType::HealingPotion
+                    || g.item_type == GroundItemType::ManaPotion);
+                placed = true;
+                break;
+            }
+        }
+        assert!(placed, "expected at least one forced drop within 50 seeds");
+    }
+
+    #[test]
+    fn test_drop_type_distribution() {
+        // Over many forced drops the type distribution should roughly match
+        // 70/20/10. We collect drops and check the bands.
+        let mut counts = [0usize; 3]; // [gold, heal, mana]
+        let mut rng = rand::rngs::StdRng::seed_from_u64(99);
+        let mut gs = GameState::new(Player::new(), false, 1);
+        let mut attempts = 0;
+        while counts.iter().sum::<usize>() < 2000 && attempts < 20000 {
+            attempts += 1;
+            let before = gs.ground_items.len();
+            gs.roll_monster_drop(0, 0, &mut rng);
+            if gs.ground_items.len() > before {
+                let t = gs.ground_items.last().unwrap().item_type;
+                match t {
+                    GroundItemType::Gold => counts[0] += 1,
+                    GroundItemType::HealingPotion => counts[1] += 1,
+                    GroundItemType::ManaPotion => counts[2] += 1,
+                }
+            }
+        }
+        let total = counts.iter().sum::<usize>() as f64;
+        let gold_pct = counts[0] as f64 / total * 100.0;
+        let heal_pct = counts[1] as f64 / total * 100.0;
+        let mana_pct = counts[2] as f64 / total * 100.0;
+        // 70/20/10 with a generous tolerance band.
+        assert!(gold_pct > 60.0 && gold_pct < 80.0, "gold pct {}", gold_pct);
+        assert!(heal_pct > 12.0 && heal_pct < 28.0, "heal pct {}", heal_pct);
+        assert!(mana_pct > 4.0 && mana_pct < 18.0, "mana pct {}", mana_pct);
+    }
+
+    #[test]
+    fn test_pickup_gold_adds_to_player_gold() {
+        let mut gs = GameState::new(Player::new(), false, 1);
+        let gold_before = gs.player._p_gold;
+        // Drop a gold item directly onto the player's tile.
+        gs.player.position = Point::new(30, 30);
+        gs.ground_items.push(GroundItem { x: 30, y: 30, item_type: GroundItemType::Gold });
+        gs.pickup_ground_items();
+        assert_eq!(
+            gs.player._p_gold,
+            gold_before + GroundItemType::GOLD_AMOUNT,
+            "gold should increase by GOLD_AMOUNT"
+        );
+        assert!(gs.ground_items.is_empty(), "picked-up item removed from floor");
+    }
+
+    #[test]
+    fn test_pickup_only_removes_coincident_items() {
+        let mut gs = GameState::new(Player::new(), false, 1);
+        gs.player.position = Point::new(30, 30);
+        // One item on the player's tile, one elsewhere.
+        gs.ground_items.push(GroundItem { x: 30, y: 30, item_type: GroundItemType::Gold });
+        gs.ground_items.push(GroundItem { x: 40, y: 40, item_type: GroundItemType::HealingPotion });
+        assert_eq!(gs.ground_items.len(), 2);
+        gs.pickup_ground_items();
+        // Only the coincident item is removed.
+        assert_eq!(gs.ground_items.len(), 1);
+        assert_eq!(gs.ground_items[0].x, 40);
+        assert_eq!(gs.ground_items[0].y, 40);
+        assert_eq!(gs.ground_items[0].item_type, GroundItemType::HealingPotion);
+    }
+
+    #[test]
+    fn test_pickup_potion_logs_without_crash() {
+        // Potions don't have inventory integration yet; pickup should still
+        // remove them from the floor without affecting gold.
+        let mut gs = GameState::new(Player::new(), false, 1);
+        gs.player.position = Point::new(5, 5);
+        let gold_before = gs.player._p_gold;
+        gs.ground_items.push(GroundItem { x: 5, y: 5, item_type: GroundItemType::HealingPotion });
+        gs.ground_items.push(GroundItem { x: 5, y: 5, item_type: GroundItemType::ManaPotion });
+        gs.pickup_ground_items();
+        assert!(gs.ground_items.is_empty());
+        assert_eq!(gs.player._p_gold, gold_before, "potion pickup must not change gold");
+    }
+
+    #[test]
+    fn test_pickup_noop_when_empty() {
+        let mut gs = GameState::new(Player::new(), false, 1);
+        // No items at all: pickup is a no-op and must not panic.
+        gs.pickup_ground_items();
+        assert!(gs.ground_items.is_empty());
+    }
+
+    #[test]
+    fn test_pickup_noop_when_not_coincident() {
+        let mut gs = GameState::new(Player::new(), false, 1);
+        gs.player.position = Point::new(10, 10);
+        gs.ground_items.push(GroundItem { x: 99, y: 99, item_type: GroundItemType::Gold });
+        gs.pickup_ground_items();
+        // Item stays because the player isn't on its tile.
+        assert_eq!(gs.ground_items.len(), 1);
+    }
+
+    #[test]
+    fn test_pickup_multiple_items_same_tile() {
+        // Walking onto a tile with several items should pick them all up.
+        let mut gs = GameState::new(Player::new(), false, 1);
+        gs.player.position = Point::new(7, 7);
+        gs.ground_items.push(GroundItem { x: 7, y: 7, item_type: GroundItemType::Gold });
+        gs.ground_items.push(GroundItem { x: 7, y: 7, item_type: GroundItemType::Gold });
+        gs.ground_items.push(GroundItem { x: 7, y: 7, item_type: GroundItemType::HealingPotion });
+        let gold_before = gs.player._p_gold;
+        gs.pickup_ground_items();
+        assert!(gs.ground_items.is_empty());
+        // Two gold piles => 2 * GOLD_AMOUNT.
+        assert_eq!(gs.player._p_gold, gold_before + 2 * GroundItemType::GOLD_AMOUNT);
+    }
+
+    #[test]
+    fn test_gold_amount_is_positive_constant() {
+        // Sanity: the gold-per-pile constant is a sensible positive value.
+        assert!(GroundItemType::GOLD_AMOUNT > 0);
     }
 
     #[test]
@@ -1389,5 +1791,129 @@ mod tests {
 
         // Cleanup.
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    // ========================================================================
+    // Audio (SFX) trigger tests
+    // ========================================================================
+
+    #[test]
+    fn test_pending_sfx_starts_empty_and_drains() {
+        // A fresh GameState has no pending SFX, and drain returns an empty vec
+        // while resetting the queue.
+        let mut gs = GameState::new(Player::new(), false, 1);
+        assert!(gs.pending_sfx.is_empty());
+        assert!(gs.drain_pending_sfx().is_empty());
+        // After draining, pushing then draining returns the pushed name.
+        gs.queue_sfx("swing");
+        gs.queue_sfx("monster_death");
+        let drained = gs.drain_pending_sfx();
+        assert_eq!(drained, vec!["swing".to_string(), "monster_death".to_string()]);
+        // Second drain is empty (the queue was taken).
+        assert!(gs.drain_pending_sfx().is_empty());
+    }
+
+    #[test]
+    fn test_combat_queues_sfx_on_hit_or_kill() {
+        // When the player is adjacent to a monster, update() runs melee
+        // combat. A non-killing hit must queue "swing" and a kill must queue
+        // "monster_death". We run two scenarios:
+        //   * high-HP monster  → hits that don't kill → "swing"
+        //   * low-HP  monster  → hits that kill       → "monster_death"
+        use crate::game::monster::MonsterType;
+
+        // ── Scenario A: tanky monster so hits survive → "swing" ────────────
+        let mut saw_swing = false;
+        for seed in 0..50u64 {
+            let mut gs = dungeon_gs_with_corridor(MonsterType::Zombie, 11, 10);
+            gs.player.position = Point::new(12, 10);
+            gs.player._p_level = 5;
+            gs.player._p_dexterity = 30;
+            gs.player._p_i_bonus_to_hit = 100;
+            gs.player._p_i_min_dam = 1;
+            gs.player._p_i_max_dam = 3; // small damage so the tank survives
+
+            // Find the placed monster's actual id (add_monster may re-index)
+            // and make it very tanky with zero armor.
+            let monster_ids: Vec<usize> =
+                gs.monster_manager.iter().map(|(id, _)| id).collect();
+            for id in &monster_ids {
+                if let Some(mon) = gs.monster_manager.get_monster_mut(*id) {
+                    mon.hp = 5000 * 64; // huge HP: no hit will kill
+                    mon.max_hp = 5000 * 64;
+                    mon.armor_class = 0;
+                }
+            }
+
+            let _ = gs.drain_pending_sfx();
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            gs.update(&mut rng);
+
+            for name in gs.drain_pending_sfx() {
+                if name == "swing" {
+                    saw_swing = true;
+                }
+            }
+            if saw_swing {
+                break;
+            }
+        }
+        assert!(
+            saw_swing,
+            "combat should have queued a 'swing' SFX on at least one non-killing hit"
+        );
+
+        // ── Scenario B: frail monster so any hit kills → "monster_death" ───
+        let mut saw_monster_death = false;
+        for seed in 0..50u64 {
+            let mut gs = dungeon_gs_with_corridor(MonsterType::Zombie, 11, 10);
+            gs.player.position = Point::new(12, 10);
+            gs.player._p_level = 20;
+            gs.player._p_dexterity = 100;
+            gs.player._p_i_bonus_to_hit = 200;
+            gs.player._p_i_min_dam = 10;
+            gs.player._p_i_max_dam = 20;
+
+            let monster_ids: Vec<usize> =
+                gs.monster_manager.iter().map(|(id, _)| id).collect();
+            for id in &monster_ids {
+                if let Some(mon) = gs.monster_manager.get_monster_mut(*id) {
+                    mon.hp = 1 * 64; // any hit kills
+                    mon.max_hp = 1 * 64;
+                    mon.armor_class = 0;
+                }
+            }
+
+            let _ = gs.drain_pending_sfx();
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            gs.update(&mut rng);
+
+            for name in gs.drain_pending_sfx() {
+                if name == "monster_death" {
+                    saw_monster_death = true;
+                }
+            }
+            if saw_monster_death {
+                break;
+            }
+        }
+        assert!(
+            saw_monster_death,
+            "combat should have queued a 'monster_death' SFX on at least one kill"
+        );
+    }
+
+    #[test]
+    fn test_combat_no_sfx_when_no_monster_adjacent() {
+        // With no monster next to the player, update() must not queue any SFX.
+        let mut gs = GameState::new(Player::new(), false, 1);
+        // Player far from any monster (none placed).
+        gs.player.position = Point::new(50, 50);
+        let mut rng = rand::rngs::StdRng::seed_from_u64(7);
+        gs.update(&mut rng);
+        assert!(
+            gs.drain_pending_sfx().is_empty(),
+            "no SFX should be queued when no monster is in melee range"
+        );
     }
 }

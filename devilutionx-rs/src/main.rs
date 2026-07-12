@@ -571,6 +571,25 @@ fn audio_manager() -> &'static Mutex<AudioManager> {
     })
 }
 
+/// Global SFX sink registered with the library so gameplay code (game_loop,
+/// combat integration) can request sound playback without holding a reference
+/// to the AudioManager. Locks the static manager and forwards the name to
+/// `AudioManager::play_sfx`. Safe to call from any thread; lock contention is
+/// benign (sounds are fire-and-forget).
+///
+/// Registered once at startup in `main` via `engine::audio::set_global_sfx_sink`.
+fn global_play_sfx(name: &str) {
+    let mgr = audio_manager();
+    match mgr.lock() {
+        Ok(mut audio) => {
+            audio.play_sfx(name);
+        }
+        Err(err) => {
+            println!("[Audio] global_play_sfx({:?}) lock failed: {}", name, err);
+        }
+    }
+}
+
 #[derive(Clone, Default)]
 struct UiArtImage {
     width: u32,
@@ -1610,11 +1629,20 @@ fn ui_main_menu_dialog(
                 Event::KeyDown { keycode: Some(key), .. } => {
                     last_input = Instant::now();
                     match key {
-                        Keycode::Up | Keycode::W => main_menu.move_selection(-1),
-                        Keycode::Down | Keycode::S => main_menu.move_selection(1),
+                        Keycode::Up | Keycode::W => {
+                            main_menu.move_selection(-1);
+                            // Menu-navigation blip (title-screen cursor movement).
+                            engine::audio::dispatch_sfx("ui_click");
+                        },
+                        Keycode::Down | Keycode::S => {
+                            main_menu.move_selection(1);
+                            engine::audio::dispatch_sfx("ui_click");
+                        },
                         Keycode::Return | Keycode::Space => {
                             let selection = main_menu.get_selected();
                             if selection != MainMenuSelection::None {
+                                // Menu selection confirm (title-screen select).
+                                engine::audio::dispatch_sfx("menu_click");
                                 break 'dialog_loop selection;
                             }
                         },
@@ -1631,6 +1659,7 @@ fn ui_main_menu_dialog(
                     last_input = Instant::now();
                     if let Some(idx) = hit_test_menu_item(x, y, menu_item_count) {
                         if let Some(selection) = MainMenuSelection::from_index(idx) {
+                            engine::audio::dispatch_sfx("menu_click");
                             break 'dialog_loop selection;
                         }
                     }
@@ -1640,6 +1669,8 @@ fn ui_main_menu_dialog(
                     if let Some(idx) = hit_test_menu_item(x, y, menu_item_count) {
                         if main_menu.selected_index() != idx {
                             main_menu.set_selection(idx);
+                            // Play the nav blip when the hover changes rows.
+                            engine::audio::dispatch_sfx("ui_click");
                         }
                     }
                 },
@@ -2068,6 +2099,13 @@ fn main() -> Result<(), String> {
     init_padmap_actions();
 
     log_step("init input");
+
+    // Register the global SFX sink so gameplay code (game_loop / combat) can
+    // request sound effects through engine::audio::dispatch_sfx without
+    // holding a reference to the AudioManager. Idempotent; the first
+    // registration wins.
+    engine::audio::set_global_sfx_sink(global_play_sfx);
+    log_step("registered global SFX sink");
 
     apply_path_overrides(&flags);
 

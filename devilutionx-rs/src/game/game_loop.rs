@@ -16,7 +16,7 @@ use crate::engine::dungeon::{TileDecoder, DunTemplate};
 use crate::engine::sprite_render::rgba_to_texture;
 use crate::game::input::InputSystem;
 use crate::game::network;
-use crate::game::game_state::{GameState, TownLayout, TOWN_MAX_X, TOWN_MAX_Y};
+use crate::game::game_state::{GameState, TownLayout, TOWN_MAX_X, TOWN_MAX_Y, GroundItemType};
 use crate::game::hud;
 use anyhow::Result;
 use sdl2::event::Event;
@@ -55,6 +55,11 @@ struct GameLoopState {
     /// draw the in-game cursor so the player can see where they're pointing.
     /// C++ equivalent: `MousePosition` global (diablo.cpp:136).
     mouse_pos: (i32, i32),
+    /// Click-to-move destination in world tile coordinates. Set when the
+    /// player left-clicks the ground; cleared on arrival or when a movement
+    /// key is pressed. Consumed one tile per logic tick in the 2 Hz update
+    /// path. `None` when the player is not auto-walking.
+    move_target: Option<(i32, i32)>,
 }
 
 impl GameLoopState {
@@ -65,6 +70,7 @@ impl GameLoopState {
             process_players: true,
             result: true,
             mouse_pos: (320, 240),
+            move_target: None,
         }
     }
 }
@@ -131,7 +137,7 @@ pub fn run_game_loop(mode: InterfaceMode, window: &mut GameWindow, game_state: &
                 Event::KeyUp { keycode: Some(k), .. } => input.on_key_up(*k),
                 _ => {}
             }
-            if !handle_event(&event, &mut state, &mut input) {
+            if !handle_event(&event, &mut state, &mut input, game_state) {
                 break;
             }
         }
@@ -219,7 +225,7 @@ pub fn run_game_loop(mode: InterfaceMode, window: &mut GameWindow, game_state: &
             // Render if needed
             if draw_game {
                 redraw_viewport(window, game_state);
-                draw_and_blit(window, game_state, state.mouse_pos);
+                draw_and_blit(window, game_state, state.mouse_pos, state.move_target);
             }
 
             continue;
@@ -227,6 +233,13 @@ pub fn run_game_loop(mode: InterfaceMode, window: &mut GameWindow, game_state: &
 
         // LOGIC PATH - Every 500ms (~2 Hz)
         // C++: ProcessGameMessagePackets(), game_loop(gbGameLoopStartup), diablo_color_cyc_logic()
+
+        // Click-to-move: walk one tile toward the pending destination each
+        // logic tick, dragging the camera with the player. Done here (not in
+        // the fast path) so movement is locked to the 2 Hz simulation rate.
+        if let Some(target) = state.move_target {
+            tick_move_target(game_state, target, &mut state.move_target);
+        }
 
         // Process network messages
         network::process_game_message_packets();
@@ -242,7 +255,7 @@ pub fn run_game_loop(mode: InterfaceMode, window: &mut GameWindow, game_state: &
         // Render
         if draw_game {
             redraw_viewport(window, game_state);
-            draw_and_blit(window, game_state, state.mouse_pos);
+            draw_and_blit(window, game_state, state.mouse_pos, state.move_target);
         }
     }
 
@@ -288,6 +301,15 @@ fn game_loop_iteration(startup: bool, game_state: &mut GameState) -> Result<bool
         // Core game logic
         // C++: GameLogic()
         game_logic(game_state)?;
+
+        // Drain any SFX requests queued by gameplay (combat hits, monster
+        // deaths, item pickups, ...) and forward them to the global audio sink.
+        // The sink is registered by main.rs at startup and wraps
+        // AudioManager::play_sfx. In headless/test environments where no sink
+        // is registered, dispatch_sfx is a silent no-op (never panics).
+        for sfx_name in game_state.drain_pending_sfx() {
+            crate::engine::audio::dispatch_sfx(&sfx_name);
+        }
 
         // Network command cleanup
         // C++: ClearLastSentPlayerCmd()
@@ -409,7 +431,57 @@ fn cleanup() {
 // Event Handling
 //------------------------------------------------------------------------------
 
-fn handle_event(event: &Event, state: &mut GameLoopState, input: &mut InputSystem) -> bool {
+/// Convert a logical-canvas mouse position (mx, my) into a world tile
+/// coordinate, using the inverse of the isometric projection applied by
+/// `draw_tristram`/`draw_dungeon`.
+///
+/// Forward projection (scrollrt.cpp / our draw path), for a world tile
+/// offset `(u, v) = (wx - cam_x, wy - cam_y)` relative to the camera:
+///   `rel_x = (u - v) * (TILE_WIDTH / 2)`   (= (u-v)*32)
+///   `rel_y = (u + v) * (TILE_HEIGHT / 2)`  (= (u+v)*16)
+/// and the screen point is `(screen_center_x + rel_x, screen_center_y + rel_y)`.
+///
+/// Inverting: given `rel_x = mx - screen_center_x`, `rel_y = my - screen_center_y`,
+///   `u + v = rel_y / (TILE_HEIGHT/2) = rel_y / 16`
+///   `u - v = rel_x / (TILE_WIDTH/2)  = rel_x / 32`
+///   `u = (rel_y/16 + rel_x/32) / 2`
+///   `v = (rel_y/16 - rel_x/32) / 2`
+/// and finally `wx = cam_x + u`, `wy = cam_y + v`.
+///
+/// This is the Rust analogue of C++ `cursor.cpp::ConvertToTileGrid` +
+/// `ShiftToDiamondGridAlignment`. The diamond sub-tile correction is folded
+/// in by rounding to the nearest tile (the half-tile offsets cancel out at
+/// tile centres for our 64x32 diamonds).
+fn convert_screen_to_tile(
+    mx: i32,
+    my: i32,
+    cam_tile_x: i32,
+    cam_tile_y: i32,
+    screen_center_x: i32,
+    screen_center_y: i32,
+) -> (i32, i32) {
+    let rel_x = mx - screen_center_x;
+    let rel_y = my - screen_center_y;
+
+    // u + v = rel_y / 16  (Q: TILE_HEIGHT/2)
+    // u - v = rel_x / 32  (Q: TILE_WIDTH/2)
+    // Use integer math throughout; the divides by 16/32 are exact for the
+    // integer pixel deltas, and the final /2 may leave a half-tile remainder
+    // which we discard (rounds toward zero) — fine for click targeting.
+    let sum_uv = rel_y / (TILE_HEIGHT / 2);
+    let diff_uv = rel_x / (TILE_WIDTH / 2);
+    let u = (sum_uv + diff_uv) / 2;
+    let v = (sum_uv - diff_uv) / 2;
+
+    (cam_tile_x + u, cam_tile_y + v)
+}
+
+fn handle_event(
+    event: &Event,
+    state: &mut GameLoopState,
+    input: &mut InputSystem,
+    game_state: &GameState,
+) -> bool {
     match event {
         Event::Quit { .. } => {
             println!("Quit event received");
@@ -424,6 +496,14 @@ fn handle_event(event: &Event, state: &mut GameLoopState, input: &mut InputSyste
             false
         }
         Event::KeyDown { keycode: Some(k), .. } => {
+            // Any movement key cancels an in-progress click-to-move so the
+            // keyboard takes over immediately (mirrors C++ behaviour where a
+            // new walk command clears the pending destination).
+            if is_movement_keycode(*k) {
+                if state.move_target.is_some() {
+                    state.move_target = None;
+                }
+            }
             input.on_key_down(*k);
             true
         }
@@ -441,10 +521,34 @@ fn handle_event(event: &Event, state: &mut GameLoopState, input: &mut InputSyste
         }
         Event::MouseButtonDown { x, y, .. } => {
             state.mouse_pos = (*x, *y);
+            // Play the UI click SFX on mouse-down. dispatch_sfx is a no-op
+            // when no global sink is registered (headless / library-only), so
+            // this is safe in all environments.
+            crate::engine::audio::dispatch_sfx("ui_click");
             true
         }
-        Event::MouseButtonUp { x, y, .. } => {
+        Event::MouseButtonUp { mouse_btn, x, y, .. } => {
             state.mouse_pos = (*x, *y);
+            // Left-click on the ground sets a click-to-move destination. We
+            // convert the click's logical-canvas coords to a world tile via
+            // the inverse isometric projection (same transform C++
+            // `ConvertToTileGrid` uses), then store it for the 2 Hz logic
+            // tick to walk toward one tile at a time.
+            if *mouse_btn == sdl2::mouse::MouseButton::Left {
+                const PANEL_HEIGHT: i32 = 144;
+                let screen_center_x = LOGICAL_WIDTH as i32 / 2; // 320
+                let screen_center_y = (LOGICAL_HEIGHT as i32 - PANEL_HEIGHT) / 2; // 168
+                let (wx, wy) = convert_screen_to_tile(
+                    *x,
+                    *y,
+                    game_state.camera.tile_x,
+                    game_state.camera.tile_y,
+                    screen_center_x,
+                    screen_center_y,
+                );
+                state.move_target = Some((wx, wy));
+                println!("[ClickMove] target=({},{})", wx, wy);
+            }
             true
         }
         _ => {
@@ -452,6 +556,22 @@ fn handle_event(event: &Event, state: &mut GameLoopState, input: &mut InputSyste
             true
         }
     }
+}
+
+/// Is `k` one of the keyboard movement keys (WASD + arrows)? Used to decide
+/// whether a key-down should cancel an in-progress click-to-move.
+fn is_movement_keycode(k: Keycode) -> bool {
+    matches!(
+        k,
+        Keycode::W
+            | Keycode::A
+            | Keycode::S
+            | Keycode::D
+            | Keycode::Up
+            | Keycode::Down
+            | Keycode::Left
+            | Keycode::Right
+    )
 }
 
 //------------------------------------------------------------------------------
@@ -736,6 +856,61 @@ fn apply_movement(game_state: &mut GameState, input: &InputSystem) {
     }
 }
 
+/// Advance click-to-move by one tile toward `target`.
+///
+/// Called once per logic tick (2 Hz). Moves the player one world tile along
+/// the diagonal toward the destination (independent signum on each axis, so
+/// the path is a diagonal-then-straight walk, matching how the C++ walk
+/// command steps `position` toward `walk.destination`). The camera follows
+/// the player exactly (camera == player position, same convention as
+/// [`apply_movement`]). On arrival the destination is cleared via the
+/// `move_target` out-parameter so the main loop stops calling this.
+///
+/// `target` is passed by value and `move_target` is a mutable reference back
+/// into `GameLoopState` so we can `None` it on arrival; the caller reads the
+/// current value from `state.move_target` before invoking us.
+fn tick_move_target(
+    game_state: &mut GameState,
+    target: (i32, i32),
+    move_target: &mut Option<(i32, i32)>,
+) {
+    let (tx, ty) = target;
+    let cur_x = game_state.player.position.x;
+    let cur_y = game_state.player.position.y;
+
+    // Already there?
+    if cur_x == tx && cur_y == ty {
+        *move_target = None;
+        return;
+    }
+
+    // Step one tile toward the target on each axis (signum delta). This gives
+    // a diagonal-then-straight path: e.g. from (0,0) to (3,1) walks
+    // (1,1)->(2,1)->(3,1).
+    let dx = (tx - cur_x).signum();
+    let dy = (ty - cur_y).signum();
+
+    let new_x = (cur_x + dx).max(4).min((TOWN_MAX_X as i32) - 5);
+    let new_y = (cur_y + dy).max(4).min((TOWN_MAX_Y as i32) - 5);
+
+    // Move the player + camera together. The renderer centres on the camera
+    // tile and draws the player token on top, so they must stay aligned.
+    game_state.player.position.x = new_x;
+    game_state.player.position.y = new_y;
+    game_state.camera.tile_x = new_x;
+    game_state.camera.tile_y = new_y;
+    // Reset the sub-tile accumulators so keyboard movement resumes cleanly
+    // after a click-move.
+    game_state.camera.sub_x = 0;
+    game_state.camera.sub_y = 0;
+
+    // Arrival check: clear the destination so subsequent ticks don't keep
+    // nudging (and so keyboard input regains control).
+    if new_x == tx && new_y == ty {
+        *move_target = None;
+    }
+}
+
 //------------------------------------------------------------------------------
 // Rendering Functions
 //------------------------------------------------------------------------------
@@ -746,7 +921,12 @@ fn redraw_viewport(_window: &mut GameWindow, _game_state: &GameState) {
     // frame. Kept as a hook for future partial-redraw optimisation.
 }
 
-fn draw_and_blit(window: &mut GameWindow, game_state: &GameState, mouse_pos: (i32, i32)) {
+fn draw_and_blit(
+    window: &mut GameWindow,
+    game_state: &GameState,
+    mouse_pos: (i32, i32),
+    move_target: Option<(i32, i32)>,
+) {
     // C++: DrawAndBlit() - renders the dungeon viewport then flips the back
     // buffer.
     //
@@ -813,6 +993,11 @@ fn draw_and_blit(window: &mut GameWindow, game_state: &GameState, mouse_pos: (i3
         draw_plain_checkerboard(canvas, screen_center_x, screen_center_y);
     }
 
+    // Draw ground loot (dropped by slain monsters) before the player sprite so
+    // the player token renders on top of any item they're standing on. Uses the
+    // same isometric projection as the monsters/player (coloured icons, no art).
+    draw_ground_items(window, game_state, cam_tile_x, cam_tile_y, screen_center_x, screen_center_y);
+
     // Draw the player at the viewport centre (camera == player position).
     // Prefer the real Warrior town-walk sprite; fall back to the yellow
     // marker if no sprite was loaded. The sprite texture is rebuilt every
@@ -861,6 +1046,27 @@ fn draw_and_blit(window: &mut GameWindow, game_state: &GameState, mouse_pos: (i3
         }
     }
 
+    // Click-to-move destination marker: a pulsing green diamond outline drawn
+    // at the target tile's projected screen position while the player is
+    // auto-walking. Removed once the player arrives (move_target == None).
+    // Uses the same forward iso projection as the floor tiles.
+    if let Some((tx, ty)) = move_target {
+        let rel_x = (tx - cam_tile_x - (ty - cam_tile_y)) * (TILE_WIDTH / 2);
+        let rel_y = (tx - cam_tile_x + (ty - cam_tile_y)) * (TILE_HEIGHT / 2);
+        let cx = screen_center_x + rel_x;
+        let cy = screen_center_y + rel_y;
+        let canvas = window.canvas_mut();
+        canvas.set_draw_color(sdl2::pixels::Color::RGB(80, 255, 120));
+        let half_w = TILE_WIDTH / 2;
+        let half_h = TILE_HEIGHT / 2;
+        let _ = canvas.draw_line((cx, cy - half_h), (cx + half_w, cy));
+        let _ = canvas.draw_line((cx + half_w, cy), (cx, cy + half_h));
+        let _ = canvas.draw_line((cx, cy + half_h), (cx - half_w, cy));
+        let _ = canvas.draw_line((cx - half_w, cy), (cx, cy - half_h));
+        // Centre dot so the destination is readable even at a distance.
+        let _ = canvas.draw_point(sdl2::rect::Point::new(cx, cy));
+    }
+
     // Screenshot dump hook: RS_SHOT=1 dumps one game frame for verification.
     if std::env::var("RS_SHOT").is_ok() && game_state.game_tick >= 10 {
         static SHOT_DONE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -902,6 +1108,69 @@ fn draw_simple_missiles(
         for (dx, dy) in [(-3, 0), (3, 0), (0, -3), (0, 3), (-2, -1), (2, -1), (-2, 1), (2, 1), (0, 0)] {
             let _ = canvas.draw_point(sdl2::rect::Point::new(cx + dx, cy + dy));
         }
+    }
+}
+
+/// Draw ground loot (items dropped by slain monsters) as small coloured icons.
+///
+/// Each `GroundItem` is projected through the same isometric transform the
+/// monsters/player use (`rel_x = (wx-wy)*32`, `rel_y = (wx+wy)*16`) and drawn as
+/// a filled rectangle centred on its tile. Icon colour encodes the item type:
+///   * Gold          — yellow (255, 215, 0)
+///   * HealingPotion — red    (220,  40, 40)
+///   * ManaPotion    — blue   ( 40,  80, 220)
+///
+/// Pure canvas drawing (no textures), so it runs outside any TextureCreator
+/// borrow block. Off-screen items are culled.
+fn draw_ground_items(
+    window: &mut GameWindow,
+    game_state: &GameState,
+    cam_tile_x: i32,
+    cam_tile_y: i32,
+    screen_center_x: i32,
+    screen_center_y: i32,
+) {
+    if game_state.ground_items.is_empty() {
+        return;
+    }
+    // Sort by depth (wx+wy ascending) so lower-screen items overlap those behind.
+    let mut order: Vec<&crate::game::game_state::GroundItem> = game_state.ground_items.iter().collect();
+    order.sort_by_key(|g| g.x + g.y);
+
+    let canvas = window.canvas_mut();
+    for g in order {
+        let rel_x = (g.x - cam_tile_x - (g.y - cam_tile_y)) * (TILE_WIDTH / 2);
+        let rel_y = (g.x - cam_tile_x + (g.y - cam_tile_y)) * (TILE_HEIGHT / 2);
+        let cx = screen_center_x + rel_x;
+        let cy = screen_center_y + rel_y;
+
+        // Cull off-screen items.
+        if cx < -(TILE_WIDTH * 2) || cx > (LOGICAL_WIDTH as i32 + TILE_WIDTH * 2)
+            || cy < -(TILE_HEIGHT * 6) || cy > (LOGICAL_HEIGHT as i32 + TILE_HEIGHT * 4)
+        {
+            continue;
+        }
+
+        let (r, gg, b) = match g.item_type {
+            GroundItemType::Gold => (255, 215, 0),
+            GroundItemType::HealingPotion => (220, 40, 40),
+            GroundItemType::ManaPotion => (40, 80, 220),
+        };
+        // Filled icon centred on the tile, sitting just above the floor line so
+        // it reads clearly against the tile art. A 10x8 filled rect plus a
+        // darker outline for contrast.
+        const ICON_W: i32 = 10;
+        const ICON_H: i32 = 8;
+        let icon = Rect::new(cx - ICON_W / 2, cy - ICON_H - 2, ICON_W as u32, ICON_H as u32);
+        canvas.set_draw_color(sdl2::pixels::Color::RGB(r / 3, gg / 3, b / 3));
+        let _ = canvas.fill_rect(Rect::new(
+            icon.x() - 1,
+            icon.y() - 1,
+            icon.width() + 2,
+            icon.height() + 2,
+        ));
+        canvas.set_draw_color(sdl2::pixels::Color::RGB(r, gg, b));
+        let _ = canvas.fill_rect(icon);
     }
 }
 
@@ -1908,5 +2177,145 @@ mod tests {
         // Player position tracks camera.
         assert_eq!(gs.camera.tile_x, gs.player.position.x);
         assert_eq!(gs.camera.tile_y, gs.player.position.y);
+    }
+
+    /// Forward iso projection (matches draw_tristram/draw_dungeon): given a
+    /// world tile offset (u, v) from the camera, returns the logical-canvas
+    /// screen point. Used by the click-move tests to round-trip the inverse.
+    fn project_tile_to_screen(
+        u: i32,
+        v: i32,
+        screen_center_x: i32,
+        screen_center_y: i32,
+    ) -> (i32, i32) {
+        let rel_x = (u - v) * (TILE_WIDTH / 2);
+        let rel_y = (u + v) * (TILE_HEIGHT / 2);
+        (screen_center_x + rel_x, screen_center_y + rel_y)
+    }
+
+    #[test]
+    fn test_convert_screen_to_tile_at_centre_is_camera() {
+        // Clicking the viewport centre should map back to the camera tile.
+        const SCX: i32 = 320;
+        const SCY: i32 = 168;
+        let cam_x = 75;
+        let cam_y = 68;
+        let (wx, wy) = convert_screen_to_tile(SCX, SCY, cam_x, cam_y, SCX, SCY);
+        assert_eq!((wx, wy), (cam_x, cam_y));
+    }
+
+    #[test]
+    fn test_convert_screen_to_tile_round_trips_forward_projection() {
+        // For every tile offset within the visible radius, forward-project to
+        // a screen point, then convert back — the round-trip must be exact.
+        const SCX: i32 = 320;
+        const SCY: i32 = 168;
+        let cam_x = 75;
+        let cam_y = 68;
+        for u in -9..=9 {
+            for v in -9..=9 {
+                let (mx, my) = project_tile_to_screen(u, v, SCX, SCY);
+                let (wx, wy) = convert_screen_to_tile(mx, my, cam_x, cam_y, SCX, SCY);
+                assert_eq!(
+                    (wx, wy),
+                    (cam_x + u, cam_y + v),
+                    "round-trip failed for offset ({},{}): screen=({},{})",
+                    u, v, mx, my
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_convert_screen_to_tile_concrete_example() {
+        // cam=(75,68), tile (80,70): u=5, v=2.
+        //   rel_x = (5-2)*32 = 96  -> mx = 320+96 = 416
+        //   rel_y = (5+2)*16 = 112 -> my = 168+112 = 280
+        // Inverse must recover (80, 70).
+        const SCX: i32 = 320;
+        const SCY: i32 = 168;
+        let (wx, wy) = convert_screen_to_tile(416, 280, 75, 68, SCX, SCY);
+        assert_eq!((wx, wy), (80, 70));
+    }
+
+    #[test]
+    fn test_tick_move_target_clears_on_arrival() {
+        // Player already on the target: tick should be a no-op and clear the
+        // destination so subsequent ticks don't run.
+        let player = crate::game::player_exact::Player::new();
+        let mut gs = GameState::new(player, true, 1);
+        gs.camera.tile_x = 50;
+        gs.camera.tile_y = 50;
+        gs.player.position.x = 50;
+        gs.player.position.y = 50;
+        let mut target = Some((50, 50));
+        tick_move_target(&mut gs, (50, 50), &mut target);
+        assert_eq!(target, None, "target should be cleared on arrival");
+        assert_eq!(gs.camera.tile_x, 50);
+        assert_eq!(gs.camera.tile_y, 50);
+    }
+
+    #[test]
+    fn test_tick_move_target_walks_one_tile_toward_destination() {
+        // From (50,50) toward (53,52): the first tick moves diagonally to
+        // (51,51) (both axes advance). Camera must follow the player.
+        let player = crate::game::player_exact::Player::new();
+        let mut gs = GameState::new(player, true, 1);
+        gs.camera.tile_x = 50;
+        gs.camera.tile_y = 50;
+        gs.player.position.x = 50;
+        gs.player.position.y = 50;
+        let mut target = Some((53, 52));
+        tick_move_target(&mut gs, (53, 52), &mut target);
+        assert_eq!(gs.player.position.x, 51, "x advanced by 1");
+        assert_eq!(gs.player.position.y, 51, "y advanced by 1");
+        // Camera follows.
+        assert_eq!(gs.camera.tile_x, 51);
+        assert_eq!(gs.camera.tile_y, 51);
+        // Not arrived yet — target retained.
+        assert_eq!(target, Some((53, 52)));
+    }
+
+    #[test]
+    fn test_tick_move_target_clears_destination_on_final_step() {
+        // From (50,50) toward (52,50): tick twice. After the second tick the
+        // player is on the destination and target should be None.
+        let player = crate::game::player_exact::Player::new();
+        let mut gs = GameState::new(player, true, 1);
+        gs.camera.tile_x = 50;
+        gs.camera.tile_y = 50;
+        gs.player.position.x = 50;
+        gs.player.position.y = 50;
+        let mut target = Some((52, 50));
+        tick_move_target(&mut gs, (52, 50), &mut target);
+        assert_eq!(gs.player.position.x, 51);
+        assert_eq!(target, Some((52, 50)));
+        tick_move_target(&mut gs, (52, 50), &mut target);
+        assert_eq!(gs.player.position.x, 52, "arrived at x");
+        assert_eq!(gs.player.position.y, 50, "y unchanged");
+        assert_eq!(target, None, "target cleared after final step");
+    }
+
+    #[test]
+    fn test_tick_move_target_walks_full_diagonal_path() {
+        // From (50,50) to (53,53): three diagonal ticks. After arrival the
+        // player is on the target and it is cleared.
+        let player = crate::game::player_exact::Player::new();
+        let mut gs = GameState::new(player, true, 1);
+        gs.camera.tile_x = 50;
+        gs.camera.tile_y = 50;
+        gs.player.position.x = 50;
+        gs.player.position.y = 50;
+        let dest = (53, 53);
+        let mut target = Some(dest);
+        for _ in 0..10 {
+            tick_move_target(&mut gs, dest, &mut target);
+            if target.is_none() {
+                break;
+            }
+        }
+        assert_eq!(target, None, "should have arrived within 10 ticks");
+        assert_eq!(gs.player.position.x, 53);
+        assert_eq!(gs.player.position.y, 53);
     }
 }
