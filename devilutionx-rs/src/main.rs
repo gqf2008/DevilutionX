@@ -1498,6 +1498,14 @@ fn render_selhero(
 fn mainmenu_loop(ctx: &mut DiabloContext, event_pump: &mut sdl2::EventPump, flags: &CmdFlags) -> Result<(), String> {
     println!("[mainmenu_loop] Entering main menu...");
 
+    // Test hook: RS_AUTOPLAY=1 skips the menu entirely and drops straight
+    // into the game as a Warrior. Used for headless screenshot capture.
+    if std::env::var("RS_AUTOPLAY").is_ok() {
+        println!("[mainmenu_loop] RS_AUTOPLAY: skipping menu, starting game as Warrior");
+        start_game(ctx, game::player::PlayerClass::Warrior, event_pump)?;
+        return Ok(());
+    }
+
     let attract_timeout = if flags.no_splash { None } else { Some(Duration::from_secs(60)) };
 
     // C++: mainmenu_loop() - do-while loop until done

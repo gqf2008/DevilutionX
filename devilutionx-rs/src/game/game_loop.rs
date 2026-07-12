@@ -861,6 +861,18 @@ fn draw_and_blit(window: &mut GameWindow, game_state: &GameState, mouse_pos: (i3
         }
     }
 
+    // Screenshot dump hook: RS_SHOT=1 dumps one game frame for verification.
+    if std::env::var("RS_SHOT").is_ok() && game_state.game_tick >= 10 {
+        static SHOT_DONE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if !SHOT_DONE.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            let canvas = window.canvas_mut();
+            if let Ok(pix) = canvas.read_pixels(None, sdl2::pixels::PixelFormatEnum::ABGR8888) {
+                let _ = std::fs::write("game_shot.rgba", &pix);
+                eprintln!("[SHOT] game {} bytes tick={}", pix.len(), game_state.game_tick);
+            }
+        }
+    }
+
     window.present();
 }
 
