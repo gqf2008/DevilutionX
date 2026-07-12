@@ -957,10 +957,11 @@ fn draw_tristram(
                 continue;
             }
 
-            // dPiece is an index into the MIN mega-tile table (mirrors C++
-            // DPieceMicros[dPiece]). The MIN table is 0-based, and the values
-            // stored in town.til's micro fields are already these indices.
-            let mega_idx = dpiece as usize;
+            // dPiece is a 1-based index into the MIN mega-tile table (mirrors
+            // C++ pMegaTiles[dPiece - 1]). The MIN array is 0-based, so we
+            // subtract 1. Without this, every tile reads the wrong mega (off by
+            // one) and the town renders dark/garbled.
+            let mega_idx = dpiece.saturating_sub(1) as usize;
             let mega = match level.min.mega_tiles.get(mega_idx) {
                 Some(m) => m,
                 None => {
@@ -1071,7 +1072,7 @@ fn draw_dungeon(
                 continue;
             }
 
-            let mega_idx = dpiece as usize;
+            let mega_idx = dpiece.saturating_sub(1) as usize;
             let mega = match level.min.mega_tiles.get(mega_idx) {
                 Some(m) => m,
                 None => {

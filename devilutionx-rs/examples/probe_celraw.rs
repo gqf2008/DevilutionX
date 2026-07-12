@@ -1,19 +1,33 @@
 use devilutionx_rs::engine::mpq::AssetManager;
-use devilutionx_rs::engine::dungeon::DungeonLevelData;
-use devilutionx_rs::engine::dungeon::DungeonType;
+use devilutionx_rs::engine::dungeon::{DungeonLevelData, DungeonType, TileDecoder};
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut mpq = AssetManager::new();
     mpq.load_mpq("spawn.mpq", 0)?;
     let level = DungeonLevelData::load_from_asset_manager(&mut mpq, DungeonType::Town)?;
-    let cel = &level.level_cel;
-    // Check if first offset points right past the header
-    let nf = u32::from_le_bytes([cel[0],cel[1],cel[2],cel[3]]);
-    let expected_header_end = 4 + (nf as usize + 1) * 4;
-    let off0 = u32::from_le_bytes([cel[4],cel[5],cel[6],cel[7]]) as usize;
-    println!("nf={} header_end={} offset[0]={} match={}", nf, expected_header_end, off0, expected_header_end == off0);
-    // What if offsets are RELATIVE to offset array start (not file start)?
-    // Some CEL formats use relative offsets. Check if off0 == (nf+1)*4 (relative)
-    let relative = (nf as usize + 1) * 4;
-    println!("relative offset[0] would be {} actual={} match={}", relative, off0, relative == off0);
+    for &idx in &[0usize, 1, 425, 426, 500, 1000] {
+        if idx < level.min.mega_tiles.len() {
+            let mt = &level.min.mega_tiles[idx];
+            let b = &mt.blocks[0];
+            if b.has_value() {
+                if let Some(rgba) = TileDecoder::decode_tile(&level.level_cel, b.frame(), b.tile_type(), &level.palette) {
+                    let maxr = rgba.iter().step_by(4).copied().max().unwrap_or(0);
+                    println!("mega[{}] (dPiece={}): frame={} type={:?} maxR={}",
+                        idx, idx + 1, b.frame(), b.tile_type(), maxr);
+                }
+            } else { println!("mega[{}]: empty", idx); }
+        }
+    }
+    let mut best = (0u8, 0usize);
+    for (mi, mt) in level.min.mega_tiles.iter().enumerate() {
+        let b = &mt.blocks[0];
+        if b.has_value() {
+            if let Some(rgba) = TileDecoder::decode_tile(&level.level_cel, b.frame(), b.tile_type(), &level.palette) {
+                let maxr = rgba.iter().step_by(4).copied().max().unwrap_or(0);
+                if maxr > best.0 { best = (maxr, mi); }
+            }
+        }
+    }
+    println!("brightest mega[{}] maxR={}", best.1, best.0);
     Ok(())
 }
