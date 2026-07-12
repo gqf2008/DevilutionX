@@ -345,6 +345,17 @@ pub struct GameState {
     /// [`crate::game::towner::TownerFactory::get_data`]. Only rendered while
     /// `in_dungeon` is false (Tristram).
     pub towners: Vec<(i32, i32, &'static str, u8)>,
+
+    /// Player-is-dead flag, latched by [`GameState::check_player_death`] once
+    /// `_p_hit_points` drops to/below zero during combat. While true, the game
+    /// loop draws the red "YOU HAVE DIED" overlay and pauses normal game
+    /// processing; the player resurrects (via [`GameState::resurrect_player`])
+    /// when they press Space/Enter, returning to Tristram at full HP with the
+    /// classic Diablo gold penalty.
+    ///
+    /// Mirrors C++ `gbDeathActive` (Source/diablo.cpp) which is set on the
+    /// dying player and drives the death screen + respawn flow.
+    pub player_dead: bool,
 }
 
 /// L1 Cathedral dungeon layout, the dungeon-mode analogue of `TownLayout`.
@@ -451,6 +462,7 @@ impl GameState {
             monster_sprites: None,
             pending_sfx: Vec::new(),
             towners: Self::build_towner_list(),
+            player_dead: false,
         }
     }
 
@@ -562,6 +574,17 @@ impl GameState {
     pub fn update(&mut self, rng: &mut impl Rng) {
         self.game_tick += 1;
 
+        // Pause normal game processing while the player is dead. The death
+        // overlay is shown by the game loop and the player resurrects on
+        // Space/Enter. We still advance `game_tick` so the stair cooldown /
+        // animation timers keep moving, but no HP regen, combat, or monster AI
+        // runs — mirrors C++ where `ProcessPlayers`/`ProcessMonsters` are
+        // skipped while `gbDeathActive` is set.
+        if self.player_dead {
+            self.logic_step = GameLogicStep::None;
+            return;
+        }
+
         // Process player (C++ line 1516)
         self.logic_step = GameLogicStep::ProcessPlayers;
         self.process_player_internal(rng);
@@ -590,7 +613,123 @@ impl GameState {
             self.pickup_ground_items();
         }
 
+        // Death detection: if the player's HP dropped to/below zero from a
+        // monster hit during this update, latch `player_dead`. Once latched,
+        // the game loop draws the death overlay and pauses normal processing
+        // until the player resurrects. Mirrors C++ `gbDeathActive` which is
+        // set inside `MonsterAttackPlayer`'s kill path / `StartPlayerKill`.
+        // We check this *after* `check_monster_combat` so the monster hit has
+        // already been applied by the time we sample HP.
+        self.check_player_death();
+
         self.logic_step = GameLogicStep::None;
+    }
+
+    /// Check whether the player just died (HP ≤ 0) and latch [`player_dead`]
+    /// if so.
+    ///
+    /// Safe to call every update tick: once `player_dead` is true the death
+    /// overlay / resurrection flow takes over and HP is no longer decremented
+    /// (the game loop pauses normal game logic while dead). Idempotent —
+    /// calling it again when already dead is a no-op.
+    ///
+    /// **C++ Reference**: `Source/diablo.cpp` death handling — `gbDeathActive`
+    /// is set when `Player::_pHitPoints <= 0` is detected after combat, which
+    /// triggers the death screen and respawn-on-Space flow.
+    pub fn check_player_death(&mut self) {
+        if self.player_dead {
+            return; // already dead, nothing to do
+        }
+        if self.player._p_hit_points <= 0 {
+            self.player_dead = true;
+            println!(
+                "[Death] player '{}' died (HP {} <= 0) at ({},{})",
+                self.player.get_name(),
+                self.player._p_hit_points,
+                self.player.position.x,
+                self.player.position.y
+            );
+        }
+    }
+
+    /// True when the player is currently dead ([`player_dead`] is latched).
+    /// Used by the game loop to decide whether to draw the death overlay and
+    /// suppress movement/spell-casting input.
+    pub fn is_player_dead(&self) -> bool {
+        self.player_dead
+    }
+
+    /// Resurrect the player after death, applying the classic Diablo death
+    /// penalty.
+    ///
+    /// Restores HP and Mana to full, sends the player back to Tristram town
+    /// at the ENTRY_MAIN spawn (75, 68), halves their carried gold (the
+    /// canonical Diablo death penalty — gold above the stash is split 50/50
+    /// in the original; we model only the inventory portion and halve it),
+    /// and clears the [`player_dead`] flag so normal game logic resumes.
+    ///
+    /// This is the Rust analogue of the C++ respawn flow
+    /// (`StartNewGame`/`RestartTownLvl` + `Player::Reset`): the original
+    /// revives the player in town with full HP and drops half the inventory
+    /// gold as a loot pile on the death tile (we forego the loot pile for
+    /// simplicity). Safe to call only when [`is_player_dead`] is true; calling
+    /// it on a live player is a defensive no-op.
+    ///
+    /// **C++ Reference**: `Source/inv.cpp` `PlayerDeathsPayPenalty` +
+    /// `Source/diablo.cpp` `RestartTownLvl` (sets position to town spawn and
+    /// restores HP).
+    pub fn resurrect_player(&mut self) {
+        if !self.player_dead {
+            return; // defensive: nothing to resurrect
+        }
+
+        // 1. HP / Mana to full (64x fixed-point). Mirrors C++ `Player::Reset`
+        //    setting `_pHitPoints = _pMaxHP` on respawn.
+        self.player._p_hit_points = self.player._p_max_hp;
+        self.player._p_hp_base = self.player._p_max_hp_base;
+        self.player._p_mana = self.player._p_max_mana;
+        self.player._p_mana_base = self.player._p_max_mana_base;
+
+        // 2. Gold penalty: halve carried gold (Diablo's death penalty).
+        //    C++ `PlayerDeathsPayPenalty` drops half the inventory gold on the
+        //    floor; here we simply discard half for simplicity (no stash /
+        //    floor-pile system in this demo).
+        let gold_before = self.player._p_gold;
+        self.player._p_gold = gold_before / 2;
+        println!(
+            "[Respawn] gold penalty: {} -> {} (halved)",
+            gold_before, self.player._p_gold
+        );
+
+        // 3. Return to Tristram town at the ENTRY_MAIN spawn (75, 68). This
+        //    mirrors C++ `RestartTownLvl` which sets `ViewPosition` to the
+        //    town spawn and clears the dungeon. We reuse the existing
+        //    `return_to_town` helper in `game_loop` by setting the town-mode
+        //    flags + camera here; the full helper also clears monsters/sprites
+        //    which we *want* (no point dragging dead-dungeon state to town).
+        //    We call the inline equivalent because `return_to_town` lives in
+        //    `game_loop` (would create a circular dependency if imported).
+        self.in_dungeon = false;
+        self.is_town = true;
+        self.dungeon_layout = None;
+        self.dungeon_up_stairs = None;
+        self.simple_missiles.clear();
+        self.ground_items.clear();
+        self.monster_manager.clear();
+        self.monster_sprites = None;
+        self.mark_stair_transition();
+        self.init_town_camera();
+
+        // 4. Clear the death flag last so the game loop resumes normal logic.
+        self.player_dead = false;
+        println!(
+            "[Respawn] player '{}' resurrected in town at ({},{}) with HP {}/{}",
+            self.player.get_name(),
+            self.player.position.x,
+            self.player.position.y,
+            self.player._p_hit_points,
+            self.player._p_max_hp
+        );
     }
 
     /// Process player logic
@@ -2040,6 +2179,283 @@ mod tests {
             gs.drain_pending_sfx().is_empty(),
             "no SFX should be queued when no monster is in melee range"
         );
+    }
+
+    // ========================================================================
+    // Death detection / resurrection tests
+    // ========================================================================
+
+    #[test]
+    fn test_fresh_game_state_is_not_dead() {
+        // A freshly-created GameState has the player alive and the dead flag
+        // clear, regardless of town/dungeon mode.
+        let gs_town = GameState::new(Player::new(), true, 1);
+        assert!(!gs_town.player_dead, "fresh town state not dead");
+        assert!(!gs_town.is_player_dead());
+
+        let gs_dungeon = GameState::new(Player::new(), false, 1);
+        assert!(!gs_dungeon.player_dead, "fresh dungeon state not dead");
+        assert!(!gs_dungeon.is_player_dead());
+    }
+
+    #[test]
+    fn test_check_player_death_latches_when_hp_zero() {
+        // When HP drops to exactly 0, check_player_death must latch
+        // player_dead and is_player_dead must return true.
+        let mut gs = GameState::new(Player::new(), false, 1);
+        gs.player._p_hit_points = 0;
+        assert!(!gs.player_dead, "no latch before the check runs");
+        gs.check_player_death();
+        assert!(gs.player_dead, "HP == 0 should latch player_dead");
+        assert!(gs.is_player_dead());
+    }
+
+    #[test]
+    fn test_check_player_death_latches_when_hp_negative() {
+        // HP < 0 (overkill) should also latch death.
+        let mut gs = GameState::new(Player::new(), false, 1);
+        gs.player._p_hit_points = -64; // one point of overkill in 64x
+        gs.check_player_death();
+        assert!(gs.player_dead);
+        assert!(gs.is_player_dead());
+    }
+
+    #[test]
+    fn test_check_player_death_noop_when_alive() {
+        // HP > 0 → no latch. (Player::new() leaves HP/max at 0, so set a
+        // real max first.)
+        let mut gs = GameState::new(Player::new(), false, 1);
+        gs.player._p_max_hp = 64 * 100;
+        gs.player._p_hit_points = gs.player._p_max_hp; // full HP
+        gs.check_player_death();
+        assert!(!gs.player_dead);
+        assert!(!gs.is_player_dead());
+    }
+
+    #[test]
+    fn test_check_player_death_idempotent_when_already_dead() {
+        // Once latched, re-running the check is a no-op (stays dead).
+        let mut gs = GameState::new(Player::new(), false, 1);
+        gs.player._p_hit_points = 0;
+        gs.check_player_death();
+        assert!(gs.player_dead);
+        // Mutate HP then re-check: flag stays latched (doesn't "un-die").
+        gs.player._p_hit_points = 1000;
+        gs.check_player_death();
+        assert!(gs.player_dead, "once dead, stays dead until resurrect");
+    }
+
+    #[test]
+    fn test_death_latches_via_update_when_monster_kills_player() {
+        // End-to-end: a monster next to the player with enough damage to kill
+        // in one hit must latch player_dead after a single update().
+        use crate::game::monster::MonsterType;
+
+        // Try multiple seeds since the hit roll is RNG-dependent; we just need
+        // *some* seed where the first attack connects and kills.
+        let mut killed = false;
+        for seed in 0..200u64 {
+            let mut gs = dungeon_gs_with_corridor(MonsterType::Zombie, 11, 10);
+            gs.player.position = Point::new(12, 10);
+            // Frail player so any connected hit kills.
+            gs.player._p_hit_points = 64; // 1 HP in display units
+            gs.player._p_max_hp = 64;
+            gs.player._p_armor_class = 0; // no armor reduction
+            // Make the monster hit hard and accurately.
+            let monster_ids: Vec<usize> =
+                gs.monster_manager.iter().map(|(id, _)| id).collect();
+            for id in &monster_ids {
+                if let Some(mon) = gs.monster_manager.get_monster_mut(*id) {
+                    mon.intelligence = 100; // near-guaranteed hit (5..95 clamp)
+                    mon.min_damage = 100;
+                    mon.max_damage = 100;
+                }
+            }
+
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            gs.update(&mut rng);
+
+            if gs.is_player_dead() {
+                killed = true;
+                // HP should be clamped to 0 by modify_hp.
+                assert!(gs.player._p_hit_points <= 0);
+                break;
+            }
+        }
+        assert!(
+            killed,
+            "expected at least one seed where a monster attack kills the player and latches player_dead"
+        );
+    }
+
+    #[test]
+    fn test_update_skips_processing_while_dead() {
+        // Once player_dead is latched, update() must NOT run HP regen
+        // (process_player_internal bumps HP toward max). We set HP to a small
+        // positive value, latch death manually, then call update and verify HP
+        // is unchanged (no regen) and the flag stays latched.
+        let mut gs = GameState::new(Player::new(), false, 1);
+        gs.player._p_max_hp = 64 * 100;
+        gs.player._p_hit_points = 64 * 5; // 5 HP (injured, would normally regen)
+        gs.player_dead = true; // pre-latch death
+
+        let hp_before = gs.player._p_hit_points;
+        let mut rng = rand::rngs::StdRng::seed_from_u64(3);
+        gs.update(&mut rng);
+
+        assert_eq!(
+            gs.player._p_hit_points,
+            hp_before,
+            "no HP regen while dead (update should skip process_player_internal)"
+        );
+        assert!(gs.player_dead, "death flag stays latched across update");
+    }
+
+    // ========================================================================
+    // Resurrection tests
+    // ========================================================================
+
+    #[test]
+    fn test_resurrect_player_is_noop_when_alive() {
+        // Calling resurrect on a live player is a defensive no-op: HP/gold/
+        // position must be untouched.
+        let mut gs = GameState::new(Player::new(), false, 1);
+        gs.player._p_hit_points = gs.player._p_max_hp;
+        gs.player._p_gold = 500;
+        let (hp, gold, pos) = (
+            gs.player._p_hit_points,
+            gs.player._p_gold,
+            gs.player.position,
+        );
+        gs.resurrect_player();
+        assert!(!gs.player_dead, "resurrect on live player must not set dead");
+        assert_eq!(gs.player._p_hit_points, hp);
+        assert_eq!(gs.player._p_gold, gold);
+        assert_eq!(gs.player.position, pos);
+    }
+
+    #[test]
+    fn test_resurrect_player_restores_full_hp_and_mana() {
+        // After resurrect, HP and Mana equal their max (64x).
+        let mut gs = GameState::new(Player::new(), false, 1);
+        gs.player._p_max_hp = 64 * 120;
+        gs.player._p_hit_points = 0; // dead
+        gs.player._p_hp_base = 0;
+        gs.player._p_max_mana = 64 * 80;
+        gs.player._p_mana = 0;
+        gs.player._p_mana_base = 0;
+        gs.player_dead = true;
+
+        gs.resurrect_player();
+
+        assert!(!gs.player_dead, "resurrect clears the dead flag");
+        assert_eq!(gs.player._p_hit_points, 64 * 120, "HP restored to full");
+        assert_eq!(gs.player._p_hp_base, gs.player._p_max_hp_base);
+        assert_eq!(gs.player._p_mana, 64 * 80, "Mana restored to full");
+        assert_eq!(gs.player._p_mana_base, gs.player._p_max_mana_base);
+        assert!(gs.player._p_hit_points > 0, "player is alive again");
+        assert!(!gs.is_player_dead());
+    }
+
+    #[test]
+    fn test_resurrect_player_halves_gold() {
+        // Diablo's classic death penalty halves carried gold. Odd amounts
+        // floor-divide (integer /2).
+        let mut gs = GameState::new(Player::new(), false, 1);
+        gs.player._p_gold = 1000;
+        gs.player._p_hit_points = 0;
+        gs.player._p_max_hp = 64 * 50;
+        gs.player_dead = true;
+
+        gs.resurrect_player();
+        assert_eq!(gs.player._p_gold, 500, "even gold halved exactly");
+
+        // Odd amount floors.
+        let mut gs2 = GameState::new(Player::new(), false, 1);
+        gs2.player._p_gold = 999;
+        gs2.player._p_hit_points = 0;
+        gs2.player._p_max_hp = 64 * 50;
+        gs2.player_dead = true;
+        gs2.resurrect_player();
+        assert_eq!(gs2.player._p_gold, 499, "odd gold floors on halving");
+    }
+
+    #[test]
+    fn test_resurrect_player_returns_to_town_spawn() {
+        // After resurrect, the player is back in Tristram at ENTRY_MAIN
+        // (75, 68), in_dungeon is false, and the camera is centred on the
+        // spawn.
+        let mut gs = GameState::new(Player::new(), false, 1);
+        gs.in_dungeon = true;
+        gs.is_town = false;
+        gs.player._p_hit_points = 0;
+        gs.player._p_max_hp = 64 * 50;
+        gs.player_dead = true;
+        // Park the player somewhere off-spawn.
+        gs.player.position = Point::new(10, 10);
+        gs.camera.tile_x = 10;
+        gs.camera.tile_y = 10;
+
+        gs.resurrect_player();
+
+        assert!(!gs.in_dungeon, "resurrect returns to town (in_dungeon=false)");
+        assert!(gs.is_town, "is_town true after resurrect");
+        // C++ ENTRY_MAIN spawn.
+        assert_eq!(gs.player.position.x, 75);
+        assert_eq!(gs.player.position.y, 68);
+        assert_eq!(gs.camera.tile_x, 75);
+        assert_eq!(gs.camera.tile_y, 68);
+    }
+
+    #[test]
+    fn test_resurrect_player_clears_dungeon_state() {
+        // Resurrecting clears the dungeon layout + monsters + sprites + ground
+        // items so a fresh dungeon is generated on the next descent.
+        use crate::game::monster::MonsterType;
+        let mut gs = dungeon_gs_with_corridor(MonsterType::Zombie, 11, 10);
+        gs.player._p_hit_points = 0;
+        gs.player._p_max_hp = 64 * 50;
+        gs.player_dead = true;
+        // Populate some dungeon state that should be cleared.
+        gs.dungeon_up_stairs = Some((5, 5));
+        gs.ground_items.push(GroundItem { x: 1, y: 1, item_type: GroundItemType::Gold });
+        gs.simple_missiles.push(SimpleMissile {
+            x: 0, y: 0, dx: 1, dy: 0, damage: 5, range_left: 5,
+        });
+        assert!(gs.active_monster_count() > 0);
+
+        gs.resurrect_player();
+
+        assert!(gs.dungeon_layout.is_none(), "dungeon layout cleared");
+        assert!(gs.dungeon_up_stairs.is_none(), "up-stairs cleared");
+        assert!(gs.ground_items.is_empty(), "ground items cleared");
+        assert!(gs.simple_missiles.is_empty(), "missiles cleared");
+        assert_eq!(gs.active_monster_count(), 0, "monsters cleared");
+        assert!(gs.monster_sprites.is_none(), "monster sprites cleared");
+    }
+
+    #[test]
+    fn test_resurrect_full_cycle_resume_normal_logic() {
+        // After death → resurrect, the player is alive in town at full HP and
+        // a subsequent update() runs normally (no longer paused). We verify HP
+        // regen is *not* triggered (player is already at full) and the dead
+        // flag stays clear.
+        let mut gs = GameState::new(Player::new(), true, 1);
+        gs.player._p_max_hp = 64 * 60;
+        gs.player._p_hit_points = 0;
+        gs.player._p_gold = 200;
+        gs.player_dead = true;
+
+        gs.resurrect_player();
+        assert!(!gs.player_dead);
+        let hp_after = gs.player._p_hit_points;
+        assert_eq!(hp_after, 64 * 60);
+
+        // Run an update — should be a normal alive update (no death latch).
+        let mut rng = rand::rngs::StdRng::seed_from_u64(1);
+        gs.update(&mut rng);
+        assert!(!gs.player_dead, "still alive after update");
+        assert_eq!(gs.player._p_hit_points, hp_after, "full HP unchanged by regen");
     }
 
     // ========================================================================

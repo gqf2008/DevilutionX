@@ -60,6 +60,15 @@ struct GameLoopState {
     /// key is pressed. Consumed one tile per logic tick in the 2 Hz update
     /// path. `None` when the player is not auto-walking.
     move_target: Option<(i32, i32)>,
+    /// Character stats panel visibility (toggled with the `C` key, mirroring
+    /// C++ `QuestLogIsOpen`/`chrbtns` style panel toggles). When true,
+    /// `draw_and_blit` paints a full-screen overlay listing the hero's
+    /// Str/Mag/Dex/Vit, HP/Mana, AC, damage, XP, gold.
+    char_panel_open: bool,
+    /// Quest log visibility (toggled with the `Q` key, mirroring C++
+    /// `QuestLogIsOpen`). When true, `draw_and_blit` paints an overlay listing
+    /// the active quests and their status.
+    quest_panel_open: bool,
 }
 
 impl GameLoopState {
@@ -71,6 +80,8 @@ impl GameLoopState {
             result: true,
             mouse_pos: (320, 240),
             move_target: None,
+            char_panel_open: false,
+            quest_panel_open: false,
         }
     }
 }
@@ -146,6 +157,29 @@ pub fn run_game_loop(mode: InterfaceMode, window: &mut GameWindow, game_state: &
             break;
         }
 
+        // ── Death / Resurrection flow ───────────────────────────────────────
+        //
+        // When `game_state.player_dead` is latched (HP dropped to ≤ 0 in the
+        // last logic tick), the player sees the red "YOU HAVE DIED" overlay
+        // (drawn in `draw_and_blit`) and the rest of the game input is frozen.
+        // Pressing Space or Enter resurrects them: HP/Mana refilled, sent back
+        // to Tristram town, gold halved (classic Diablo death penalty). Mirrors
+        // C++ `gbDeathActive` + the Space-to-respawn handler in `RunGameLoop`.
+        //
+        // The input handlers below (D/T stairs, F5/F9 save, F spell, movement)
+        // are gated on `!is_player_dead()` so they can't fire while dead; the
+        // timing/render path still runs every frame so the overlay is drawn.
+        let player_dead = game_state.is_player_dead();
+        if player_dead {
+            if input.is_key_pressed(Keycode::Space)
+                || input.is_key_pressed(Keycode::Return)
+                || input.is_key_pressed(Keycode::Return2)
+                || input.is_key_pressed(Keycode::KpEnter)
+            {
+                game_state.resurrect_player();
+            }
+        }
+
         // Town <-> Dungeon toggle keys. 'D' descends into L1 Cathedral (only
         // when currently in town); 'T' returns to town (only when in the
         // dungeon). These are manual fallbacks alongside the automatic
@@ -153,13 +187,15 @@ pub fn run_game_loop(mode: InterfaceMode, window: &mut GameWindow, game_state: &
         // the player walks onto a stair tile). Kept so the player can force a
         // transition even if they can't reach the stair (e.g. pathfinding
         // limitations) or for debugging.
-        if input.is_key_pressed(Keycode::D) && !game_state.in_dungeon {
-            if let Err(e) = descend_to_dungeon(game_state) {
-                println!("[GameLoop] descend_to_dungeon failed: {}", e);
+        if !player_dead {
+            if input.is_key_pressed(Keycode::D) && !game_state.in_dungeon {
+                if let Err(e) = descend_to_dungeon(game_state) {
+                    println!("[GameLoop] descend_to_dungeon failed: {}", e);
+                }
             }
-        }
-        if input.is_key_pressed(Keycode::T) && game_state.in_dungeon {
-            return_to_town(game_state);
+            if input.is_key_pressed(Keycode::T) && game_state.in_dungeon {
+                return_to_town(game_state);
+            }
         }
 
         // F5 = quick-save the current game to slot 0, F9 = quick-load from
@@ -202,13 +238,17 @@ pub fn run_game_loop(mode: InterfaceMode, window: &mut GameWindow, game_state: &
 
         // 'F' = cast Firebolt toward the nearest monster (demo spell-casting).
         // Edge-triggered so one tap fires one bolt. Mana cost is applied
-        // inside the cast; nothing happens if mana is insufficient.
-        if input.is_key_pressed(Keycode::F) && game_state.in_dungeon {
+        // inside the cast; nothing happens if mana is insufficient. Skipped
+        // while dead (the player must resurrect first).
+        if !player_dead && input.is_key_pressed(Keycode::F) && game_state.in_dungeon {
             let _ = game_state.cast_firebolt_at_nearest();
         }
 
         // Apply continuous movement (held arrow/WASD keys) to the player/camera.
-        apply_movement(game_state, &input);
+        // Frozen while dead — the overlay takes over until the player resurrects.
+        if !player_dead {
+            apply_movement(game_state, &input);
+        }
 
         // Timing check - has 500ms passed?
         // C++: bool runGameLoop = nthread_has_500ms_passed(&drawGame)
@@ -228,7 +268,7 @@ pub fn run_game_loop(mode: InterfaceMode, window: &mut GameWindow, game_state: &
             // Render if needed
             if draw_game {
                 redraw_viewport(window, game_state);
-                draw_and_blit(window, game_state, state.mouse_pos, state.move_target);
+                draw_and_blit(window, game_state, state.mouse_pos, state.move_target, state.char_panel_open, state.quest_panel_open);
             }
 
             continue;
@@ -240,8 +280,11 @@ pub fn run_game_loop(mode: InterfaceMode, window: &mut GameWindow, game_state: &
         // Click-to-move: walk one tile toward the pending destination each
         // logic tick, dragging the camera with the player. Done here (not in
         // the fast path) so movement is locked to the 2 Hz simulation rate.
-        if let Some(target) = state.move_target {
-            tick_move_target(game_state, target, &mut state.move_target);
+        // Skipped while dead (the death overlay is modal).
+        if !game_state.is_player_dead() {
+            if let Some(target) = state.move_target {
+                tick_move_target(game_state, target, &mut state.move_target);
+            }
         }
 
         // Stair detection: if the player is standing on (or adjacent to) a
@@ -250,8 +293,11 @@ pub fn run_game_loop(mode: InterfaceMode, window: &mut GameWindow, game_state: &
         // `GameLogic()` after the player position has been updated. Placed here
         // (logic path, 2 Hz) rather than the fast path so transitions are
         // locked to the simulation rate and the cooldown (in ticks) is
-        // meaningful. The D/T manual keys above remain as a fallback.
-        check_stairs_transition(game_state);
+        // meaningful. The D/T manual keys above remain as a fallback. Skipped
+        // while dead.
+        if !game_state.is_player_dead() {
+            check_stairs_transition(game_state);
+        }
 
         // Process network messages
         network::process_game_message_packets();
@@ -267,7 +313,7 @@ pub fn run_game_loop(mode: InterfaceMode, window: &mut GameWindow, game_state: &
         // Render
         if draw_game {
             redraw_viewport(window, game_state);
-            draw_and_blit(window, game_state, state.mouse_pos, state.move_target);
+            draw_and_blit(window, game_state, state.mouse_pos, state.move_target, state.char_panel_open, state.quest_panel_open);
         }
     }
 
@@ -515,6 +561,15 @@ fn handle_event(
                 if state.move_target.is_some() {
                     state.move_target = None;
                 }
+            }
+            // Panel toggles (mirrors C++ Keydown handlers in
+            // `diablo.cpp::PressKey`: `KEYCODE_C` opens the character sheet,
+            // `KEYCODE_Q` opens the quest log). Edge-triggered via KeyDown so a
+            // single tap flips the flag; pressing again closes.
+            match *k {
+                Keycode::C => state.char_panel_open = !state.char_panel_open,
+                Keycode::Q => state.quest_panel_open = !state.quest_panel_open,
+                _ => {}
             }
             input.on_key_down(*k);
             true
@@ -1078,6 +1133,8 @@ fn draw_and_blit(
     game_state: &GameState,
     mouse_pos: (i32, i32),
     move_target: Option<(i32, i32)>,
+    char_panel_open: bool,
+    quest_panel_open: bool,
 ) {
     // C++: DrawAndBlit() - renders the dungeon viewport then flips the back
     // buffer.
@@ -1246,7 +1303,378 @@ fn draw_and_blit(
         }
     }
 
+    // Character (C) and Quest (Q) overlay panels. Drawn last so they sit on
+    // top of the world + HUD + cursor. Each is a modal full-screen dim with a
+    // bordered panel listing the relevant info; toggled edge-triggered in
+    // `handle_event`. If both are somehow open, the character panel wins
+    // (drawn after the quest panel).
+    if quest_panel_open {
+        draw_quest_panel(window, game_state);
+    }
+    if char_panel_open {
+        draw_char_panel(window, game_state);
+    }
+
+    // Death overlay: drawn on the very top (over everything, including the
+    // char/quest panels) while `game_state.player_dead` is latched. A red
+    // semi-transparent wash + "YOU HAVE DIED" headline + the prompt to press
+    // Space/Enter to resurrect. The player resurrects in the main loop's
+    // death-flow handler (above), which calls `GameState::resurrect_player`.
+    if game_state.is_player_dead() {
+        draw_death_overlay(window, game_state);
+    }
+
     window.present();
+}
+
+/// Death overlay: painted on top of everything while `game_state.player_dead`
+/// is latched.
+///
+/// A full-screen red semi-transparent wash (alpha ~140) evokes the C++ death
+/// screen's red-tinted palette, then a centred black-bordered "YOU HAVE DIED"
+/// headline in the largest bitmap font scale, followed by the gold-penalty
+/// note and the "PRESS SPACE / ENTER TO RESURRECT" prompt. The hero's name and
+/// the death location are shown for context.
+///
+/// Mirrors C++ `DrawDiabloDeath` (Source/interfac.cpp) which renders the death
+/// screen with the slain-hero artwork + a "Save Game? Y/N" prompt; we use a
+/// procedural canvas overlay instead since we don't ship the death CEL art.
+///
+/// All values are read straight from `GameState::player`; nothing is mutated.
+fn draw_death_overlay(window: &mut GameWindow, game_state: &GameState) {
+    let canvas = window.canvas_mut();
+    let player = &game_state.player;
+
+    // ---- Full-screen red wash (semi-transparent) ----
+    canvas.set_draw_color(sdl2::pixels::Color::RGBA(110, 0, 0, 160));
+    let _ = canvas.fill_rect(Rect::new(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT));
+
+    // ---- Centred panel backdrop for the headline ----
+    const PANEL_W: i32 = 420;
+    const PANEL_H: i32 = 150;
+    let panel_x = (LOGICAL_WIDTH as i32 - PANEL_W) / 2;
+    let panel_y = (LOGICAL_HEIGHT as i32 - PANEL_H) / 2;
+
+    // Outer dark border + inner bevel (matching the char-panel palette).
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(20, 0, 0));
+    let _ = canvas.fill_rect(Rect::new(panel_x - 3, panel_y - 3, (PANEL_W + 6) as u32, (PANEL_H + 6) as u32));
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(48, 12, 12));
+    let _ = canvas.fill_rect(Rect::new(panel_x, panel_y, PANEL_W as u32, PANEL_H as u32));
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(150, 40, 40));
+    let _ = canvas.draw_rect(Rect::new(panel_x, panel_y, PANEL_W as u32, PANEL_H as u32));
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(96, 24, 24));
+    let _ = canvas.draw_rect(Rect::new(panel_x + 1, panel_y + 1, (PANEL_W - 2) as u32, (PANEL_H - 2) as u32));
+
+    // ---- Text ----
+    let title_font = crate::engine::font::PixelFont::new(3); // largest scale
+    let font = crate::engine::font::PixelFont::new(2);
+    let small = crate::engine::font::PixelFont::new(1);
+
+    let red = sdl2::pixels::Color::RGB(255, 60, 60);
+    let gold = sdl2::pixels::Color::RGB(255, 200, 80);
+    let dim = sdl2::pixels::Color::RGB(180, 160, 140);
+
+    let center_x = LOGICAL_WIDTH as i32 / 2;
+    let mut y = panel_y + 14;
+
+    // Headline.
+    title_font.render_text_centered(canvas, "YOU HAVE DIED", center_x, y, red);
+    y += title_font.line_height() + 8;
+
+    // Divider.
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(96, 24, 24));
+    let _ = canvas.draw_line((panel_x + 16, y), (panel_x + PANEL_W - 16, y));
+    y += 8;
+
+    // Hero name + death location for context.
+    let name = player.get_name();
+    small.render_text_centered(
+        canvas,
+        &format!("{} has fallen", if name.is_empty() { "The hero" } else { name.as_str() }),
+        center_x,
+        y,
+        dim,
+    );
+    y += small.line_height() + 4;
+
+    // Gold-penalty note.
+    let gold_note = format!("Half your gold ({} left) is forfeit", player._p_gold / 2);
+    small.render_text_centered(canvas, &gold_note, center_x, y, gold);
+    y += small.line_height() + 8;
+
+    // Resurrect prompt.
+    font.render_text_centered(canvas, "PRESS SPACE / ENTER TO RESURRECT", center_x, y, gold);
+}
+
+/// Character info panel overlay (C key, C++ `DrawChr`).
+///
+/// Paints a semi-transparent full-screen dim, then a bordered 280x430 stone
+/// panel on the left side listing the hero's name, class, level, the four core
+/// attributes (Str/Mag/Dex/Vit with their base/bonus split), HP and Mana in
+/// display units (raw 64x >> 6), armour class, damage range, experience, the
+/// XP needed to reach the next level, and gold.
+///
+/// All numbers come straight from `GameState::player`; nothing is mutated. The
+/// frame + text are drawn procedurally with the SDL2 canvas + `PixelFont` (no
+/// CEL art), matching the HUD's approach so the panel renders identically with
+/// or without the real Diablo `data\char.cel` art.
+fn draw_char_panel(window: &mut GameWindow, game_state: &GameState) {
+    let canvas = window.canvas_mut();
+    let player = &game_state.player;
+
+    // ---- Full-screen dim (semi-transparent black) ----
+    canvas.set_draw_color(sdl2::pixels::Color::RGBA(0, 0, 0, 150));
+    let _ = canvas.fill_rect(Rect::new(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT));
+
+    // ---- Panel frame (left-side, 280x430) ----
+    const PANEL_X: i32 = 16;
+    const PANEL_Y: i32 = 20;
+    const PANEL_W: i32 = 280;
+    const PANEL_H: i32 = 430;
+
+    // Outer dark border + inner bevel (mirrors the HUD's stone palette).
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(20, 16, 12));
+    let _ = canvas.fill_rect(Rect::new(PANEL_X - 2, PANEL_Y - 2, (PANEL_W + 4) as u32, (PANEL_H + 4) as u32));
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(58, 46, 34));
+    let _ = canvas.fill_rect(Rect::new(PANEL_X, PANEL_Y, PANEL_W as u32, PANEL_H as u32));
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(140, 116, 84));
+    let _ = canvas.draw_rect(Rect::new(PANEL_X, PANEL_Y, PANEL_W as u32, PANEL_H as u32));
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(96, 78, 56));
+    let _ = canvas.draw_rect(Rect::new(PANEL_X + 1, PANEL_Y + 1, (PANEL_W - 2) as u32, (PANEL_H - 2) as u32));
+
+    // ---- Text ----
+    let font = crate::engine::font::PixelFont::new(2);
+    let title_font = crate::engine::font::PixelFont::new(2);
+    let small = crate::engine::font::PixelFont::new(1);
+
+    let txt = sdl2::pixels::Color::RGB(240, 230, 200);
+    let label = sdl2::pixels::Color::RGB(200, 188, 150);
+    let dim = sdl2::pixels::Color::RGB(150, 138, 110);
+    let hi = sdl2::pixels::Color::RGB(255, 240, 160);
+
+    let mut y = PANEL_Y + 10;
+
+    // Title bar.
+    title_font.render_text_centered(canvas, "CHARACTER", PANEL_X + PANEL_W / 2, y, hi);
+    y += title_font.line_height() + 8;
+
+    // Divider.
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(96, 78, 56));
+    let _ = canvas.draw_line((PANEL_X + 10, y), (PANEL_X + PANEL_W - 10, y));
+    y += 6;
+
+    // Name + class.
+    let name = player.get_name();
+    let class = player.get_class_name();
+    let level = player._p_level;
+
+    title_font.render_text(canvas, &name, PANEL_X + 14, y, txt);
+    y += title_font.line_height() + 2;
+    small.render_text(canvas, &format!("CLASS: {}", class), PANEL_X + 14, y, dim);
+    y += small.line_height() + 2;
+    small.render_text(canvas, &format!("LEVEL: {}", level), PANEL_X + 14, y, dim);
+    y += small.line_height() + 8;
+
+    // ---- Core attributes (Str/Mag/Dex/Vit): base + bonus ----
+    let attrs: [(&str, i32, i32); 4] = [
+        ("STRENGTH",     player._p_strength,   player._p_base_str),
+        ("MAGIC",        player._p_magic,      player._p_base_mag),
+        ("DEXTERITY",    player._p_dexterity,  player._p_base_dex),
+        ("VITALITY",     player._p_vitality,   player._p_base_vit),
+    ];
+    for (name, cur, base) in attrs.iter() {
+        font.render_text(canvas, name, PANEL_X + 14, y, label);
+        // Display as "cur" if no bonus, else "cur (base+bonus)".
+        let bonus = cur - base;
+        let val_str = if bonus == 0 {
+            format!("{}", cur)
+        } else {
+            format!("{} ({:+})", cur, bonus)
+        };
+        font.render_text(canvas, &val_str, PANEL_X + 150, y, txt);
+        y += font.line_height() + 4;
+    }
+    y += 4;
+
+    // ---- HP / Mana (display value = 64x >> 6) ----
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(96, 78, 56));
+    let _ = canvas.draw_line((PANEL_X + 10, y), (PANEL_X + PANEL_W - 10, y));
+    y += 6;
+
+    let hp_cur = player._p_hit_points >> 6;
+    let hp_max = player._p_max_hp >> 6;
+    let mp_cur = player._p_mana >> 6;
+    let mp_max = player._p_max_mana >> 6;
+
+    font.render_text(canvas, "LIFE", PANEL_X + 14, y, label);
+    font.render_text(canvas, &format!("{}/{}", hp_cur.max(0), hp_max), PANEL_X + 150, y, txt);
+    y += font.line_height() + 4;
+
+    font.render_text(canvas, "MANA", PANEL_X + 14, y, label);
+    font.render_text(canvas, &format!("{}/{}", mp_cur.max(0), mp_max), PANEL_X + 150, y, txt);
+    y += font.line_height() + 8;
+
+    // ---- Combat: AC + damage ----
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(96, 78, 56));
+    let _ = canvas.draw_line((PANEL_X + 10, y), (PANEL_X + PANEL_W - 10, y));
+    y += 6;
+
+    let ac = player._p_i_ac;
+    let dmg_min = player._p_i_min_dam;
+    let dmg_max = player._p_i_max_dam;
+
+    font.render_text(canvas, "ARMOR", PANEL_X + 14, y, label);
+    font.render_text(canvas, &format!("{}", ac), PANEL_X + 150, y, txt);
+    y += font.line_height() + 4;
+
+    font.render_text(canvas, "DAMAGE", PANEL_X + 14, y, label);
+    font.render_text(canvas, &format!("{}-{}", dmg_min, dmg_max), PANEL_X + 150, y, txt);
+    y += font.line_height() + 8;
+
+    // ---- Experience / next-level / gold ----
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(96, 78, 56));
+    let _ = canvas.draw_line((PANEL_X + 10, y), (PANEL_X + PANEL_W - 10, y));
+    y += 6;
+
+    let exp = player._p_experience;
+    // Use the same XP table the HUD uses for the "next level" threshold.
+    let next_xp = next_level_threshold(level, exp);
+
+    font.render_text(canvas, "EXPERIENCE", PANEL_X + 14, y, label);
+    font.render_text(canvas, &format!("{}", exp), PANEL_X + 150, y, txt);
+    y += font.line_height() + 4;
+
+    font.render_text(canvas, "NEXT LEVEL", PANEL_X + 14, y, label);
+    let next_str = match next_xp {
+        Some(n) => format!("{}", n),
+        None => "MAX".to_string(),
+    };
+    font.render_text(canvas, &next_str, PANEL_X + 150, y, txt);
+    y += font.line_height() + 4;
+
+    font.render_text(canvas, "GOLD", PANEL_X + 14, y, label);
+    font.render_text(canvas, &format!("{}", player._p_gold), PANEL_X + 150, y, hi);
+    y += font.line_height() + 8;
+
+    // Footer hint.
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(96, 78, 56));
+    let _ = canvas.draw_line((PANEL_X + 10, y), (PANEL_X + PANEL_W - 10, y));
+    y += 6;
+    small.render_text_centered(canvas, "PRESS C TO CLOSE", PANEL_X + PANEL_W / 2, y, dim);
+}
+
+/// Quest log panel overlay (Q key, C++ `DrawQuestLog`).
+///
+/// The port doesn't yet track per-quest state in `GameState`, so this renders a
+/// curated list of the canonical Diablo main quests with a fixed "active /
+/// completed" status drawn from the hero's level (lower-level quests read as
+/// completed once the hero has out-levelled them). When real quest state lands
+/// in `GameState` this becomes a straight read; for now it's a readable
+/// placeholder that exercises the full overlay path.
+fn draw_quest_panel(window: &mut GameWindow, game_state: &GameState) {
+    let canvas = window.canvas_mut();
+    let level = game_state.player._p_level;
+
+    // ---- Full-screen dim ----
+    canvas.set_draw_color(sdl2::pixels::Color::RGBA(0, 0, 0, 150));
+    let _ = canvas.fill_rect(Rect::new(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT));
+
+    // ---- Panel frame (centred, 360x360) ----
+    const PANEL_W: i32 = 360;
+    const PANEL_H: i32 = 360;
+    let panel_x = (LOGICAL_WIDTH as i32 - PANEL_W) / 2;
+    let panel_y = (LOGICAL_HEIGHT as i32 - PANEL_H) / 2;
+
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(20, 16, 12));
+    let _ = canvas.fill_rect(Rect::new(panel_x - 2, panel_y - 2, (PANEL_W + 4) as u32, (PANEL_H + 4) as u32));
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(58, 46, 34));
+    let _ = canvas.fill_rect(Rect::new(panel_x, panel_y, PANEL_W as u32, PANEL_H as u32));
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(140, 116, 84));
+    let _ = canvas.draw_rect(Rect::new(panel_x, panel_y, PANEL_W as u32, PANEL_H as u32));
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(96, 78, 56));
+    let _ = canvas.draw_rect(Rect::new(panel_x + 1, panel_y + 1, (PANEL_W - 2) as u32, (PANEL_H - 2) as u32));
+
+    let font = crate::engine::font::PixelFont::new(2);
+    let title_font = crate::engine::font::PixelFont::new(2);
+    let small = crate::engine::font::PixelFont::new(1);
+
+    let hi = sdl2::pixels::Color::RGB(255, 240, 160);
+    let txt = sdl2::pixels::Color::RGB(240, 230, 200);
+    let active = sdl2::pixels::Color::RGB(120, 220, 120);
+    let done = sdl2::pixels::Color::RGB(150, 138, 110);
+
+    let mut y = panel_y + 12;
+    title_font.render_text_centered(canvas, "QUEST LOG", panel_x + PANEL_W / 2, y, hi);
+    y += title_font.line_height() + 8;
+
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(96, 78, 56));
+    let _ = canvas.draw_line((panel_x + 12, y), (panel_x + PANEL_W - 12, y));
+    y += 8;
+
+    // Canonical Diablo quests: (name, level_threshold). A quest reads as
+    // "completed" once the hero's level exceeds the threshold, otherwise
+    // "active". This is a stand-in until real quest state is tracked.
+    let quests: &[(&str, u8)] = &[
+        ("THE BUTCHER",          4),
+        ("POISONED WATER SUPPLY", 5),
+        ("KING LEORIC'S CURSE",  7),
+        ("MAGIC ROCK",           9),
+        ("VALOR",                10),
+        ("HALLS OF THE BLIND",   10),
+        ("Zhar THE MAD",         11),
+        ("BLACK MUSHROOM",       12),
+        ("ANVIL OF FURY",        13),
+        ("WARLORD OF BLOOD",     14),
+        ("LACHDANAN",            15),
+        ("ARCHBISHOP LAZARUS",   16),
+    ];
+
+    for (name, thresh) in quests {
+        let is_done = level >= *thresh;
+        let status_str = if is_done { "[DONE]" } else { "[ACTIVE]" };
+        let colour = if is_done { done } else { active };
+
+        font.render_text(canvas, name, panel_x + 18, y, txt);
+        font.render_text(canvas, status_str, panel_x + PANEL_W - 18 - font.text_width(status_str), y, colour);
+        y += font.line_height() + 3;
+    }
+
+    y += 8;
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(96, 78, 56));
+    let _ = canvas.draw_line((panel_x + 12, y), (panel_x + PANEL_W - 12, y));
+    y += 6;
+    small.render_text_centered(canvas, "PRESS Q TO CLOSE", panel_x + PANEL_W / 2, y, done);
+}
+
+/// XP required to advance from the given level to the next, using the canonical
+/// Diablo 1 per-level experience table (a copy of `hud::XP_THRESHOLDS`, kept
+/// here because the HUD's copy is private). Returns `None` at max level.
+///
+/// `exp` is the hero's current experience; if they've already banked enough to
+/// leave the level, the remaining requirement is 0 (clamped at 0).
+fn next_level_threshold(level: u8, exp: u32) -> Option<u32> {
+    // C++ Reference: Source/playerdat.cpp::GetNextExperienceThresholdForLevel.
+    // Index i = threshold to leave level (i+1); i.e. entry [level-1] leaves
+    // the current level.
+    const XP_THRESHOLDS: [u32; 50] = [
+        2000, 4620, 8040, 12489, 18258, 25712, 35309, 47622, 63364, 83419, 108879, 141086, 181683,
+        231075, 313656, 424067, 571190, 766569, 1025154, 1366227, 1814568, 2401895, 3168651,
+        4166200, 5459523, 7130496, 9281874, 12042092, 15571031, 20066900, 25774405, 32994399,
+        42095202, 53525811, 67831218, 85670061, 107834823, 135274799, 169122009, 210720231,
+        261657253, 323800420, 399335440, 490808349, 601170414, 733825617, 892680222, 1082908612,
+        1310707109, 1583495809,
+    ];
+    const MAX_PLAYER_LEVEL: u8 = 50;
+    if level >= MAX_PLAYER_LEVEL {
+        return None;
+    }
+    let idx = (level as usize).saturating_sub(1);
+    let next = XP_THRESHOLDS.get(idx).copied()?;
+    if exp >= next {
+        Some(0)
+    } else {
+        Some(next - exp)
+    }
 }
 
 /// Draw active spell projectiles (Firebolt) as small orange diamonds at their
