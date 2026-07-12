@@ -17,6 +17,7 @@ use crate::engine::sprite_render::rgba_to_texture;
 use crate::game::input::InputSystem;
 use crate::game::network;
 use crate::game::game_state::{GameState, TownLayout, TOWN_MAX_X, TOWN_MAX_Y, GroundItemType};
+use crate::game::player_exact::Player;
 use crate::game::hud;
 use anyhow::Result;
 use sdl2::event::Event;
@@ -69,6 +70,17 @@ struct GameLoopState {
     /// `QuestLogIsOpen`). When true, `draw_and_blit` paints an overlay listing
     /// the active quests and their status.
     quest_panel_open: bool,
+    /// Spell book visibility (toggled with the `B` key, mirroring C++
+    /// `DrawSpellBook`). When true, `draw_and_blit` paints an overlay listing
+    /// the player's known spells with mana costs; the currently readied spell
+    /// (`player._p_r_spell`) is highlighted. Number keys 1-9 select a spell.
+    spellbook_open: bool,
+    /// Automap visibility (toggled with the `A` key, mirroring C++
+    /// `StartAutomap`/`DrawAutomap`). When true, `draw_and_blit` paints a
+    /// semi-transparent overlay in the upper-right showing an isometric
+    /// thumbnail of the surrounding tiles plus the player + nearby NPCs /
+    /// monsters.
+    automap_open: bool,
 }
 
 impl GameLoopState {
@@ -82,6 +94,8 @@ impl GameLoopState {
             move_target: None,
             char_panel_open: false,
             quest_panel_open: false,
+            spellbook_open: false,
+            automap_open: false,
         }
     }
 }
@@ -123,6 +137,20 @@ pub fn run_game_loop(mode: InterfaceMode, window: &mut GameWindow, game_state: &
 
     init_backbuffer();
     redraw_everything(window);
+
+    // Equip the Warrior with a starter Short Sword (1-6 damage) so melee
+    // combat has a non-zero damage range. This mirrors the C++ starting kit
+    // handed out in `CreatePlayer`/`StartNewGame`. Recalculating derived item
+    // stats here populates `_p_i_min_dam`/`_p_i_max_dam` which the combat path
+    // (`player_attack_monster`) reads. Safe to call every loop start: it's
+    // idempotent (no-ops when a weapon is already equipped).
+    game_state.equip_starter_weapon();
+    println!(
+        "[Equip] starter weapon equipped: damage range {}-{} (gold {})",
+        game_state.player._p_i_min_dam,
+        game_state.player._p_i_max_dam,
+        game_state.player._p_gold
+    );
 
     // 4. Create timing controller
     let mut timing = GameTiming::new();
@@ -268,7 +296,7 @@ pub fn run_game_loop(mode: InterfaceMode, window: &mut GameWindow, game_state: &
             // Render if needed
             if draw_game {
                 redraw_viewport(window, game_state);
-                draw_and_blit(window, game_state, state.mouse_pos, state.move_target, state.char_panel_open, state.quest_panel_open);
+                draw_and_blit(window, game_state, state.mouse_pos, state.move_target, state.char_panel_open, state.quest_panel_open, state.spellbook_open, state.automap_open);
             }
 
             continue;
@@ -313,7 +341,7 @@ pub fn run_game_loop(mode: InterfaceMode, window: &mut GameWindow, game_state: &
         // Render
         if draw_game {
             redraw_viewport(window, game_state);
-            draw_and_blit(window, game_state, state.mouse_pos, state.move_target, state.char_panel_open, state.quest_panel_open);
+            draw_and_blit(window, game_state, state.mouse_pos, state.move_target, state.char_panel_open, state.quest_panel_open, state.spellbook_open, state.automap_open);
         }
     }
 
@@ -538,7 +566,7 @@ fn handle_event(
     event: &Event,
     state: &mut GameLoopState,
     input: &mut InputSystem,
-    game_state: &GameState,
+    game_state: &mut GameState,
 ) -> bool {
     match event {
         Event::Quit { .. } => {
@@ -548,7 +576,14 @@ fn handle_event(
             false
         }
         Event::KeyDown { keycode: Some(Keycode::Escape), .. } => {
-            // ESC exits the game back to the menu.
+            // If the shop panel is open, ESC closes it instead of exiting the
+            // game (mirrors C++ where ESC first dismisses the active store
+            // before falling through to the game-menu exit). Otherwise ESC
+            // exits the game back to the menu.
+            if game_state.shop_open {
+                game_state.close_shop();
+                return true;
+            }
             println!("ESC pressed - exiting game loop");
             state.running = false;
             false
@@ -564,12 +599,31 @@ fn handle_event(
             }
             // Panel toggles (mirrors C++ Keydown handlers in
             // `diablo.cpp::PressKey`: `KEYCODE_C` opens the character sheet,
-            // `KEYCODE_Q` opens the quest log). Edge-triggered via KeyDown so a
-            // single tap flips the flag; pressing again closes.
+            // `KEYCODE_Q` opens the quest log, `KEYCODE_B` opens the spell
+            // book, `KEYCODE_A` opens the automap). Edge-triggered via KeyDown
+            // so a single tap flips the flag; pressing again closes.
             match *k {
                 Keycode::C => state.char_panel_open = !state.char_panel_open,
                 Keycode::Q => state.quest_panel_open = !state.quest_panel_open,
+                Keycode::B => state.spellbook_open = !state.spellbook_open,
+                Keycode::A => state.automap_open = !state.automap_open,
                 _ => {}
+            }
+            // While the spell book is open, the number keys 1-9 select the
+            // readied spell (`player._p_r_spell`) from the displayed list.
+            // Mirrors C++ `DrawSpellBook` / `PressSpellKey` selection. The
+            // list ordering is fixed by `known_spells_for_book()` (canonical
+            // Diablo order); the index maps to the nth known spell.
+            if state.spellbook_open {
+                if let Some(idx) = spell_selection_index(*k) {
+                    let known = known_spells_for_book(&game_state.player);
+                    if let Some(&(spell, _mana)) = known.get(idx) {
+                        game_state.player._p_r_spell = spell;
+                        game_state.player._p_r_spl_type =
+                            crate::game::player_exact::SpellType::Spell;
+                        crate::engine::audio::dispatch_sfx("ui_click");
+                    }
+                }
             }
             input.on_key_down(*k);
             true
@@ -596,12 +650,20 @@ fn handle_event(
         }
         Event::MouseButtonUp { mouse_btn, x, y, .. } => {
             state.mouse_pos = (*x, *y);
-            // Left-click on the ground sets a click-to-move destination. We
-            // convert the click's logical-canvas coords to a world tile via
-            // the inverse isometric projection (same transform C++
-            // `ConvertToTileGrid` uses), then store it for the 2 Hz logic
-            // tick to walk toward one tile at a time.
+            // Left-click handling branches on whether the shop panel is open.
             if *mouse_btn == sdl2::mouse::MouseButton::Left {
+                // If the shop panel is open, route clicks to the shop overlay
+                // (item rows / CLOSE) instead of click-to-move. The overlay
+                // geometry is computed by `shop_panel_geometry` and must match
+                // `draw_shop_panel`.
+                if game_state.shop_open {
+                    handle_shop_panel_click(game_state, *x, *y);
+                    return true;
+                }
+
+                // Convert the click's logical-canvas coords to a world tile via
+                // the inverse isometric projection (same transform C++
+                // `ConvertToTileGrid` uses).
                 const PANEL_HEIGHT: i32 = 144;
                 let screen_center_x = LOGICAL_WIDTH as i32 / 2; // 320
                 let screen_center_y = (LOGICAL_HEIGHT as i32 - PANEL_HEIGHT) / 2; // 168
@@ -613,6 +675,31 @@ fn handle_event(
                     screen_center_x,
                     screen_center_y,
                 );
+
+                // First, if the click lands on (or very near) a shop-capable
+                // NPC, open that NPC's shop instead of walking. This is the
+                // C++ `TalkToTowner` path. We also open a placeholder panel for
+                // gossip-only NPCs so the player gets feedback.
+                if let Some((nx, ny, _name, kind)) = game_state.npc_at_tile(wx, wy) {
+                    if GameState::npc_runs_shop(kind) {
+                        game_state.open_shop(kind);
+                        println!(
+                            "[Shop] opened {} shop (NPC at ({},{}), kind {})",
+                            GameState::shop_name_for_npc(kind),
+                            nx,
+                            ny,
+                            kind
+                        );
+                        // Cancelling any in-progress walk so the player stops at
+                        // the NPC rather than walking through them.
+                        state.move_target = None;
+                        return true;
+                    }
+                }
+
+                // Otherwise the click is on the ground: store it as a click-to-
+                // move destination for the 2 Hz logic tick to walk toward one
+                // tile at a time.
                 state.move_target = Some((wx, wy));
                 println!("[ClickMove] target=({},{})", wx, wy);
             }
@@ -1135,6 +1222,8 @@ fn draw_and_blit(
     move_target: Option<(i32, i32)>,
     char_panel_open: bool,
     quest_panel_open: bool,
+    spellbook_open: bool,
+    automap_open: bool,
 ) {
     // C++: DrawAndBlit() - renders the dungeon viewport then flips the back
     // buffer.
@@ -1313,6 +1402,32 @@ fn draw_and_blit(
     }
     if char_panel_open {
         draw_char_panel(window, game_state);
+    }
+
+    // Spell book (B) overlay panel. Modal like the char/quest panels (drawn
+    // on top of the world + HUD). Lists the player's known spells with mana
+    // costs and highlights the readied spell; number keys 1-9 select.
+    if spellbook_open {
+        draw_spellbook_panel(window, game_state);
+    }
+
+    // Automap (A) overlay. Non-modal: drawn in the upper-right as a bordered,
+    // semi-transparent thumbnail of the surrounding tiles (simplified iso
+    // grid) with the player, NPCs, and monsters marked. Mirrors C++
+    // `DrawAutomap`'s minimap layout. Drawn before the death overlay so the
+    // map remains visible (dimmed) behind the death screen.
+    if automap_open {
+        draw_automap_overlay(window, game_state);
+    }
+
+    // Shop panel overlay: drawn after the char/quest panels and before the
+    // death overlay. Opened by clicking a shop-capable NPC; closed by clicking
+    // CLOSE or pressing ESC. Renders a semi-transparent dim, the NPC's shop
+    // name, the BUY/SELL/REPAIR/CLOSE option buttons, and the item rows with
+    // prices. Reads its open state from `GameState::shop_open` so the data
+    // lives in one place.
+    if game_state.shop_open {
+        draw_shop_panel(window, game_state);
     }
 
     // Death overlay: drawn on the very top (over everything, including the
@@ -1645,6 +1760,673 @@ fn draw_quest_panel(window: &mut GameWindow, game_state: &GameState) {
     y += 6;
     small.render_text_centered(canvas, "PRESS Q TO CLOSE", panel_x + PANEL_W / 2, y, done);
 }
+
+// ============================================================================
+// Shop panel (Step 1: open on NPC click, list items, buy on click)
+// ============================================================================
+//
+// Geometry must be kept in sync between `shop_panel_geometry` (hit testing) and
+// `draw_shop_panel` (painting). The panel is a centred 420x340 stone rect with:
+//   * header (NPC shop name)
+//   * BUY / SELL / REPAIR / CLOSE option buttons row
+//   * 3-5 item rows (name + price), clickable
+//   * gold + hint footer
+// All coordinates are in logical 640x480 canvas space.
+
+/// Shop panel layout constants shared between drawing and hit-testing.
+const SHOP_PANEL_W: i32 = 420;
+const SHOP_PANEL_H: i32 = 340;
+/// Y offset of the first option button (BUY/SELL/REPAIR/CLOSE) from the panel
+/// top.
+const SHOP_OPTIONS_Y_OFF: i32 = 56;
+/// Height of each option button.
+const SHOP_OPTION_BTN_H: i32 = 22;
+/// Number of option buttons across the panel.
+const SHOP_NUM_OPTIONS: i32 = 4;
+/// Y offset of the first item row from the panel top.
+const SHOP_ITEMS_Y_OFF: i32 = 100;
+/// Height of each item row (clickable + rendered).
+const SHOP_ITEM_ROW_H: i32 = 24;
+
+/// Layout of the shop panel: absolute (logical-canvas) rects for the option
+/// buttons (BUY/SELL/REPAIR/CLOSE in that order) and the item rows. Computed
+/// from `GameState::active_shop_inventory()` so the hit-test and draw paths
+/// share one source of truth. Returns `(panel_rect, option_rects, item_rects)`.
+///
+/// Pure (no `&mut self`); safe to call from both the event handler and the
+/// render path.
+fn shop_panel_geometry(game_state: &GameState) -> (Rect, Vec<Rect>, Vec<Rect>) {
+    let panel_x = (LOGICAL_WIDTH as i32 - SHOP_PANEL_W) / 2;
+    let panel_y = (LOGICAL_HEIGHT as i32 - SHOP_PANEL_H) / 2;
+    let panel = Rect::new(panel_x, panel_y, SHOP_PANEL_W as u32, SHOP_PANEL_H as u32);
+
+    // Option buttons: 4 buttons evenly spaced across the panel width with 8px
+    // side padding and 6px gutters.
+    let btn_w = (SHOP_PANEL_W - 16 - (SHOP_NUM_OPTIONS - 1) as i32 * 6) / SHOP_NUM_OPTIONS;
+    let mut options: Vec<Rect> = Vec::with_capacity(SHOP_NUM_OPTIONS as usize);
+    for i in 0..SHOP_NUM_OPTIONS {
+        let bx = panel_x + 8 + i as i32 * (btn_w + 6);
+        let by = panel_y + SHOP_OPTIONS_Y_OFF;
+        options.push(Rect::new(bx, by, btn_w as u32, SHOP_OPTION_BTN_H as u32));
+    }
+
+    // Item rows: one per active-shop inventory entry, each full-width-minus-
+    // padding.
+    let row_w = SHOP_PANEL_W - 24;
+    let mut items: Vec<Rect> = Vec::new();
+    let n = game_state.active_shop_inventory().len() as i32;
+    for i in 0..n {
+        let ry = panel_y + SHOP_ITEMS_Y_OFF + i * SHOP_ITEM_ROW_H;
+        items.push(Rect::new(panel_x + 12, ry, row_w as u32, SHOP_ITEM_ROW_H as u32));
+    }
+
+    (panel, options, items)
+}
+
+/// Handle a left-click at `(mx, my)` while the shop panel is open.
+///
+/// Hit-tests against the layout from [`shop_panel_geometry`]:
+///   * CLOSE button (index 3) closes the shop.
+///   * BUY/SELL/REPAIR buttons are no-ops for now (logged); the demo only wires
+///     the buy path via item-row clicks. (Buying is exercised by clicking an
+///     item row below the buttons.)
+///   * An item row calls [`GameState::buy_shop_item`] for that index, logging
+///     the result. Gold is deducted on success.
+///
+/// Clicks outside any button/row are ignored (the panel stays open). Pure
+/// geometry check + mutation of `game_state` only; no rendering.
+fn handle_shop_panel_click(game_state: &mut GameState, mx: i32, my: i32) {
+    let (_panel, options, items) = shop_panel_geometry(game_state);
+
+    // CLOSE button is always the 4th option.
+    if let Some(close_rect) = options.get(3) {
+        if point_in_rect(mx, my, *close_rect) {
+            println!("[Shop] CLOSE clicked - closing shop");
+            game_state.close_shop();
+            return;
+        }
+    }
+    // BUY/SELL/REPAIR buttons (0..3) are placeholders for the demo: just log.
+    for (i, rect) in options.iter().enumerate() {
+        if i == 3 {
+            break; // handled above
+        }
+        if point_in_rect(mx, my, *rect) {
+            println!("[Shop] option {} clicked (not wired in demo)", i);
+            return;
+        }
+    }
+
+    // Item rows -> attempt purchase.
+    for (i, rect) in items.iter().enumerate() {
+        if point_in_rect(mx, my, *rect) {
+            match game_state.buy_shop_item(i) {
+                Ok((name, price)) => {
+                    println!(
+                        "[Shop] bought '{}' for {} gold ({} gold left)",
+                        name, price, game_state.player._p_gold
+                    );
+                }
+                Err(reason) => {
+                    println!("[Shop] buy failed: {}", reason);
+                }
+            }
+            return;
+        }
+    }
+}
+
+/// True when the point `(x, y)` lies inside `rect`. Uses SDL2's exclusive-
+/// bound semantics (`right = x + w`, `bottom = y + h`), so a rect of
+/// `Rect::new(10, 20, 30, 40)` covers pixel x in [10, 40) and y in [20, 60).
+fn point_in_rect(x: i32, y: i32, rect: Rect) -> bool {
+    x >= rect.left() && x < rect.right() && y >= rect.top() && y < rect.bottom()
+}
+
+/// Draw the shop panel overlay.
+///
+/// Paints a semi-transparent full-screen dim, then a bordered 420x340 stone
+/// panel showing:
+///   * the NPC's shop name (header),
+///   * a row of BUY / SELL / REPAIR / CLOSE buttons,
+///   * the active shop's inventory as clickable rows (name left, price right),
+///   * the player's current gold and a "click CLOSE or ESC to leave" hint.
+///
+/// All values are read straight from `GameState`; nothing is mutated. The
+/// geometry matches [`shop_panel_geometry`] so click hit-testing lands on the
+/// painted rows. Procedural canvas + `PixelFont` (no CEL art), matching the
+/// char/quest panels.
+fn draw_shop_panel(window: &mut GameWindow, game_state: &GameState) {
+    let canvas = window.canvas_mut();
+
+    // ---- Full-screen dim ----
+    canvas.set_draw_color(sdl2::pixels::Color::RGBA(0, 0, 0, 150));
+    let _ = canvas.fill_rect(Rect::new(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT));
+
+    let (panel, _options, _items) = shop_panel_geometry(game_state);
+    let panel_x = panel.x();
+    let panel_y = panel.y();
+
+    // ---- Panel frame ----
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(20, 16, 12));
+    let _ = canvas.fill_rect(Rect::new(
+        panel_x - 2,
+        panel_y - 2,
+        (SHOP_PANEL_W + 4) as u32,
+        (SHOP_PANEL_H + 4) as u32,
+    ));
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(58, 46, 34));
+    let _ = canvas.fill_rect(panel);
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(140, 116, 84));
+    let _ = canvas.draw_rect(panel);
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(96, 78, 56));
+    let _ = canvas.draw_rect(Rect::new(
+        panel_x + 1,
+        panel_y + 1,
+        (SHOP_PANEL_W - 2) as u32,
+        (SHOP_PANEL_H - 2) as u32,
+    ));
+
+    let font = crate::engine::font::PixelFont::new(2);
+    let title_font = crate::engine::font::PixelFont::new(2);
+    let small = crate::engine::font::PixelFont::new(1);
+
+    let hi = sdl2::pixels::Color::RGB(255, 240, 160);
+    let txt = sdl2::pixels::Color::RGB(240, 230, 200);
+    let label = sdl2::pixels::Color::RGB(200, 188, 150);
+    let dim = sdl2::pixels::Color::RGB(150, 138, 110);
+    let gold = sdl2::pixels::Color::RGB(255, 215, 0);
+    let btn_txt = sdl2::pixels::Color::RGB(230, 220, 190);
+
+    // ---- Header: NPC shop name ----
+    let npc_kind = game_state.active_shop_npc.unwrap_or(255);
+    let shop_name = GameState::shop_name_for_npc(npc_kind);
+    let mut y = panel_y + 12;
+    title_font.render_text_centered(canvas, shop_name, panel_x + SHOP_PANEL_W / 2, y, hi);
+    y += title_font.line_height() + 6;
+
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(96, 78, 56));
+    let _ = canvas.draw_line((panel_x + 12, y), (panel_x + SHOP_PANEL_W - 12, y));
+    y += 6;
+
+    // ---- Option buttons row (BUY / SELL / REPAIR / CLOSE) ----
+    let btn_w = (SHOP_PANEL_W - 16 - (SHOP_NUM_OPTIONS - 1) as i32 * 6) / SHOP_NUM_OPTIONS;
+    let btn_labels = ["BUY", "SELL", "REPAIR", "CLOSE"];
+    for (i, label_str) in btn_labels.iter().enumerate() {
+        let bx = panel_x + 8 + i as i32 * (btn_w + 6);
+        let by = panel_y + SHOP_OPTIONS_Y_OFF;
+        // CLOSE button gets a brighter outline so the exit affordance is clear.
+        let is_close = *label_str == "CLOSE";
+        canvas.set_draw_color(if is_close {
+            sdl2::pixels::Color::RGB(110, 90, 60)
+        } else {
+            sdl2::pixels::Color::RGB(70, 56, 40)
+        });
+        let _ = canvas.fill_rect(Rect::new(bx, by, btn_w as u32, SHOP_OPTION_BTN_H as u32));
+        canvas.set_draw_color(if is_close {
+            sdl2::pixels::Color::RGB(200, 170, 110)
+        } else {
+            sdl2::pixels::Color::RGB(130, 108, 78)
+        });
+        let _ = canvas.draw_rect(Rect::new(bx, by, btn_w as u32, SHOP_OPTION_BTN_H as u32));
+        font.render_text_centered(
+            canvas,
+            label_str,
+            bx + btn_w / 2,
+            by + (SHOP_OPTION_BTN_H - font.line_height()) / 2,
+            btn_txt,
+        );
+    }
+
+    // ---- Items list ----
+    let mut iy = panel_y + SHOP_ITEMS_Y_OFF - 4;
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(96, 78, 56));
+    let _ = canvas.draw_line((panel_x + 12, iy), (panel_x + SHOP_PANEL_W - 12, iy));
+    iy += 6;
+    small.render_text(canvas, "ITEMS FOR SALE", panel_x + 14, iy, label);
+    iy += small.line_height() + 4;
+
+    let inventory = game_state.active_shop_inventory();
+    if inventory.is_empty() {
+        // No shop or gossip-only NPC: show a placeholder.
+        small.render_text(canvas, "(This NPC has nothing for sale.)", panel_x + 14, iy, dim);
+        iy += small.line_height() + 4;
+    } else {
+        for (name, price) in &inventory {
+            // Row background (subtle shade so rows read as clickable). Faint
+            // enough that text stays legible.
+            canvas.set_draw_color(sdl2::pixels::Color::RGB(48, 38, 28));
+            let _ = canvas.fill_rect(Rect::new(
+                panel_x + 12,
+                iy - 2,
+                (SHOP_PANEL_W - 24) as u32,
+                (SHOP_ITEM_ROW_H - 2) as u32,
+            ));
+            // Item name (left).
+            font.render_text(canvas, name, panel_x + 18, iy, txt);
+            // Price (right-aligned). Render "N gold" right-aligned to the panel.
+            let price_str = format!("{} gold", price);
+            let pw = font.text_width(&price_str);
+            let affordable = game_state.player._p_gold >= *price;
+            let price_col = if affordable { gold } else { dim };
+            font.render_text(
+                canvas,
+                &price_str,
+                panel_x + SHOP_PANEL_W - 18 - pw,
+                iy,
+                price_col,
+            );
+            iy += SHOP_ITEM_ROW_H;
+        }
+    }
+
+    // ---- Footer: gold + hint ----
+    let footer_y = panel_y + SHOP_PANEL_H - 38;
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(96, 78, 56));
+    let _ = canvas.draw_line((panel_x + 12, footer_y), (panel_x + SHOP_PANEL_W - 12, footer_y));
+    let mut fy = footer_y + 6;
+    font.render_text(
+        canvas,
+        &format!("YOUR GOLD: {}", game_state.player._p_gold),
+        panel_x + 14,
+        fy,
+        gold,
+    );
+    fy += font.line_height() + 2;
+    small.render_text_centered(
+        canvas,
+        "CLICK AN ITEM TO BUY  -  CLOSE OR ESC TO LEAVE",
+        panel_x + SHOP_PANEL_W / 2,
+        fy,
+        dim,
+    );
+}
+
+
+//------------------------------------------------------------------------------
+// Spell Book panel (B key) + Automap (A key)
+//------------------------------------------------------------------------------
+
+/// Convert a digit Keycode (1-9) into a 0-based list index for the spell book.
+/// Returns `None` for non-digit keys. Used by `handle_event` so the number keys
+/// select a spell from the displayed list (mirrors C++ `PressSpellKey`).
+fn spell_selection_index(k: Keycode) -> Option<usize> {
+    match k {
+        Keycode::Num1 | Keycode::Kp1 => Some(0),
+        Keycode::Num2 | Keycode::Kp2 => Some(1),
+        Keycode::Num3 | Keycode::Kp3 => Some(2),
+        Keycode::Num4 | Keycode::Kp4 => Some(3),
+        Keycode::Num5 | Keycode::Kp5 => Some(4),
+        Keycode::Num6 | Keycode::Kp6 => Some(5),
+        Keycode::Num7 | Keycode::Kp7 => Some(6),
+        Keycode::Num8 | Keycode::Kp8 => Some(7),
+        Keycode::Num9 | Keycode::Kp9 => Some(8),
+        _ => None,
+    }
+}
+
+/// Build the ordered list of spells shown in the spell book.
+///
+/// The player's memorised/known spells come from two sources:
+///   * `player._p_mem_spells` — the classic 64-bit bitmask of memorised spells
+///     (`_pMemSpells` in C++). Bit `i` (0-indexed) corresponds to the i-th
+///     spell in canonical order.
+///   * `player._p_spl_lvl[]` — per-spell level (non-zero ⇒ the spell has been
+///     learnt from a book). This is the more reliable source in the port since
+///     the bitmask bit-ordering differs between `player_exact::SpellId`
+///     (Firebolt=0) and `spelldat::SpellID` (Firebolt=1).
+///
+/// The spell is included if *either* the bitmask has its bit set *or* the
+/// spell level is ≥ 1. Firebolt is always offered as the hero's starting spell
+/// (C++ gives every class Firebolt at level 0). The result is in canonical
+/// Diablo spell order (Firebolt, Healing, Lightning, ...) with the mana cost
+/// pulled from `spelldat::SPELLS_DATA` next to each entry.
+///
+/// **Index mapping note:** `player_exact::SpellId` uses Firebolt=0, while
+/// `spelldat::SpellID` uses Firebolt=1 (Null=0). We index `_p_spl_lvl` and the
+/// bitmask with the *player_exact* discriminant (so Firebolt is slot 0), then
+/// translate to the spelldat table by adding 1 when looking up the name/cost.
+fn known_spells_for_book(player: &Player) -> Vec<(crate::game::player_exact::SpellId, u8)> {
+    use crate::game::player_exact::SpellId as PId;
+    // Canonical order of Diablo (non-Hellfire) spells as the book presents
+    // them. Indices match `player_exact::SpellId` discriminants *and* the
+    // `_p_spl_lvl` array slots.
+    const BOOK_SPELLS: [PId; 9] = [
+        PId::Firebolt,
+        PId::Healing,
+        PId::Lightning,
+        PId::Flash,
+        PId::FireWall,
+        PId::TownPortal,
+        PId::StoneCurse,
+        PId::Fireball,
+        PId::ChargedBolt,
+    ];
+
+    let mut out: Vec<(PId, u8)> = Vec::new();
+    for &spell in BOOK_SPELLS.iter() {
+        let idx = spell as usize; // player_exact discriminant (Firebolt = 0)
+        let bit_set = (player._p_mem_spells >> idx) & 1 == 1;
+        let lvl_known = idx < player._p_spl_lvl.len() && player._p_spl_lvl[idx] >= 1;
+        // Firebolt is always available (starting spell for every class).
+        let always = spell == PId::Firebolt;
+        if bit_set || lvl_known || always {
+            // spelldat uses SpellID with Firebolt=1 (Null=0), so the data slot
+            // is `player_exact discriminant + 1`.
+            let data_idx = idx + 1;
+            let mana = if data_idx < crate::game::spelldat::SPELLS_DATA.len() {
+                crate::game::spelldat::SPELLS_DATA[data_idx].mana_cost
+            } else {
+                0
+            };
+            out.push((spell, mana));
+        }
+    }
+    out
+}
+
+/// Spell book overlay (B key, C++ `DrawSpellBook`).
+///
+/// Renders a modal full-screen dim + a right-side panel listing the hero's
+/// known spells with their mana cost. The currently readied spell
+/// (`player._p_r_spell`) is highlighted. A leading index (1-9) is shown next
+/// to each row so the player knows which number key selects it; pressing that
+/// key in `handle_event` sets `_p_r_spell` directly.
+fn draw_spellbook_panel(window: &mut GameWindow, game_state: &GameState) {
+    use crate::game::player_exact::SpellId as PId;
+
+    let canvas = window.canvas_mut();
+    let player = &game_state.player;
+
+    // ---- Full-screen dim ----
+    canvas.set_draw_color(sdl2::pixels::Color::RGBA(0, 0, 0, 150));
+    let _ = canvas.fill_rect(Rect::new(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT));
+
+    // ---- Panel frame (right-side, 300x430) ----
+    const PANEL_X: i32 = 324;
+    const PANEL_Y: i32 = 20;
+    const PANEL_W: i32 = 300;
+    const PANEL_H: i32 = 430;
+
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(20, 16, 12));
+    let _ = canvas.fill_rect(Rect::new(PANEL_X - 2, PANEL_Y - 2, (PANEL_W + 4) as u32, (PANEL_H + 4) as u32));
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(58, 46, 34));
+    let _ = canvas.fill_rect(Rect::new(PANEL_X, PANEL_Y, PANEL_W as u32, PANEL_H as u32));
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(140, 116, 84));
+    let _ = canvas.draw_rect(Rect::new(PANEL_X, PANEL_Y, PANEL_W as u32, PANEL_H as u32));
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(96, 78, 56));
+    let _ = canvas.draw_rect(Rect::new(PANEL_X + 1, PANEL_Y + 1, (PANEL_W - 2) as u32, (PANEL_H - 2) as u32));
+
+    let font = crate::engine::font::PixelFont::new(2);
+    let title_font = crate::engine::font::PixelFont::new(2);
+    let small = crate::engine::font::PixelFont::new(1);
+
+    let txt = sdl2::pixels::Color::RGB(240, 230, 200);
+    let label = sdl2::pixels::Color::RGB(200, 188, 150);
+    let dim = sdl2::pixels::Color::RGB(150, 138, 110);
+    let hi = sdl2::pixels::Color::RGB(255, 240, 160);
+    let sel_bg = sdl2::pixels::Color::RGBA(120, 100, 40, 200);
+
+    let mut y = PANEL_Y + 10;
+
+    // Title.
+    title_font.render_text_centered(canvas, "SPELL BOOK", PANEL_X + PANEL_W / 2, y, hi);
+    y += title_font.line_height() + 4;
+
+    small.render_text_centered(
+        canvas,
+        "PRESS 1-9 TO READY A SPELL",
+        PANEL_X + PANEL_W / 2,
+        y,
+        dim,
+    );
+    y += small.line_height() + 8;
+
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(96, 78, 56));
+    let _ = canvas.draw_line((PANEL_X + 10, y), (PANEL_X + PANEL_W - 10, y));
+    y += 6;
+
+    // Mana available (display value = 64x >> 6).
+    let mp_cur = (player._p_mana >> 6).max(0);
+    let mp_max = player._p_max_mana >> 6;
+    font.render_text(canvas, "MANA", PANEL_X + 14, y, label);
+    font.render_text(
+        canvas,
+        &format!("{}/{}", mp_cur, mp_max),
+        PANEL_X + 150,
+        y,
+        txt,
+    );
+    y += font.line_height() + 8;
+
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(96, 78, 56));
+    let _ = canvas.draw_line((PANEL_X + 10, y), (PANEL_X + PANEL_W - 10, y));
+    y += 6;
+
+    // Column headers.
+    small.render_text(canvas, "# SPELL        MANA", PANEL_X + 14, y, dim);
+    y += small.line_height() + 4;
+
+    let known = known_spells_for_book(player);
+    let readied = player._p_r_spell;
+
+    if known.is_empty() {
+        small.render_text_centered(canvas, "NO SPELLS KNOWN", PANEL_X + PANEL_W / 2, y, dim);
+    }
+
+    for (i, (spell, mana)) in known.iter().enumerate() {
+        // Only the first 9 rows get a hotkey (1-9).
+        let hotkey = if i < 9 { format!("{}", i + 1) } else { String::new() };
+
+        let is_sel = *spell == readied;
+        // Highlight bar for the readied spell.
+        if is_sel {
+            canvas.set_draw_color(sel_bg);
+            let _ = canvas.fill_rect(Rect::new(PANEL_X + 8, y - 2, (PANEL_W - 16) as u32, (font.line_height() + 4) as u32));
+        }
+
+        let name = spell_display_name(*spell);
+        let row_colour = if is_sel { hi } else { txt };
+
+        // "1 Firebolt     6"
+        let prefix = format!("{:<2}", hotkey);
+        font.render_text(canvas, &prefix, PANEL_X + 14, y, label);
+        font.render_text(canvas, name, PANEL_X + 36, y, row_colour);
+        let mana_str = format!("{}", mana);
+        font.render_text(
+            canvas,
+            &mana_str,
+            PANEL_X + PANEL_W - 14 - font.text_width(&mana_str),
+            y,
+            row_colour,
+        );
+
+        y += font.line_height() + 4;
+    }
+
+    // Footer.
+    y = PANEL_Y + PANEL_H - 28;
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(96, 78, 56));
+    let _ = canvas.draw_line((PANEL_X + 10, y), (PANEL_X + PANEL_W - 10, y));
+    y += 6;
+    small.render_text_centered(canvas, "PRESS B TO CLOSE", PANEL_X + PANEL_W / 2, y, dim);
+
+    let _ = PId::Invalid; // silence unused-import warning if SpellId unused here
+}
+
+/// Human-readable name for a `player_exact::SpellId`. Uses the spelldat table
+/// when possible (canonical Blizzard spelling) and falls back to a debug name
+/// derived from the discriminant.
+fn spell_display_name(spell: crate::game::player_exact::SpellId) -> &'static str {
+    use crate::game::player_exact::SpellId as PId;
+    // spelldat index = player_exact discriminant + 1 (Null occupies slot 0).
+    let idx = (spell as i32 + 1) as usize;
+    if idx < crate::game::spelldat::SPELLS_DATA.len() {
+        let name = crate::game::spelldat::SPELLS_DATA[idx].name;
+        if !name.is_empty() {
+            return name;
+        }
+    }
+    // Fallback debug names (shouldn't normally be hit).
+    match spell {
+        PId::Firebolt => "Firebolt",
+        PId::Healing => "Healing",
+        PId::Lightning => "Lightning",
+        PId::Flash => "Flash",
+        PId::FireWall => "Fire Wall",
+        PId::TownPortal => "Town Portal",
+        PId::StoneCurse => "Stone Curse",
+        PId::Fireball => "Fireball",
+        PId::ChargedBolt => "Charged Bolt",
+        _ => "???",
+    }
+}
+
+/// Automap overlay (A key, C++ `DrawAutomap`).
+///
+/// Draws a bordered, semi-transparent thumbnail of the tiles around the camera
+/// in the upper-right corner of the screen. Each world tile maps to a small
+/// point in a simplified isometric grid; solid tiles (walls / non-zero dPiece
+/// for the town, or non-floor for the dungeon) are drawn brighter so the level
+/// geometry reads at a glance. The player is a bright marker at the centre;
+/// town NPCs and dungeon monsters are coloured dots.
+///
+/// This is a deliberately simplified renderer: it does not replicate the C++
+/// wall-polygon geometry (which needs the full AutomapTileType table wired into
+/// the dungeon generator). Instead it classifies each visible tile as
+/// walkable / solid from the dPiece grid, which is enough to navigate.
+fn draw_automap_overlay(window: &mut GameWindow, game_state: &GameState) {
+    let canvas = window.canvas_mut();
+
+    // ---- Map geometry ----
+    // Thumbnail is a fixed-size box in the upper-right. The grid step is a
+    // small number of pixels per tile so a decent radius fits.
+    const MAP_W: i32 = 184;
+    const MAP_H: i32 = 150;
+    const MAP_PAD: i32 = 8;
+    let map_x = LOGICAL_WIDTH as i32 - MAP_W - MAP_PAD;
+    let map_y = MAP_PAD;
+    let map_cx = map_x + MAP_W / 2;
+    let map_cy = map_y + MAP_H / 2;
+
+    // Iso grid step: pixels per tile. dx/dy form the iso basis.
+    const STEP_X: i32 = 3; // (tile_x - tile_y) axis
+    const STEP_Y: i32 = 2; // (tile_x + tile_y) axis
+    const RADIUS: i32 = 26; // tiles from camera to each edge
+
+    // ---- Frame + translucent background ----
+    // Shadow + dim border, echoing C++ minimap frame.
+    canvas.set_draw_color(sdl2::pixels::Color::RGBA(0, 0, 0, 170));
+    let _ = canvas.fill_rect(Rect::new(map_x, map_y, MAP_W as u32, MAP_H as u32));
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(140, 116, 84));
+    let _ = canvas.draw_rect(Rect::new(map_x - 1, map_y - 1, (MAP_W + 2) as u32, (MAP_H + 2) as u32));
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(96, 78, 56));
+    let _ = canvas.draw_rect(Rect::new(map_x, map_y, MAP_W as u32, MAP_H as u32));
+
+    let cam_x = game_state.camera.tile_x;
+    let cam_y = game_state.camera.tile_y;
+
+    // Determine which tile source to read.
+    let dungeon = game_state.dungeon_layout.as_ref();
+    let town = game_state.town_layout.as_ref();
+    let in_dungeon = game_state.in_dungeon;
+
+    // Closure: is (wx, wy) a solid tile?
+    let tile_solid = |wx: i32, wy: i32| -> bool {
+        if in_dungeon {
+            if let Some(dl) = dungeon {
+                // Non-zero dPiece ⇒ wall/solid in the Cathedral grid; floor
+                // tiles were stamped with the floor mega so this is a coarse
+                // but useful wall/floor split. We additionally treat the
+                // explicitly-known floor_tiles set as walkable.
+                let v = dl.get(wx, wy);
+                if v == 0 {
+                    return false;
+                }
+                // floor_tiles is a Vec; membership check is O(n) but the list
+                // is small (a few hundred entries) and this runs once/frame.
+                !dl.floor_tiles.iter().any(|&(fx, fy)| fx == wx && fy == wy)
+            } else {
+                false
+            }
+        } else if let Some(tl) = town {
+            // Town: a non-zero dPiece is a placed tile (road/structure). We
+            // draw all placed tiles as "structure" dots and leave empty
+            // (dPiece == 0) tiles blank. This gives a readable town layout.
+            tl.get(wx, wy) != 0
+        } else {
+            false
+        }
+    };
+
+    // ---- Draw the tile grid ----
+    let wall_col = sdl2::pixels::Color::RGB(190, 170, 120);
+    let floor_col = sdl2::pixels::Color::RGB(70, 64, 48);
+
+    for dy in -RADIUS..=RADIUS {
+        for dx in -RADIUS..=RADIUS {
+            let wx = cam_x + dx;
+            let wy = cam_y + dy;
+            // Iso projection: screen offset from map centre.
+            let sx = map_cx + (dx - dy) * STEP_X;
+            let sy = map_cy + (dx + dy) * STEP_Y;
+            // Clip to the map box.
+            if sx < map_x + 1 || sx > map_x + MAP_W - 1 || sy < map_y + 1 || sy > map_y + MAP_H - 1 {
+                continue;
+            }
+            if tile_solid(wx, wy) {
+                canvas.set_draw_color(wall_col);
+            } else {
+                canvas.set_draw_color(floor_col);
+            }
+            let _ = canvas.draw_point(sdl2::rect::Point::new(sx, sy));
+        }
+    }
+
+    // ---- NPCs (town) as green dots ----
+    let npc_col = sdl2::pixels::Color::RGB(120, 230, 120);
+    if !in_dungeon {
+        for &(nx, ny, _name, _kind) in &game_state.towners {
+            let dx = nx - cam_x;
+            let dy = ny - cam_y;
+            let sx = map_cx + (dx - dy) * STEP_X;
+            let sy = map_cy + (dx + dy) * STEP_Y;
+            if sx >= map_x && sx < map_x + MAP_W && sy >= map_y && sy < map_y + MAP_H {
+                canvas.set_draw_color(npc_col);
+                let _ = canvas.draw_point(sdl2::rect::Point::new(sx, sy));
+            }
+        }
+    }
+
+    // ---- Monsters (dungeon) as red dots ----
+    let mon_col = sdl2::pixels::Color::RGB(240, 70, 60);
+    if in_dungeon {
+        for (_id, mx, my, _mt, _ai) in game_state.monster_manager.iter().map(|(id, m)| (id, m.x, m.y, m.monster_type, m.ai_state)) {
+            let dx = mx - cam_x;
+            let dy = my - cam_y;
+            let sx = map_cx + (dx - dy) * STEP_X;
+            let sy = map_cy + (dx + dy) * STEP_Y;
+            if sx >= map_x && sx < map_x + MAP_W && sy >= map_y && sy < map_y + MAP_H {
+                canvas.set_draw_color(mon_col);
+                let _ = canvas.draw_point(sdl2::rect::Point::new(sx, sy));
+            }
+        }
+    }
+
+    // ---- Player marker (bright) at the centre ----
+    let plr_col = sdl2::pixels::Color::RGB(255, 255, 255);
+    canvas.set_draw_color(plr_col);
+    // A small plus sign so the player is unmistakable.
+    for &(dx, dy) in &[(-2, 0), (-1, 0), (0, 0), (1, 0), (2, 0), (0, -2), (0, -1), (0, 1), (0, 2)] {
+        let _ = canvas.draw_point(sdl2::rect::Point::new(map_cx + dx, map_cy + dy));
+    }
+
+    // ---- Label ----
+    let small = crate::engine::font::PixelFont::new(1);
+    let label_col = sdl2::pixels::Color::RGB(240, 230, 200);
+    small.render_text(canvas, "AUTOMAP", map_x + 4, map_y + MAP_H + 2, label_col);
+}
+
 
 /// XP required to advance from the given level to the next, using the canonical
 /// Diablo 1 per-level experience table (a copy of `hud::XP_THRESHOLDS`, kept
@@ -3324,5 +4106,154 @@ mod tests {
             til: TilData { tiles: til_tiles },
             level_cel: vec![],
         }
+    }
+    // ========================================================================
+    // Shop panel click hit-testing tests (Step 1: geometry + buy path)
+    // ========================================================================
+
+    #[test]
+    fn test_point_in_rect_basic() {
+        // point_in_rect uses SDL2's exclusive-bound semantics:
+        // Rect::new(10, 20, 30, 40) covers pixel x in [10,40), y in [20,60).
+        let r = Rect::new(10, 20, 30, 40); // left=10,right=40,top=20,bottom=60
+        assert!(point_in_rect(10, 20, r), "top-left corner (inclusive lower bound)");
+        assert!(point_in_rect(39, 59, r), "last interior pixel (just inside upper bound)");
+        assert!(point_in_rect(25, 40, r), "interior point");
+        assert!(!point_in_rect(9, 40, r), "just left of rect");
+        assert!(!point_in_rect(40, 40, r), "right edge is exclusive");
+        assert!(!point_in_rect(25, 19, r), "just above rect");
+        assert!(!point_in_rect(25, 60, r), "bottom edge is exclusive");
+    }
+
+    /// Build a GameState with the shop open for `kind` and `gold` player gold.
+    fn gs_with_shop_open(kind: u8, gold: i32) -> GameState {
+        let player = crate::game::player_exact::Player::new();
+        let mut gs = GameState::new(player, true, 1);
+        gs.player._p_gold = gold;
+        gs.open_shop(kind);
+        gs
+    }
+
+    #[test]
+    fn test_shop_panel_geometry_is_centered() {
+        // The panel must be centred in the 640x480 logical canvas.
+        let gs = gs_with_shop_open(0, 1000);
+        let (panel, _opts, _items) = shop_panel_geometry(&gs);
+        let expected_x = (LOGICAL_WIDTH as i32 - SHOP_PANEL_W) / 2;
+        let expected_y = (LOGICAL_HEIGHT as i32 - SHOP_PANEL_H) / 2;
+        assert_eq!(panel.x(), expected_x);
+        assert_eq!(panel.y(), expected_y);
+        assert_eq!(panel.width(), SHOP_PANEL_W as u32);
+        assert_eq!(panel.height(), SHOP_PANEL_H as u32);
+    }
+
+    #[test]
+    fn test_shop_panel_geometry_has_four_option_buttons() {
+        // BUY / SELL / REPAIR / CLOSE → exactly 4 option rects, equal widths.
+        let gs = gs_with_shop_open(0, 1000);
+        let (_panel, opts, _items) = shop_panel_geometry(&gs);
+        assert_eq!(opts.len(), SHOP_NUM_OPTIONS as usize);
+        let w0 = opts[0].width();
+        assert!(opts.iter().all(|r| r.width() == w0), "option buttons equal width");
+    }
+
+    #[test]
+    fn test_shop_panel_geometry_item_rows_match_inventory_size() {
+        // The number of item rows must equal the active shop's inventory count.
+        for kind in [0u8, 1, 6, 8] {
+            let gs = gs_with_shop_open(kind, 10_000);
+            let (_panel, _opts, items) = shop_panel_geometry(&gs);
+            let expected = gs.active_shop_inventory().len();
+            assert_eq!(items.len(), expected, "kind {} row count", kind);
+            assert!(expected >= 1, "kind {} has at least one item", kind);
+        }
+    }
+
+    #[test]
+    fn test_close_button_click_closes_shop() {
+        // Clicking the CLOSE button (4th option) must close the shop.
+        let mut gs = gs_with_shop_open(0, 1000);
+        let (_panel, opts, _items) = shop_panel_geometry(&gs);
+        let close = opts[3];
+        let cx = close.x() + close.width() as i32 / 2;
+        let cy = close.y() + close.height() as i32 / 2;
+        handle_shop_panel_click(&mut gs, cx, cy);
+        assert!(!gs.shop_open, "CLOSE should close the shop");
+        assert!(gs.active_shop_npc.is_none());
+    }
+
+    #[test]
+    fn test_item_row_click_buys_item() {
+        // Clicking the centre of the first item row should buy that item,
+        // deducting its price from the player's gold.
+        let price;
+        {
+            let gs = gs_with_shop_open(0, 10_000);
+            price = gs.active_shop_inventory()[0].1;
+        }
+        let mut gs = gs_with_shop_open(0, 10_000);
+        let (_panel, _opts, items) = shop_panel_geometry(&gs);
+        let row = items[0];
+        let rx = row.x() + 5;
+        let ry = row.y() + row.height() as i32 / 2;
+        let gold_before = gs.player._p_gold;
+        handle_shop_panel_click(&mut gs, rx, ry);
+        assert_eq!(gs.player._p_gold, gold_before - price, "gold deducted by item price");
+        // Shop stays open after a buy (player can buy more).
+        assert!(gs.shop_open, "shop stays open after a buy");
+    }
+
+    #[test]
+    fn test_item_row_click_no_gold_leaves_gold_unchanged() {
+        // With zero gold, clicking an item row must fail to buy and leave gold
+        // at 0 (and the shop open).
+        let mut gs = gs_with_shop_open(0, 0);
+        let (_panel, _opts, items) = shop_panel_geometry(&gs);
+        let row = items[0];
+        let rx = row.x() + 5;
+        let ry = row.y() + row.height() as i32 / 2;
+        handle_shop_panel_click(&mut gs, rx, ry);
+        assert_eq!(gs.player._p_gold, 0, "no gold deducted on failed buy");
+        assert!(gs.shop_open, "shop stays open on failed buy");
+    }
+
+    #[test]
+    fn test_click_outside_buttons_and_rows_is_ignored() {
+        // A click well inside the panel but not on any button/row must be
+        // ignored: shop stays open and gold is unchanged.
+        let mut gs = gs_with_shop_open(0, 1000);
+        let (panel, _opts, _items) = shop_panel_geometry(&gs);
+        // Click in the header area (top of panel, above the option buttons).
+        let header_x = panel.x() + SHOP_PANEL_W / 2;
+        let header_y = panel.y() + 20;
+        let gold_before = gs.player._p_gold;
+        handle_shop_panel_click(&mut gs, header_x, header_y);
+        assert!(gs.shop_open, "stray click keeps shop open");
+        assert_eq!(gs.player._p_gold, gold_before, "stray click changes nothing");
+    }
+
+    #[test]
+    fn test_each_shopkeeper_offers_three_to_five_items() {
+        // The task asks for 3-5 example items per shop. The three full
+        // shopkeepers (Griswold=0, Pepin=1, Adria=6) must stay in that range so
+        // the panel never looks empty or overflows. Wirt (8) is canonically a
+        // single-item premium vendor, so he's checked separately (exactly 1).
+        for kind in [0u8, 1, 6] {
+            let gs = gs_with_shop_open(kind, 10_000);
+            let n = gs.active_shop_inventory().len();
+            assert!(
+                (3..=5).contains(&n),
+                "kind {} should offer 3-5 items, got {}",
+                kind,
+                n
+            );
+        }
+        // Wirt: exactly one premium item (matches C++ `BoyItem`).
+        let wirt = gs_with_shop_open(8, 10_000);
+        assert_eq!(
+            wirt.active_shop_inventory().len(),
+            1,
+            "Wirt offers exactly one premium item"
+        );
     }
 }

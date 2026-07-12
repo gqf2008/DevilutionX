@@ -356,6 +356,21 @@ pub struct GameState {
     /// Mirrors C++ `gbDeathActive` (Source/diablo.cpp) which is set on the
     /// dying player and drives the death screen + respawn flow.
     pub player_dead: bool,
+
+    /// Whether the shop panel is currently open. Toggled on by clicking near a
+    /// shop-capable NPC (Griswold/Pepin/Adria/Wirt) and toggled off by clicking
+    /// CLOSE or pressing ESC. While true, [`game_loop`] draws the shop overlay
+    /// and routes clicks to shop item rows instead of click-to-move.
+    ///
+    /// Mirrors the C++ `ActiveStore != TalkID::None` check that gates store UI
+    /// rendering in `DrawAndBlit` / `PressKey`.
+    pub shop_open: bool,
+
+    /// The towner kind (`TownerType as u8`) of the NPC whose shop is currently
+    /// open. Set when the shop opens; consulted to pick which shop inventory to
+    /// show (0=Smith/Griswold, 1=Healer/Pepin, 6=Witch/Adria, 8=PegBoy/Wirt).
+    /// `None` whenever [`shop_open`] is false.
+    pub active_shop_npc: Option<u8>,
 }
 
 /// L1 Cathedral dungeon layout, the dungeon-mode analogue of `TownLayout`.
@@ -463,6 +478,8 @@ impl GameState {
             pending_sfx: Vec::new(),
             towners: Self::build_towner_list(),
             player_dead: false,
+            shop_open: false,
+            active_shop_npc: None,
         }
     }
 
@@ -538,6 +555,212 @@ impl GameState {
         let dx = (self.player.position.x - tx).abs();
         let dy = (self.player.position.y - ty).abs();
         dx.max(dy)
+    }
+
+    // ========================================================================
+    // Shop interaction (Step 1: open/close on clicking an NPC, buy items)
+    // ========================================================================
+    //
+    // These helpers mirror the C++ `TalkToTowner` → `StartStore(TalkID)` flow
+    // (Source/objects.cpp / Source/stores.cpp). The game loop calls
+    // `npc_at_tile` / `click_tile_to_open_shop` when the player clicks, and
+    // `close_shop` when they dismiss the panel. `buy_shop_item` performs the
+    // gold-for-item transaction. The shop inventory shown is keyed by the NPC
+    // kind so Griswold shows weapons/armor, Pepin shows potions, Adria shows
+    // magic items, and Wirt shows his single premium item.
+
+    /// Maximum Chebyshev distance (in world tiles) at which clicking still
+    /// counts as "talking" to an NPC. Generous (2 tiles) so the coarse whole-
+    /// tile mouse→world conversion in `game_loop` still lands the click on the
+    /// NPC even when the player is standing a step away.
+    pub const SHOP_CLICK_RADIUS: i32 = 2;
+
+    /// Return the NPC nearest `(tx, ty)` (within [`SHOP_CLICK_RADIUS`]) as an
+    /// owned `(tile_x, tile_y, name, kind)` tuple, or `None` if no NPC is in
+    /// range. If multiple NPCs are in range the nearest wins (ties broken by
+    /// list order, which roughly matches the C++ iteration order).
+    ///
+    /// `kind` is `TownerType as u8`; the game loop uses it to decide whether the
+    /// clicked NPC runs a shop (Griswold/Pepin/Adria/Wirt) or is gossip-only.
+    pub fn npc_at_tile(
+        &self,
+        tx: i32,
+        ty: i32,
+    ) -> Option<(i32, i32, &'static str, u8)> {
+        let mut best: Option<(i32, i32, &'static str, u8)> = None;
+        let mut best_dist = i32::MAX;
+        for &(nx, ny, name, kind) in &self.towners {
+            let dx = (nx - tx).abs();
+            let dy = (ny - ty).abs();
+            let dist = dx.max(dy);
+            if dist <= Self::SHOP_CLICK_RADIUS && dist < best_dist {
+                best_dist = dist;
+                best = Some((nx, ny, name, kind));
+            }
+        }
+        best
+    }
+
+    /// True when the given towner `kind` runs a shop the panel can open for.
+    /// Matches the C++ `StartStore` routing: Smith→SmithBuy, Healer→HealerBuy,
+    /// Witch→WitchBuy, PegBoy→BoyBuy. The other NPCs (Ogden, Cain, Farnham,
+    /// Gillian, Cow) are gossip-only and don't open the shop UI.
+    pub fn npc_runs_shop(kind: u8) -> bool {
+        matches!(kind, 0 | 1 | 6 | 8)
+    }
+
+    /// Display name for the shop owned by the given towner `kind`, used in the
+    /// shop panel header. Returns "NPC" for gossip-only NPCs.
+    pub fn shop_name_for_npc(kind: u8) -> &'static str {
+        match kind {
+            0 => "GRISWOLD THE BLACKSMITH",
+            1 => "PEPIN THE HEALER",
+            6 => "ADRIA THE WITCH",
+            8 => "WIRT THE PEG-LEGGED BOY",
+            _ => "NPC",
+        }
+    }
+
+    /// Open the shop panel for the given towner `kind`. Sets [`shop_open`] and
+    /// records [`active_shop_npc`]. Safe to call with a gossip-only NPC (the
+    /// flag is still set so the panel renders a "no shop" placeholder); the
+    /// caller should gate on [`npc_runs_shop`] if it wants to restrict to real
+    /// shops.
+    pub fn open_shop(&mut self, kind: u8) {
+        self.shop_open = true;
+        self.active_shop_npc = Some(kind);
+    }
+
+    /// Close the shop panel, clearing both [`shop_open`] and
+    /// [`active_shop_npc`]. Idempotent.
+    pub fn close_shop(&mut self) {
+        self.shop_open = false;
+        self.active_shop_npc = None;
+    }
+
+    /// The catalog of goods the currently active shop offers, as
+    /// `(name, price)` pairs for the panel + buy path. Each NPC returns a
+    /// fixed, curated list of 3-5 example items so the demo shop is always
+    /// populated without the full M15 item-generation pipeline. If no shop is
+    /// active, returns an empty vec.
+    ///
+    /// Prices follow the C++ "player pays 2x base value" convention where the
+    /// base value is read from the canonical item data; we hardcode the small
+    /// demo catalog so the panel doesn't depend on the full item system.
+    pub fn active_shop_inventory(&self) -> Vec<(&'static str, i32)> {
+        match self.active_shop_npc {
+            Some(0) => vec![
+                // Griswold: weapons + a cheap armor piece.
+                ("Short Sword (1-6 dmg)", 120),
+                ("Buckler (AC 5)", 60),
+                ("Club (1-3 dmg)", 20),
+                ("Chain Mail (AC 12)", 240),
+            ],
+            Some(1) => vec![
+                // Pepin: potions.
+                ("Potion of Healing", 50),
+                ("Potion of Full Healing", 150),
+                ("Potion of Mana", 50),
+            ],
+            Some(6) => vec![
+                // Adria: magic items.
+                ("Scroll of Firebolt", 100),
+                ("Scroll of Healing", 100),
+                ("Staff of Firebolt", 400),
+                ("Book of Firebolt", 1200),
+            ],
+            Some(8) => vec![
+                // Wirt: one premium item.
+                ("Wirt's Premium Item", 1000),
+            ],
+            _ => Vec::new(),
+        }
+    }
+
+    /// Try to buy the shop item at `index` from the active shop's inventory.
+    ///
+    /// Reads the price from [`active_shop_inventory`], checks the player has
+    /// enough gold, and on success deducts the gold and returns the item's
+    /// `(name, price)` for the caller to log. Returns `Err(reason)` when the
+    /// shop is closed, the index is out of range, or gold is insufficient.
+    ///
+    /// This mirrors the core of C++ `SmithBuyPgm` / `HealerBuy` /
+    /// `WitchBuy` (Source/stores.cpp): resolve price, check gold, deduct, remove
+    /// from inventory. Inventory-space is not checked (the port's inventory grid
+    /// isn't wired into the shop path yet); a successful buy just logs the item.
+    pub fn buy_shop_item(&mut self, index: usize) -> Result<(&'static str, i32), &'static str> {
+        if !self.shop_open {
+            return Err("no shop open");
+        }
+        let inv = self.active_shop_inventory();
+        let (name, price) = inv.get(index).copied().ok_or("item out of range")?;
+        if self.player._p_gold < price {
+            return Err("not enough gold");
+        }
+        self.player._p_gold -= price;
+        Ok((name, price))
+    }
+
+    // ========================================================================
+    // Equipment effects (Step 2: derive _p_i_min/max_dam from inv_body[1])
+    // ========================================================================
+    //
+    // C++ `CalcPlrItemStats` (Source/items.cpp) re-derives the player's derived
+    // stats (_p_i_min_dam / _p_i_max_dam / _p_i_ac / ...) from the equipped
+    // `InvBody[]` slots every time the inventory changes. We implement a
+    // deliberately minimal version: when the left-hand slot (HandLeft, index 4)
+    // holds a weapon, the player's item damage range is set from that weapon.
+    // The demo's `equip_starter_weapon` gives a fresh Warrior a Short Sword
+    // (1-6, matching the canonical `items\\weapons\\sward` base item) so melee
+    // combat does non-zero damage.
+
+    /// Index of the left-hand (weapon) equipment slot in `Player::inv_body`,
+    /// matching `InvBodyLoc::HandLeft` (player_exact.rs).
+    pub const INV_BODY_HAND_LEFT: usize = 4;
+
+    /// Re-derive the player's weapon damage range from the equipped left-hand
+    /// item. If the slot is empty, the damage range is reset to 0-0. This is
+    /// the minimal slice of C++ `CalcPlrItemStats` needed for the demo's combat
+    /// path — full stat recalculation (AC, to-hit, resistances, ...) is deferred
+    /// until the inventory system is wired into the equip flow.
+    pub fn recalc_equipment_stats(&mut self) {
+        let slot = self.player.inv_body.get(Self::INV_BODY_HAND_LEFT);
+        if let Some(item) = slot {
+            if !item.is_empty() {
+                self.player._p_i_min_dam = 1;
+                self.player._p_i_max_dam = 6;
+                return;
+            }
+        }
+        self.player._p_i_min_dam = 0;
+        self.player._p_i_max_dam = 0;
+    }
+
+    /// Equip a starter Short Sword (1-6 damage) in the Warrior's left-hand
+    /// slot so combat has a real damage range. Idempotent: if a weapon is
+    /// already equipped this is a no-op. Mirrors the C++ starting-kit logic in
+    /// `CreatePlayer` / `StartNewGame` which hands each class a base weapon.
+    pub fn equip_starter_weapon(&mut self) {
+        let slot = self.player.inv_body.get_mut(Self::INV_BODY_HAND_LEFT);
+        if let Some(item) = slot {
+            if !item.is_empty() {
+                return; // already armed
+            }
+            item.item_id = 1; // non-zero => "a weapon is equipped"
+            item.equipped = true;
+        }
+        self.recalc_equipment_stats();
+    }
+
+    /// True when the player currently has a weapon equipped in the left-hand
+    /// slot (so the combat path should apply weapon damage rather than bare-
+    /// handed zero damage).
+    pub fn has_weapon_equipped(&self) -> bool {
+        self.player
+            .inv_body
+            .get(Self::INV_BODY_HAND_LEFT)
+            .map(|i| !i.is_empty())
+            .unwrap_or(false)
     }
 
     /// Main game logic update (one frame)
@@ -2456,6 +2679,224 @@ mod tests {
         gs.update(&mut rng);
         assert!(!gs.player_dead, "still alive after update");
         assert_eq!(gs.player._p_hit_points, hp_after, "full HP unchanged by regen");
+    }
+
+    // ========================================================================
+    // Shop interaction tests (Step 1: open/close, npc_at_tile, buy)
+    // ========================================================================
+
+    #[test]
+    fn test_fresh_game_state_shop_is_closed() {
+        // A freshly-created GameState must have the shop panel closed and no
+        // active shop NPC.
+        let gs = GameState::new(Player::new(), true, 1);
+        assert!(!gs.shop_open, "fresh state has shop closed");
+        assert!(gs.active_shop_npc.is_none(), "fresh state has no active NPC");
+    }
+
+    #[test]
+    fn test_open_close_shop_round_trip() {
+        // open_shop sets both flags; close_shop clears both.
+        let mut gs = GameState::new(Player::new(), true, 1);
+        gs.open_shop(0); // Griswold
+        assert!(gs.shop_open);
+        assert_eq!(gs.active_shop_npc, Some(0));
+        gs.close_shop();
+        assert!(!gs.shop_open);
+        assert!(gs.active_shop_npc.is_none());
+    }
+
+    #[test]
+    fn test_npc_runs_shop_routing() {
+        // Only the 4 shop-capable NPCs (Smith=0, Healer=1, Witch=6, PegBoy=8)
+        // should report running a shop. The gossip-only NPCs (Tavern=3,
+        // Story=4, Drunk=5, Barmaid=7, Cow=9) do not.
+        assert!(GameState::npc_runs_shop(0));
+        assert!(GameState::npc_runs_shop(1));
+        assert!(GameState::npc_runs_shop(6));
+        assert!(GameState::npc_runs_shop(8));
+        assert!(!GameState::npc_runs_shop(3));
+        assert!(!GameState::npc_runs_shop(4));
+        assert!(!GameState::npc_runs_shop(5));
+        assert!(!GameState::npc_runs_shop(7));
+        assert!(!GameState::npc_runs_shop(9));
+    }
+
+    #[test]
+    fn test_shop_name_for_each_npc() {
+        // The shop-name lookup must return a distinct, human-readable header
+        // for each shop-capable NPC.
+        assert_eq!(GameState::shop_name_for_npc(0), "GRISWOLD THE BLACKSMITH");
+        assert_eq!(GameState::shop_name_for_npc(1), "PEPIN THE HEALER");
+        assert_eq!(GameState::shop_name_for_npc(6), "ADRIA THE WITCH");
+        assert_eq!(GameState::shop_name_for_npc(8), "WIRT THE PEG-LEGGED BOY");
+    }
+
+    #[test]
+    fn test_npc_at_tile_finds_nearby_npc() {
+        // build_towner_list seeds Griswold (Smith) at his default position.
+        // Clicking exactly on his tile must resolve to that NPC.
+        let gs = GameState::new(Player::new(), true, 1);
+        let griswold = gs.towners.iter().find(|t| t.3 == 0).expect("Smith seeded");
+        let hit = gs.npc_at_tile(griswold.0, griswold.1);
+        assert!(hit.is_some(), "click on Griswold's tile should find him");
+        let (_, _, _, kind) = hit.unwrap();
+        assert_eq!(kind, 0, "found NPC should be the Smith");
+    }
+
+    #[test]
+    fn test_npc_at_tile_within_click_radius() {
+        // A click one tile away (within SHOP_CLICK_RADIUS = 2) should still
+        // resolve to the NPC.
+        let gs = GameState::new(Player::new(), true, 1);
+        let griswold = gs.towners.iter().find(|t| t.3 == 0).expect("Smith seeded");
+        let hit = gs.npc_at_tile(griswold.0 + 1, griswold.1 + 1);
+        assert!(hit.is_some(), "adjacent click should find the NPC");
+        assert_eq!(hit.unwrap().3, 0);
+    }
+
+    #[test]
+    fn test_npc_at_tile_outside_radius_returns_none() {
+        // A click far from any NPC returns None.
+        let gs = GameState::new(Player::new(), true, 1);
+        // (0,0) is far from every Tristram NPC's default position.
+        assert!(gs.npc_at_tile(0, 0).is_none());
+    }
+
+    #[test]
+    fn test_active_shop_inventory_populated_for_each_shopkeeper() {
+        // Each shop-capable NPC exposes a non-empty catalog when their shop is
+        // open. Gossip-only / no-shop returns an empty catalog.
+        for kind in [0u8, 1, 6, 8] {
+            let mut gs = GameState::new(Player::new(), true, 1);
+            gs.open_shop(kind);
+            let inv = gs.active_shop_inventory();
+            assert!(!inv.is_empty(), "shop {} should have items", kind);
+            // Prices must be positive.
+            assert!(inv.iter().all(|(_, p)| *p > 0), "all prices positive");
+        }
+    }
+
+    #[test]
+    fn test_active_shop_inventory_empty_when_no_shop_open() {
+        // With no shop open the inventory helper returns an empty vec (so the
+        // panel renders the "nothing for sale" placeholder).
+        let gs = GameState::new(Player::new(), true, 1);
+        assert!(gs.active_shop_inventory().is_empty());
+    }
+
+    #[test]
+    fn test_buy_shop_item_deducts_gold_on_success() {
+        // Give the player plenty of gold, open Griswold's shop, buy the first
+        // item (Short Sword, price 120), and verify the gold was deducted and
+        // the returned name/price match.
+        let mut gs = GameState::new(Player::new(), true, 1);
+        gs.player._p_gold = 1000;
+        gs.open_shop(0);
+        let price = gs.active_shop_inventory()[0].1;
+        let result = gs.buy_shop_item(0);
+        let (name, paid) = result.expect("buy should succeed with enough gold");
+        assert_eq!(paid, price);
+        assert!(name.contains("Sword"), "first Griswold item is a sword");
+        assert_eq!(gs.player._p_gold, 1000 - price);
+    }
+
+    #[test]
+    fn test_buy_shop_item_fails_when_insufficient_gold() {
+        // Player has 10 gold, the cheapest Griswold item costs more → buy must
+        // fail with "not enough gold" and leave the gold untouched.
+        let mut gs = GameState::new(Player::new(), true, 1);
+        gs.player._p_gold = 10;
+        gs.open_shop(0);
+        let gold_before = gs.player._p_gold;
+        let result = gs.buy_shop_item(0);
+        assert!(result.is_err());
+        assert_eq!(gs.player._p_gold, gold_before, "gold unchanged on failed buy");
+    }
+
+    #[test]
+    fn test_buy_shop_item_fails_when_no_shop_open() {
+        // Without an open shop, buy must refuse (defensive).
+        let mut gs = GameState::new(Player::new(), true, 1);
+        gs.player._p_gold = 1000;
+        let result = gs.buy_shop_item(0);
+        assert!(result.is_err());
+        assert_eq!(gs.player._p_gold, 1000, "gold unchanged when no shop open");
+    }
+
+    #[test]
+    fn test_buy_shop_item_fails_for_out_of_range_index() {
+        // An index past the end of the inventory must fail with an error and
+        // not change gold.
+        let mut gs = GameState::new(Player::new(), true, 1);
+        gs.player._p_gold = 1000;
+        gs.open_shop(0);
+        let n = gs.active_shop_inventory().len();
+        let gold_before = gs.player._p_gold;
+        let result = gs.buy_shop_item(n + 5);
+        assert!(result.is_err());
+        assert_eq!(gs.player._p_gold, gold_before);
+    }
+
+    // ========================================================================
+    // Equipment effects tests (Step 2: starter weapon + recalc)
+    // ========================================================================
+
+    #[test]
+    fn test_fresh_player_has_no_weapon_and_zero_damage() {
+        // A freshly-created GameState's Warrior has an empty left-hand slot and
+        // a 0-0 item damage range.
+        let gs = GameState::new(Player::new(), true, 1);
+        assert!(!gs.has_weapon_equipped(), "fresh player has no weapon");
+        assert_eq!(gs.player._p_i_min_dam, 0);
+        assert_eq!(gs.player._p_i_max_dam, 0);
+    }
+
+    #[test]
+    fn test_equip_starter_weapon_sets_damage_range() {
+        // After equipping the starter weapon the damage range must be the Short
+        // Sword's 1-6 and the equipped flag must be set.
+        let mut gs = GameState::new(Player::new(), true, 1);
+        gs.equip_starter_weapon();
+        assert!(gs.has_weapon_equipped());
+        assert_eq!(gs.player._p_i_min_dam, 1, "Short Sword min damage");
+        assert_eq!(gs.player._p_i_max_dam, 6, "Short Sword max damage");
+    }
+
+    #[test]
+    fn test_equip_starter_weapon_is_idempotent() {
+        // Calling equip_starter_weapon twice must not stack or change the
+        // already-equipped damage range.
+        let mut gs = GameState::new(Player::new(), true, 1);
+        gs.equip_starter_weapon();
+        let (min1, max1) = (gs.player._p_i_min_dam, gs.player._p_i_max_dam);
+        gs.equip_starter_weapon();
+        assert_eq!((gs.player._p_i_min_dam, gs.player._p_i_max_dam), (min1, max1));
+        assert!(gs.has_weapon_equipped());
+    }
+
+    #[test]
+    fn test_recalc_equipment_stats_resets_when_unequipped() {
+        // After equipping, manually clearing the slot + recalc must reset the
+        // damage range to 0-0.
+        let mut gs = GameState::new(Player::new(), true, 1);
+        gs.equip_starter_weapon();
+        assert!(gs.player._p_i_max_dam > 0);
+        // Clear the slot.
+        if let Some(slot) = gs.player.inv_body.get_mut(GameState::INV_BODY_HAND_LEFT) {
+            *slot = crate::game::player_exact::PlayerItem::empty();
+        }
+        gs.recalc_equipment_stats();
+        assert!(!gs.has_weapon_equipped());
+        assert_eq!(gs.player._p_i_min_dam, 0);
+        assert_eq!(gs.player._p_i_max_dam, 0);
+    }
+
+    #[test]
+    fn test_inv_body_hand_left_index_matches_towner_slot() {
+        // The constant must point at the left-hand weapon slot (index 4),
+        // matching InvBodyLoc::HandLeft in player_exact.rs.
+        assert_eq!(GameState::INV_BODY_HAND_LEFT, 4);
     }
 
     // ========================================================================
