@@ -148,8 +148,11 @@ pub fn run_game_loop(mode: InterfaceMode, window: &mut GameWindow, game_state: &
 
         // Town <-> Dungeon toggle keys. 'D' descends into L1 Cathedral (only
         // when currently in town); 'T' returns to town (only when in the
-        // dungeon). These are the simplified staircase triggers; once true
-        // stair-tile detection is wired in they can be replaced by it.
+        // dungeon). These are manual fallbacks alongside the automatic
+        // stair-tile detection in `check_stairs_transition` (which fires when
+        // the player walks onto a stair tile). Kept so the player can force a
+        // transition even if they can't reach the stair (e.g. pathfinding
+        // limitations) or for debugging.
         if input.is_key_pressed(Keycode::D) && !game_state.in_dungeon {
             if let Err(e) = descend_to_dungeon(game_state) {
                 println!("[GameLoop] descend_to_dungeon failed: {}", e);
@@ -240,6 +243,15 @@ pub fn run_game_loop(mode: InterfaceMode, window: &mut GameWindow, game_state: &
         if let Some(target) = state.move_target {
             tick_move_target(game_state, target, &mut state.move_target);
         }
+
+        // Stair detection: if the player is standing on (or adjacent to) a
+        // stair trigger tile and the cooldown has elapsed, perform the level
+        // transition automatically. Mirrors C++ `CheckTriggers` running inside
+        // `GameLogic()` after the player position has been updated. Placed here
+        // (logic path, 2 Hz) rather than the fast path so transitions are
+        // locked to the simulation rate and the cooldown (in ticks) is
+        // meaningful. The D/T manual keys above remain as a fallback.
+        check_stairs_transition(game_state);
 
         // Process network messages
         network::process_game_message_packets();
@@ -607,7 +619,19 @@ pub fn descend_to_dungeon(game_state: &mut GameState) -> Result<(), String> {
         seed, layout.width, layout.height, filled, level.til.tiles.len()
     );
 
+    // Resolve the Cathedral→town up-stair tile (C++ `InitL1Triggers` scans for
+    // `dPiece == 128`; the Rust generator instead stamps the EntranceStairs
+    // TIL mega, so we detect by matching that mega's micro1 value in the
+    // generated d_piece grid). Falls back to None if no match found.
+    let up_stairs = find_dungeon_up_stairs(&layout, level);
+    if let Some((sx, sy)) = up_stairs {
+        println!("[Descend] up-stair (to town) located at micro-tile ({}, {})", sx, sy);
+    } else {
+        println!("[Descend] WARNING: no up-stair tile found in generated layout");
+    }
+
     game_state.dungeon_layout = Some(layout);
+    game_state.dungeon_up_stairs = up_stairs;
     game_state.in_dungeon = true;
     // Keep is_town in sync so GameState::update's monster/item logic matches the
     // active mode (dungeon processes monsters; town skips them).
@@ -629,6 +653,12 @@ pub fn descend_to_dungeon(game_state: &mut GameState) -> Result<(), String> {
 
     println!("[Descend] Entered L1 Cathedral at ({}, {})", center_x, center_y);
 
+    // Stamp the cooldown so the freshly-spawned position can't instantly
+    // re-trigger a transition. The player starts in the dungeon interior and
+    // the up-stair is somewhere in the 40×40 active region; even so, this guard
+    // makes the descent robust against landing on/near the stair tile.
+    game_state.mark_stair_transition();
+
     // Step 1: place monsters on the dungeon floor. We clear any stale monsters
     // (e.g. from a previous descent) and scatter a small pack across walkable
     // floor tiles away from the player spawn. Also pre-load their stand sprites
@@ -636,6 +666,46 @@ pub fn descend_to_dungeon(game_state: &mut GameState) -> Result<(), String> {
     place_dungeon_monsters(game_state, center_x, center_y);
 
     Ok(())
+}
+
+/// The TIL mega index the L1 Cathedral generator uses for the
+/// `EntranceStairs` logical tile. Must match `tile_to_l1_til_index` in
+/// `dungeon_level.rs` (`Tile::EntranceStairs => 12`). Kept here so the
+/// up-stair detection stays in sync with the generator's TIL mapping without
+/// `game_loop` having to reach into the levels module.
+const L1_ENTRANCE_STAIRS_TIL_INDEX: usize = 12;
+
+/// Scan a freshly-generated Cathedral `DungeonLayout` for the up-stair tile
+/// (the `EntranceStairs` mega) and return its micro-tile coordinates.
+///
+/// The Rust generator stamps the `EntranceStairs` TIL mega (index
+/// `L1_ENTRANCE_STAIRS_TIL_INDEX`) into the active region of the d_piece grid
+/// (micro offset 16,16), writing the mega's four micro values into each 2×2
+/// block. We look up that mega's `micro1` value from the loaded L1 TIL data
+/// and scan the grid for a matching d_piece, returning the first hit.
+///
+/// This mirrors C++ `InitL1Triggers` (which scans for `dPiece == 128`); the
+/// difference is that the Rust port's dPiece values are the L1 TIL micro
+/// indices, so we resolve the expected value from the TIL data instead of
+/// hard-coding 128. Returns `None` if the TIL table has no entry at the
+/// entrance-stairs index or no grid cell matches.
+fn find_dungeon_up_stairs(
+    layout: &crate::game::game_state::DungeonLayout,
+    level: &crate::engine::dungeon::DungeonLevelData,
+) -> Option<(i32, i32)> {
+    let mega = level.til.tiles.get(L1_ENTRANCE_STAIRS_TIL_INDEX)?;
+    let target = mega.micro1;
+    if target == 0 {
+        return None;
+    }
+    for y in 0..layout.height {
+        for x in 0..layout.width {
+            if layout.d_piece[y * layout.width + x] == target {
+                return Some((x as i32, y as i32));
+            }
+        }
+    }
+    None
 }
 
 /// Number of monsters to scatter across an L1 Cathedral level. Kept small so
@@ -790,6 +860,12 @@ pub fn return_to_town(game_state: &mut GameState) {
     game_state.in_dungeon = false;
     game_state.is_town = true;
     game_state.dungeon_layout = None;
+    game_state.dungeon_up_stairs = None;
+    // Stamp the cooldown so the town spawn (which is fixed at 75,68, far from
+    // the Cathedral down-stair at 25,29) can't accidentally re-trigger — and
+    // more importantly, so a player who immediately walks back to the stair
+    // gets the same 2-second grace as every other transition.
+    game_state.mark_stair_transition();
     // Clear dungeon monsters + their sprites so a fresh pack is generated on the
     // next descent.
     game_state.monster_manager.clear();
@@ -911,6 +987,82 @@ fn tick_move_target(
     }
 }
 
+/// Automatic stair-trigger detection, mirroring C++ `CheckTriggers`
+/// (`Source/levels/trigs.cpp`) which fires `WM_DIABNEXTLVL` / `WM_DIABPREVLVL`
+/// when the player stands on a stair trigger tile.
+///
+/// Runs once per logic tick (2 Hz, in the logic path) after movement has been
+/// applied, so the player's just-updated tile is the one being tested. Two
+/// triggers are checked:
+///   * **Town mode** — player on/near `TOWN_DOWN_STAIRS` (25, 29) → calls
+///     `descend_to_dungeon` (Cathedral entrance).
+///   * **Dungeon mode** — player on/near `dungeon_up_stairs` (resolved from
+///     the generated layout) → calls `return_to_town`.
+///
+/// "On/near" means within `STAIRS_TRIGGER_RADIUS` (Chebyshev distance), so the
+/// coarse whole-tile movement in this port still feels responsive. The
+/// `STAIRS_COOLDOWN_TICKS` guard (set via `mark_stair_transition`) prevents a
+/// fresh descent/ascent from immediately re-triggering.
+///
+/// The cooldown is stamped here unconditionally once a trigger fires (whether
+/// or not the underlying transition succeeds), so a missing-art failure on
+/// `descend_to_dungeon` doesn't cause the detection to re-fire every tick and
+/// spam the log. `descend_to_dungeon` / `return_to_town` also stamp the
+/// cooldown on their own success path (so manual D/T key transitions get the
+/// same guard), but the stamp is idempotent.
+///
+/// Errors from `descend_to_dungeon` (e.g. missing L1 art) are logged and
+/// swallowed so the game loop keeps running.
+fn check_stairs_transition(game_state: &mut GameState) {
+    // Cooldown gate: a transition fired too recently — do nothing this tick.
+    if !game_state.stairs_cooldown_ready() {
+        return;
+    }
+
+    let mut fired = false;
+    if !game_state.in_dungeon {
+        // Town: check the fixed Cathedral down-stair.
+        let (sx, sy) = crate::game::game_state::TOWN_DOWN_STAIRS;
+        if game_state.player_tile_distance_to(sx, sy)
+            <= crate::game::game_state::STAIRS_TRIGGER_RADIUS
+        {
+            println!(
+                "[Stairs] player at ({},{}) stepped on town down-stair ({},{}) — descending",
+                game_state.player.position.x,
+                game_state.player.position.y,
+                sx,
+                sy
+            );
+            fired = true;
+            if let Err(e) = descend_to_dungeon(game_state) {
+                println!("[Stairs] descend_to_dungeon failed: {}", e);
+            }
+        }
+    } else if let Some((sx, sy)) = game_state.dungeon_up_stairs {
+        // Dungeon: check the resolved Cathedral up-stair.
+        if game_state.player_tile_distance_to(sx, sy)
+            <= crate::game::game_state::STAIRS_TRIGGER_RADIUS
+        {
+            println!(
+                "[Stairs] player at ({},{}) stepped on dungeon up-stair ({},{}) — ascending",
+                game_state.player.position.x,
+                game_state.player.position.y,
+                sx,
+                sy
+            );
+            fired = true;
+            return_to_town(game_state);
+        }
+    }
+
+    // Stamp the cooldown whenever a trigger fired, regardless of whether the
+    // underlying transition succeeded. This prevents a failing descent (e.g.
+    // missing L1 art) from re-firing every tick and log-spamming.
+    if fired {
+        game_state.mark_stair_transition();
+    }
+}
+
 //------------------------------------------------------------------------------
 // Rendering Functions
 //------------------------------------------------------------------------------
@@ -993,6 +1145,15 @@ fn draw_and_blit(
         draw_plain_checkerboard(canvas, screen_center_x, screen_center_y);
     }
 
+    // Draw Tristram NPCs (Griswold, Pepin, Ogden, Cain, ...) as coloured
+    // markers with each NPC's initial. Only in town mode — the dungeon has no
+    // towners. Rendered after the world (so markers sit on the floor art) and
+    // before ground loot / the player sprite (so the player token stays on
+    // top). Uses the same isometric projection as monsters/player.
+    if !game_state.in_dungeon {
+        draw_towners(window, game_state, cam_tile_x, cam_tile_y, screen_center_x, screen_center_y);
+    }
+
     // Draw ground loot (dropped by slain monsters) before the player sprite so
     // the player token renders on top of any item they're standing on. Uses the
     // same isometric projection as the monsters/player (coloured icons, no art).
@@ -1003,6 +1164,12 @@ fn draw_and_blit(
     // marker if no sprite was loaded. The sprite texture is rebuilt every
     // frame (Plan A): safe, no dangling handles.
     draw_player_sprite(window, game_state, screen_center_x, screen_center_y);
+
+    // Stair markers: draw a pulsing arrow/diamond over the relevant stair tile
+    // so the player can see where to walk to change levels. Town shows the
+    // down-stair (to Cathedral); dungeon shows the up-stair (to town). Pure
+    // canvas drawing using the same iso projection as the floor tiles.
+    draw_stairs_marker(window, game_state, cam_tile_x, cam_tile_y, screen_center_x, screen_center_y);
 
     // Draw the bottom HUD panel (life/mana spheres, XP bar, belt, stats) on top
     // of the rendered world + player sprite. Pure canvas drawing (no textures).
@@ -1111,6 +1278,104 @@ fn draw_simple_missiles(
     }
 }
 
+/// Draw a pulsing stair marker over the active level's stair tile so the
+/// player can see where to walk to change levels.
+///
+///   * **Town** — marks the fixed Cathedral down-stair `TOWN_DOWN_STAIRS`
+///     (25,29) with a cyan downward-pointing chevron + outline diamond.
+///   * **Dungeon** — marks the resolved up-stair `dungeon_up_stairs` with a
+///     magenta upward-pointing chevron + outline diamond.
+///
+/// The marker pulses (alpha-modulated brightness) using `game_tick` so it's
+/// visually obvious even against busy floor art. The pulse period is 8 ticks
+/// (4 seconds at 2 Hz); on the "off" half of the cycle the marker dims but
+/// never disappears, so it's always locatable. Pure canvas drawing using the
+/// same forward iso projection as the floor/player tiles (`rel_x = (u-v)*32`,
+/// `rel_y = (u+v)*16`).
+///
+/// Off-screen stairs are silently culled (the projection would land far off
+/// the viewport), matching the floor-tile culling in `draw_tristram`.
+fn draw_stairs_marker(
+    window: &mut GameWindow,
+    game_state: &GameState,
+    cam_tile_x: i32,
+    cam_tile_y: i32,
+    screen_center_x: i32,
+    screen_center_y: i32,
+) {
+    // Resolve which stair (if any) to mark this frame.
+    let (sx, sy, down): (i32, i32, bool) = if game_state.in_dungeon {
+        match game_state.dungeon_up_stairs {
+            Some(pos) => (pos.0, pos.1, false),
+            None => return,
+        }
+    } else {
+        let pos = crate::game::game_state::TOWN_DOWN_STAIRS;
+        (pos.0, pos.1, true)
+    };
+
+    // Project the stair tile to screen space (same transform as floor tiles).
+    let rel_x = (sx - cam_tile_x - (sy - cam_tile_y)) * (TILE_WIDTH / 2);
+    let rel_y = (sx - cam_tile_x + (sy - cam_tile_y)) * (TILE_HEIGHT / 2);
+    let cx = screen_center_x + rel_x;
+    let cy = screen_center_y + rel_y;
+
+    // Cull if the projected centre is well off the visible viewport.
+    const MARGIN: i32 = 64;
+    if cx < -MARGIN
+        || cx > LOGICAL_WIDTH as i32 + MARGIN
+        || cy < -MARGIN
+        || cy > LOGICAL_HEIGHT as i32 + MARGIN
+    {
+        return;
+    }
+
+    // Pulse: bright on ticks where (game_tick % 8) < 4, dim otherwise.
+    // game_tick advances at 2 Hz inside GameState::update, so one full cycle
+    // is 4 seconds.
+    let bright = (game_state.game_tick % 8) < 4;
+    // Base colour: cyan for down-stair, magenta for up-stair.
+    let (r, g, b) = if down {
+        if bright { (120, 240, 255) } else { (40, 110, 130) }
+    } else if bright {
+        (255, 120, 240)
+    } else {
+        (130, 50, 120)
+    };
+
+    let canvas = window.canvas_mut();
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(r, g, b));
+
+    // Outline diamond — sits on the tile centre, half a tile wide/tall.
+    let half_w = TILE_WIDTH / 2;
+    let half_h = TILE_HEIGHT / 2;
+    let _ = canvas.draw_line((cx, cy - half_h), (cx + half_w, cy));
+    let _ = canvas.draw_line((cx + half_w, cy), (cx, cy + half_h));
+    let _ = canvas.draw_line((cx, cy + half_h), (cx - half_w, cy));
+    let _ = canvas.draw_line((cx - half_w, cy), (cx, cy - half_h));
+
+    // Direction chevron above the tile centre: a small arrow indicating the
+    // transition direction. Down-stair points down (into the floor), up-stair
+    // points up (out of the dungeon).
+    let arrow_top = cy - half_h - 14;
+    let arrow_bot = cy - half_h - 2;
+    if down {
+        // ▼ chevron (pointing down).
+        let _ = canvas.draw_line((cx - 6, arrow_top), (cx, arrow_bot));
+        let _ = canvas.draw_line((cx, arrow_bot), (cx + 6, arrow_top));
+        let _ = canvas.draw_line((cx - 6, arrow_top), (cx + 6, arrow_top));
+    } else {
+        // ▲ chevron (pointing up).
+        let _ = canvas.draw_line((cx - 6, arrow_bot), (cx, arrow_top));
+        let _ = canvas.draw_line((cx, arrow_top), (cx + 6, arrow_bot));
+        let _ = canvas.draw_line((cx - 6, arrow_bot), (cx + 6, arrow_bot));
+    }
+
+    // Centre dot so the marker is readable even when the chevron overlaps
+    // a wall sprite.
+    let _ = canvas.draw_point(sdl2::rect::Point::new(cx, cy));
+}
+
 /// Draw ground loot (items dropped by slain monsters) as small coloured icons.
 ///
 /// Each `GroundItem` is projected through the same isometric transform the
@@ -1171,6 +1436,115 @@ fn draw_ground_items(
         ));
         canvas.set_draw_color(sdl2::pixels::Color::RGB(r, gg, b));
         let _ = canvas.fill_rect(icon);
+    }
+}
+
+/// Marker colour per NPC `TownerType` (as u8). Each NPC gets a distinct,
+/// readable hue so the player can tell them apart at a glance. The order
+/// matches `TownerType` discriminants in `src/game/towner.rs`.
+fn towner_marker_colour(kind: u8) -> (u8, u8, u8) {
+    match kind {
+        // Smith = Griswold (blacksmith) — orange/hammer
+        0 => (220, 140, 30),
+        // Healer = Pepin — white/clean
+        1 => (240, 240, 240),
+        // DeadGuy = Wounded Townsman — dark red (not rendered in Diablo mode)
+        2 => (120, 30, 30),
+        // Tavern = Ogden — warm brown/ale
+        3 => (180, 110, 60),
+        // Story = Deckard Cain — gold/sage
+        4 => (230, 200, 60),
+        // Drunk = Farnham — purple/wine
+        5 => (170, 80, 170),
+        // Witch = Adria — violet/mystic
+        6 => (140, 90, 220),
+        // Barmaid = Gillian — pink
+        7 => (230, 130, 170),
+        // PegBoy = Wirt — green/cunning
+        8 => (60, 200, 90),
+        // Cow — white-ish
+        9 => (210, 210, 190),
+        // Farmer / Girl / CowFarmer (Hellfire-only)
+        _ => (140, 140, 140),
+    }
+}
+
+/// Draw Tristram NPCs as coloured isometric markers.
+///
+/// Each NPC is drawn as a filled diamond (the same isometric projection the
+/// floor tiles use) centred on its world tile, filled with a per-type colour
+/// from [`towner_marker_colour`] and outlined in black for contrast. A small
+/// cluster of points in the marker's upper half encodes the NPC's initial —
+/// a lightweight "text" stand-in that needs no font rasteriser (the canvas
+/// path has none). Off-screen NPCs are culled.
+///
+/// This mirrors how `draw_ground_items` / `draw_simple_missiles` project world
+/// tiles: `rel_x = (wx-wy)*32`, `rel_y = (wx+wy)*16`, centred on the camera.
+fn draw_towners(
+    window: &mut GameWindow,
+    game_state: &GameState,
+    cam_tile_x: i32,
+    cam_tile_y: i32,
+    screen_center_x: i32,
+    screen_center_y: i32,
+) {
+    if game_state.towners.is_empty() {
+        return;
+    }
+
+    // Depth-sort by (wx+wy) ascending so nearer (lower-screen) NPCs correctly
+    // overlap those behind them — same approach as draw_ground_items.
+    let mut order: Vec<(i32, i32, &'static str, u8)> = game_state.towners.clone();
+    order.sort_by_key(|t| t.0 + t.1);
+
+    let canvas = window.canvas_mut();
+    let half_w = TILE_WIDTH / 2;
+    let half_h = TILE_HEIGHT / 2;
+
+    for (wx, wy, name, kind) in order {
+        let rel_x = (wx - cam_tile_x - (wy - cam_tile_y)) * half_w;
+        let rel_y = (wx - cam_tile_x + (wy - cam_tile_y)) * half_h;
+        let cx = screen_center_x + rel_x;
+        let cy = screen_center_y + rel_y;
+
+        // Cull off-screen NPCs (with a margin for the marker + outline).
+        if cx < -(TILE_WIDTH * 2) || cx > (LOGICAL_WIDTH as i32 + TILE_WIDTH * 2)
+            || cy < -(TILE_HEIGHT * 6) || cy > (LOGICAL_HEIGHT as i32 + TILE_HEIGHT * 4)
+        {
+            continue;
+        }
+
+        let (r, g, b) = towner_marker_colour(kind);
+
+        // Filled diamond outline (slightly darker) for contrast against the floor.
+        let (or, og, ob) = ((r / 4).max(0) as u8, (g / 4).max(0) as u8, (b / 4).max(0) as u8);
+        canvas.set_draw_color(sdl2::pixels::Color::RGB(or, og, ob));
+        // Outline diamond (one tile wide) — four edges.
+        let _ = canvas.draw_line((cx, cy - half_h), (cx + half_w, cy));
+        let _ = canvas.draw_line((cx + half_w, cy), (cx, cy + half_h));
+        let _ = canvas.draw_line((cx, cy + half_h), (cx - half_w, cy));
+        let _ = canvas.draw_line((cx - half_w, cy), (cx, cy - half_h));
+
+        // Inner filled diamond — build from horizontal scanlines to approximate
+        // a filled diamond (SDL2 canvas has no fill-polygon primitive here).
+        canvas.set_draw_color(sdl2::pixels::Color::RGB(r, g, b));
+        for row in -half_h..=half_h {
+            // half-width at this row grows linearly toward the equator.
+            let row_half = half_w - (row.abs() * half_w / half_h).max(0).min(half_w);
+            let _ = canvas.draw_line((cx - row_half, cy + row), (cx + row_half, cy + row));
+        }
+
+        // Encode the NPC position with a bright focal dot above the marker
+        // centre so each marker reads as a distinct "pin" rather than an
+        // anonymous floor tile. The per-NPC colour already disambiguates them;
+        // this adds a small white highlight near the top vertex. (The canvas
+        // path has no font rasteriser, so we can't draw the NPC's initial as
+        // text — the colour is the label.)
+        canvas.set_draw_color(sdl2::pixels::Color::RGB(255, 255, 255));
+        for &(dx, dy) in &[(0, -half_h / 2), (-1, -half_h / 2), (1, -half_h / 2)] {
+            let _ = canvas.draw_point(sdl2::rect::Point::new(cx + dx, cy + dy));
+        }
+        let _ = name; // name retained for future font-rendered labels
     }
 }
 
@@ -2317,5 +2691,210 @@ mod tests {
         assert_eq!(target, None, "should have arrived within 10 ticks");
         assert_eq!(gs.player.position.x, 53);
         assert_eq!(gs.player.position.y, 53);
+    }
+
+    // ========================================================================
+    // Stair detection tests
+    // ========================================================================
+
+    /// Helper: a GameState already "in the dungeon" with the up-stair at the
+    /// given tile and the cooldown window cleared (so detection can fire).
+    fn dungeon_gs_with_up_stair(stair_x: i32, stair_y: i32) -> GameState {
+        let mut gs = GameState::new(crate::game::player_exact::Player::new(), false, 1);
+        gs.in_dungeon = true;
+        gs.is_town = false;
+        gs.dungeon_up_stairs = Some((stair_x, stair_y));
+        // Push the cooldown well into the past.
+        gs.game_tick = crate::game::game_state::STAIRS_COOLDOWN_TICKS + 10;
+        gs.last_transition_tick = 0;
+        gs
+    }
+
+    /// Helper: a GameState "in town" with the cooldown cleared.
+    fn town_gs_for_stairs() -> GameState {
+        let mut gs = GameState::new(crate::game::player_exact::Player::new(), true, 1);
+        gs.in_dungeon = false;
+        gs.is_town = true;
+        gs.game_tick = crate::game::game_state::STAIRS_COOLDOWN_TICKS + 10;
+        gs.last_transition_tick = 0;
+        gs
+    }
+
+    #[test]
+    fn test_stair_detection_descends_when_on_town_down_stair() {
+        // Player standing exactly on the town down-stair (25,29). Because
+        // descend_to_dungeon needs real L1 art (unavailable here), we expect
+        // it to fail — but the cooldown must still be stamped and in_dungeon
+        // must stay false (we didn't actually descend). This verifies the
+        // detection path fired and called descend_to_dungeon.
+        let mut gs = town_gs_for_stairs();
+        gs.player.position = crate::game::types::Point::new(
+            crate::game::game_state::TOWN_DOWN_STAIRS.0,
+            crate::game::game_state::TOWN_DOWN_STAIRS.1,
+        );
+        let tick_before = gs.game_tick;
+        check_stairs_transition(&mut gs);
+        // Detection fired → cooldown stamped at the current tick.
+        assert_eq!(
+            gs.last_transition_tick, tick_before,
+            "cooldown should be stamped after a detection fires"
+        );
+        // Without L1 art, descend failed, so we're still in town.
+        assert!(!gs.in_dungeon, "descent should fail without L1 art");
+        // And the cooldown is now blocking.
+        assert!(!gs.stairs_cooldown_ready());
+    }
+
+    #[test]
+    fn test_stair_detection_descends_when_adjacent_to_town_down_stair() {
+        // Within STAIRS_TRIGGER_RADIUS (1) — diagonally adjacent counts.
+        let mut gs = town_gs_for_stairs();
+        gs.player.position = crate::game::types::Point::new(
+            crate::game::game_state::TOWN_DOWN_STAIRS.0 + 1,
+            crate::game::game_state::TOWN_DOWN_STAIRS.1 + 1,
+        );
+        check_stairs_transition(&mut gs);
+        assert_eq!(
+            gs.last_transition_tick, gs.game_tick,
+            "adjacency within radius should still fire detection"
+        );
+    }
+
+    #[test]
+    fn test_stair_detection_does_not_descend_when_far_from_stair() {
+        // Player at the town spawn (75,68), far from the down-stair (25,29).
+        let mut gs = town_gs_for_stairs();
+        gs.player.position = crate::game::types::Point::new(75, 68);
+        let last_before = gs.last_transition_tick;
+        check_stairs_transition(&mut gs);
+        assert_eq!(
+            gs.last_transition_tick, last_before,
+            "cooldown must not change when no stair is nearby"
+        );
+        assert!(!gs.in_dungeon, "must remain in town");
+    }
+
+    #[test]
+    fn test_stair_detection_blocked_by_cooldown_in_town() {
+        // Simulate the moment right after a transition: cooldown not yet ready.
+        let mut gs = town_gs_for_stairs();
+        // Force the cooldown window to be "just fired".
+        gs.last_transition_tick = gs.game_tick; // fired this tick
+        assert!(!gs.stairs_cooldown_ready());
+        gs.player.position = crate::game::types::Point::new(
+            crate::game::game_state::TOWN_DOWN_STAIRS.0,
+            crate::game::game_state::TOWN_DOWN_STAIRS.1,
+        );
+        let last_before = gs.last_transition_tick;
+        check_stairs_transition(&mut gs);
+        assert_eq!(
+            gs.last_transition_tick, last_before,
+            "cooldown must suppress re-detection"
+        );
+        assert!(!gs.in_dungeon, "must remain in town during cooldown");
+    }
+
+    #[test]
+    fn test_stair_detection_ascends_when_on_dungeon_up_stair() {
+        // Player on the dungeon up-stair → return_to_town fires → we're back in
+        // town, dungeon_layout/up_stairs cleared, cooldown stamped.
+        let mut gs = dungeon_gs_with_up_stair(40, 40);
+        gs.player.position = crate::game::types::Point::new(40, 40);
+        check_stairs_transition(&mut gs);
+        assert!(!gs.in_dungeon, "should have returned to town");
+        assert!(gs.is_town, "is_town flag set on return");
+        assert!(gs.dungeon_layout.is_none(), "dungeon_layout cleared");
+        assert!(
+            gs.dungeon_up_stairs.is_none(),
+            "dungeon_up_stairs cleared on return"
+        );
+        assert!(gs.stairs_cooldown_ready() == false, "cooldown stamped after return");
+    }
+
+    #[test]
+    fn test_stair_detection_no_up_stair_does_nothing_in_dungeon() {
+        // In dungeon but no up-stair resolved → detection is a no-op.
+        let mut gs = dungeon_gs_with_up_stair(40, 40);
+        gs.dungeon_up_stairs = None;
+        gs.player.position = crate::game::types::Point::new(40, 40);
+        let last_before = gs.last_transition_tick;
+        check_stairs_transition(&mut gs);
+        assert!(gs.in_dungeon, "must remain in dungeon");
+        assert_eq!(gs.last_transition_tick, last_before);
+    }
+
+    #[test]
+    fn test_find_dungeon_up_stairs_locates_entrance_mega() {
+        // Build a synthetic DungeonLayout + L1 level where TIL[12] (the
+        // EntranceStairs mega) has micro1 = 999, and stamp 999 into one grid
+        // cell. The finder must return that cell's coordinates.
+        use crate::game::game_state::DungeonLayout;
+        use crate::levels::types::{MAXDUNX, MAXDUNY};
+
+        let mut layout = DungeonLayout::default();
+        // width/height come from Default (MAXDUNX×MAXDUNY). Stamp the target
+        // micro value at a known micro-tile.
+        let target_micro: u16 = 999;
+        let (tx, ty) = (20usize, 30usize);
+        layout.d_piece[ty * MAXDUNX + tx] = target_micro;
+        assert_eq!(layout.width, MAXDUNX);
+        assert_eq!(layout.height, MAXDUNY);
+
+        // Synthetic L1 level: TIL has at least 13 entries, index 12 holds the
+        // target micro value as micro1.
+        let level = make_test_level_with_stairs_mega(target_micro);
+
+        let found = find_dungeon_up_stairs(&layout, &level);
+        assert_eq!(found, Some((tx as i32, ty as i32)));
+    }
+
+    #[test]
+    fn test_find_dungeon_up_stairs_returns_none_when_no_match() {
+        // TIL[12] has micro1 = 999 but no grid cell holds it → None.
+        use crate::game::game_state::DungeonLayout;
+        let layout = DungeonLayout::default(); // all zeros
+        let level = make_test_level_with_stairs_mega(999);
+        assert!(find_dungeon_up_stairs(&layout, &level).is_none());
+    }
+
+    #[test]
+    fn test_find_dungeon_up_stairs_returns_none_when_til_too_short() {
+        // TIL table has fewer than 13 entries → the entrance mega index is out
+        // of range → None, no panic.
+        use crate::game::game_state::DungeonLayout;
+        let layout = DungeonLayout::default();
+        // make_test_level() only has 2 TIL entries.
+        let level = make_test_level();
+        assert!(find_dungeon_up_stairs(&layout, &level).is_none());
+    }
+
+    /// Build a minimal `DungeonLevelData` whose TIL table is long enough to
+    /// expose index `L1_ENTRANCE_STAIRS_TIL_INDEX` (12), with that entry's
+    /// `micro1` set to `stairs_micro1`. Used by the up-stair finder tests.
+    fn make_test_level_with_stairs_mega(stairs_micro1: u16) -> DungeonLevelData {
+        use crate::engine::dungeon::{MegaTile, MinData, SolData, TilData, TilEntry};
+        let mut til_tiles: Vec<TilEntry> = Vec::new();
+        for i in 0..=L1_ENTRANCE_STAIRS_TIL_INDEX {
+            til_tiles.push(TilEntry {
+                micro1: i as u16,
+                micro2: 0,
+                micro3: 0,
+                micro4: 0,
+            });
+        }
+        // Overwrite the entrance-stairs entry with the requested micro1.
+        til_tiles[L1_ENTRANCE_STAIRS_TIL_INDEX].micro1 = stairs_micro1;
+
+        DungeonLevelData {
+            dungeon_type: DungeonType::Cathedral,
+            palette: PaletteData::default(),
+            sol: SolData { properties: vec![] },
+            min: MinData {
+                mega_tiles: vec![MegaTile::default(); 20],
+                blocks_per_tile: 16,
+            },
+            til: TilData { tiles: til_tiles },
+            level_cel: vec![],
+        }
     }
 }

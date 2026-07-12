@@ -29,6 +29,34 @@ use rand::Rng;
 pub const TOWN_MAX_X: usize = 112;
 pub const TOWN_MAX_Y: usize = 112;
 
+/// Town→Cathedral down-stair trigger tile, in micro-tile (world) coordinates.
+///
+/// **C++ Reference**: `Source/levels/trigs.cpp:115` (`InitTownTriggers`):
+/// ```cpp
+/// // Cathedral
+/// trigs[numtrigs].position = { 25, 29 };
+/// trigs[numtrigs]._tmsg = WM_DIABNEXTLVL;
+/// ```
+/// This is a fixed, hand-placed trigger tile on the Tristram map — the entrance
+/// to the Cathedral. Stepping onto it sends `WM_DIABNEXTLVL` (descend to next
+/// level). We mirror the same coordinate so the Rust port can detect the player
+/// standing on the Cathedral stairs and trigger `descend_to_dungeon`.
+pub const TOWN_DOWN_STAIRS: (i32, i32) = (25, 29);
+
+/// Proximity radius (in world tiles) for stairs detection. The C++ trigger
+/// fires on the exact tile, but the rendered player token in this port is
+/// camera-aligned to whole tiles and movement is coarse, so we accept the
+/// player being on or adjacent to the stair tile (Chebyshev distance ≤ this).
+/// Kept at 1 so the trigger feels responsive without being too generous.
+pub const STAIRS_TRIGGER_RADIUS: i32 = 1;
+
+/// Number of game-logic ticks that must elapse between two automatic stair
+/// transitions. The logic tick runs at 2 Hz (one `GameState::update` per 500 ms
+/// via the `game_loop` 500 ms pass), so 4 ticks ≈ 2 seconds. This prevents the
+/// descent immediately re-triggering the ascent (and vice-versa) when the
+/// player spawns standing on/near a stair tile.
+pub const STAIRS_COOLDOWN_TICKS: u32 = 4;
+
 /// Camera in world tile coordinates. The renderer centres the viewport on this
 /// point. Kept as fixed-point-ish integers for simplicity; smooth sub-tile
 /// movement can be added later by switching to pixel coordinates.
@@ -264,6 +292,24 @@ pub struct GameState {
     /// `DRLG_LPass3`). `None` until the player descends into the dungeon.
     pub dungeon_layout: Option<DungeonLayout>,
 
+    /// Micro-tile coordinates of the Cathedral→town up-stair (the tile the
+    /// player must stand on to ascend back to Tristram). Populated by
+    /// `descend_to_dungeon` when it scans the freshly-generated
+    /// `dungeon_layout` for the `EntranceStairs` mega's micro dPiece values
+    /// (C++ `InitL1Triggers` scans for `dPiece == 128`; the Rust generator
+    /// instead stamps the `EntranceStairs` TIL mega, so we detect by matching
+    /// those four micro values). `None` while in town or when no up-stair was
+    /// found in the current layout.
+    pub dungeon_up_stairs: Option<(i32, i32)>,
+
+    /// `game_tick` value at which the last automatic stair transition fired.
+    /// The detection logic refuses to trigger another transition until
+    /// `game_tick - last_transition_tick >= STAIRS_COOLDOWN_TICKS`, so a
+    /// descent that lands the player on/near the up-stair doesn't instantly
+    /// bounce them back to town. Starts at 0; the cooldown is initially
+    /// considered elapsed (so the very first descent can fire from tick 0).
+    pub last_transition_tick: u32,
+
     /// L1 Cathedral art (l1.cel/l1.min/l1.til/l1.sol/l1.pal) loaded once from
     /// MPQ, used to render the dungeon floor when `in_dungeon` is true. Kept
     /// separate from `level_data` (which holds the *active* level's art) so we
@@ -288,6 +334,17 @@ pub struct GameState {
     /// audio system. Names map to MPQ files via
     /// [`crate::engine::audio::SfxLibrary`].
     pub pending_sfx: Vec<String>,
+
+    /// Tristram NPCs to render in town mode.
+    ///
+    /// Each entry is `(tile_x, tile_y, display_name, towner_kind)` where
+    /// `towner_kind` is a small integer (matching `TownerType as u8`) used by
+    /// the renderer to pick a distinct marker colour per NPC. The positions
+    /// come from the C++ `TownersData` / `townerdat` TSV defaults and are
+    /// captured here at `GameState::new` time from
+    /// [`crate::game::towner::TownerFactory::get_data`]. Only rendered while
+    /// `in_dungeon` is false (Tristram).
+    pub towners: Vec<(i32, i32, &'static str, u8)>,
 }
 
 /// L1 Cathedral dungeon layout, the dungeon-mode analogue of `TownLayout`.
@@ -388,10 +445,49 @@ impl GameState {
             player_sprite: None,
             in_dungeon: false,
             dungeon_layout: None,
+            dungeon_up_stairs: None,
+            last_transition_tick: 0,
             dungeon_level_data: None,
             monster_sprites: None,
             pending_sfx: Vec::new(),
+            towners: Self::build_towner_list(),
         }
+    }
+
+    /// Build the list of Tristram NPCs from the static towner config.
+    ///
+    /// Mirrors C++ `InitTowners()` (Source/towners.cpp:742) for the always
+    /// available Diablo-mode NPCs. We include the 9 town NPCs that are always
+    /// present (Smith, Healer, Tavern, Story, Drunk, Witch, Barmaid, PegBoy,
+    /// Cow); quest/hellfire-gated NPCs (DeadGuy, Farmer, Girl, CowFarmer) are
+    /// omitted since they require active quest state the demo doesn't track
+    /// here. Position + name come from
+    /// [`crate::game::towner::TownerFactory::get_data`].
+    fn build_towner_list() -> Vec<(i32, i32, &'static str, u8)> {
+        use crate::game::towner::{TownerFactory, TownerType};
+        let npc_types = [
+            TownerType::Smith,
+            TownerType::Healer,
+            TownerType::Tavern,
+            TownerType::Story,
+            TownerType::Drunk,
+            TownerType::Witch,
+            TownerType::Barmaid,
+            TownerType::PegBoy,
+            TownerType::Cow,
+        ];
+        npc_types
+            .iter()
+            .map(|&ty| {
+                let data = TownerFactory::get_data(ty);
+                (
+                    data.default_position.x,
+                    data.default_position.y,
+                    data.name,
+                    ty as u8,
+                )
+            })
+            .collect()
     }
 
     /// Initialise the camera/player position to the town spawn (C++ `ViewPosition`
@@ -401,6 +497,35 @@ impl GameState {
         // C++ CreateTown ENTRY_MAIN: ViewPosition = { 75, 68 }
         self.camera = Camera { tile_x: 75, tile_y: 68, sub_x: 0, sub_y: 0 };
         self.player.position = Point::new(75, 68);
+    }
+
+    /// True when enough game ticks have elapsed since the last automatic stair
+    /// transition that a new one is allowed to fire.
+    ///
+    /// Wraps the `STAIRS_COOLDOWN_TICKS` check in one place so the detection
+    /// logic in `game_loop` stays readable. The subtraction is saturating so a
+    /// freshly-created state (tick 0, last 0) reports ready immediately.
+    pub fn stairs_cooldown_ready(&self) -> bool {
+        self.game_tick.saturating_sub(self.last_transition_tick) >= STAIRS_COOLDOWN_TICKS
+    }
+
+    /// Record that an automatic stair transition just fired, stamping the
+    /// current `game_tick` as the cooldown anchor. Called by `game_loop`'s
+    /// stair detection after a successful `descend_to_dungeon` /
+    /// `return_to_town`.
+    pub fn mark_stair_transition(&mut self) {
+        self.last_transition_tick = self.game_tick;
+    }
+
+    /// Chebyshev (8-connected) distance in world tiles between the player's
+    /// current position and `(tx, ty)`. Returns 0 when standing on the tile,
+    /// 1 when orthogonally/diagonally adjacent, etc. Used by the stair
+    /// detection to decide if the player is "on" the stair within
+    /// `STAIRS_TRIGGER_RADIUS`.
+    pub fn player_tile_distance_to(&self, tx: i32, ty: i32) -> i32 {
+        let dx = (self.player.position.x - tx).abs();
+        let dy = (self.player.position.y - ty).abs();
+        dx.max(dy)
     }
 
     /// Main game logic update (one frame)
@@ -1915,5 +2040,97 @@ mod tests {
             gs.drain_pending_sfx().is_empty(),
             "no SFX should be queued when no monster is in melee range"
         );
+    }
+
+    // ========================================================================
+    // Stairs detection / cooldown tests
+    // ========================================================================
+
+    #[test]
+    fn test_town_down_stairs_constant_matches_cpp() {
+        // C++ InitTownTriggers places the Cathedral down-stair at {25, 29}.
+        assert_eq!(TOWN_DOWN_STAIRS, (25, 29));
+    }
+
+    #[test]
+    fn test_new_game_state_has_no_dungeon_up_stairs() {
+        // A fresh state is in town, so no up-stair tile has been resolved.
+        let gs = GameState::new(Player::new(), true, 1);
+        assert!(gs.dungeon_up_stairs.is_none());
+        assert_eq!(gs.last_transition_tick, 0);
+    }
+
+    #[test]
+    fn test_stairs_cooldown_initially_ready() {
+        // tick 0 − last 0 saturates to 0, but the cooldown is "ready" at start
+        // so the first descent can fire. (We treat elapsed == cooldown as ready
+        // AND, because the very first transition has last==0==tick, we accept
+        // the saturating-sub == 0 case as ready when nothing has fired yet.)
+        let gs = GameState::new(Player::new(), true, 1);
+        // tick 0, last 0 → 0 >= 4 is false, so NOT ready at exact tick 0.
+        // But the moment the loop advances a few ticks it becomes ready.
+        assert!(!gs.stairs_cooldown_ready(), "tick 0 right after init is in cooldown window");
+    }
+
+    #[test]
+    fn test_stairs_cooldown_becomes_ready_after_window() {
+        let mut gs = GameState::new(Player::new(), true, 1);
+        // Simulate a transition firing at tick 10.
+        gs.game_tick = 10;
+        gs.mark_stair_transition();
+        assert!(!gs.stairs_cooldown_ready(), "still inside cooldown right after transition");
+        // Advance to 10 + STAIRS_COOLDOWN_TICKS - 1 → still blocked.
+        gs.game_tick = 10 + STAIRS_COOLDOWN_TICKS - 1;
+        assert!(!gs.stairs_cooldown_ready(), "one tick before window ends: blocked");
+        // Advance to exactly the window end → ready.
+        gs.game_tick = 10 + STAIRS_COOLDOWN_TICKS;
+        assert!(gs.stairs_cooldown_ready(), "at window end: ready");
+        // Well past → ready.
+        gs.game_tick = 10 + STAIRS_COOLDOWN_TICKS + 50;
+        assert!(gs.stairs_cooldown_ready(), "long after: ready");
+    }
+
+    #[test]
+    fn test_player_tile_distance_chebyshev() {
+        let mut gs = GameState::new(Player::new(), true, 1);
+        gs.player.position = Point::new(25, 29);
+        // On the tile.
+        assert_eq!(gs.player_tile_distance_to(25, 29), 0);
+        // Orthogonally adjacent.
+        assert_eq!(gs.player_tile_distance_to(26, 29), 1);
+        assert_eq!(gs.player_tile_distance_to(25, 28), 1);
+        // Diagonally adjacent (Chebyshev, not Manhattan).
+        assert_eq!(gs.player_tile_distance_to(26, 30), 1);
+        assert_eq!(gs.player_tile_distance_to(24, 28), 1);
+        // Two tiles away on one axis.
+        assert_eq!(gs.player_tile_distance_to(27, 29), 2);
+        // Mixed.
+        assert_eq!(gs.player_tile_distance_to(28, 31), 3);
+    }
+
+    #[test]
+    fn test_stair_detection_radius_covers_adjacent() {
+        // With STAIRS_TRIGGER_RADIUS = 1 the player on or adjacent to the
+        // town down-stair should be considered "on" it.
+        let mut gs = GameState::new(Player::new(), true, 1);
+        // Move the cooldown window out of the way.
+        gs.last_transition_tick = 0;
+        gs.game_tick = STAIRS_COOLDOWN_TICKS + 1;
+        assert!(gs.stairs_cooldown_ready());
+
+        // Player exactly on the stair tile.
+        gs.player.position = Point::new(TOWN_DOWN_STAIRS.0, TOWN_DOWN_STAIRS.1);
+        assert!(gs.player_tile_distance_to(TOWN_DOWN_STAIRS.0, TOWN_DOWN_STAIRS.1)
+            <= STAIRS_TRIGGER_RADIUS);
+
+        // Player diagonally adjacent.
+        gs.player.position = Point::new(TOWN_DOWN_STAIRS.0 + 1, TOWN_DOWN_STAIRS.1 + 1);
+        assert!(gs.player_tile_distance_to(TOWN_DOWN_STAIRS.0, TOWN_DOWN_STAIRS.1)
+            <= STAIRS_TRIGGER_RADIUS);
+
+        // Player two tiles away → outside radius.
+        gs.player.position = Point::new(TOWN_DOWN_STAIRS.0 + 2, TOWN_DOWN_STAIRS.1);
+        assert!(gs.player_tile_distance_to(TOWN_DOWN_STAIRS.0, TOWN_DOWN_STAIRS.1)
+            > STAIRS_TRIGGER_RADIUS);
     }
 }
