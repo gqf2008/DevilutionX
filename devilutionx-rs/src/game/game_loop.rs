@@ -985,46 +985,44 @@ fn draw_tristram(
                 continue;
             }
 
-            // Draw the two floor sub-tiles (left + right) that form the diamond.
-            // blocks[0] => left triangle, blocks[1] => right triangle.
-            let canvas = window.canvas_mut();
-            for (slot, block) in [(0usize, &mega.blocks[0]), (1, &mega.blocks[1])] {
-                if !block.has_value() {
-                    continue;
-                }
-                // Decode the CEL frame to RGBA, then upload via a short-lived
-                // TextureCreator + Texture scoped to this single copy. `creator`
-                // holds an Rc into the renderer, so it does NOT keep borrowing
-                // the canvas; `tex` borrows `creator`, and `copy` needs
-                // `&Texture` + `&mut Canvas`. The lifetimes line up soundly.
-                let rgba = match TileDecoder::decode_tile(
-                    &level.level_cel,
-                    block.frame(),
-                    block.tile_type(),
-                    &level.palette,
-                ) {
-                    Some(r) => r,
-                    None => continue,
-                };
-                let creator = canvas.texture_creator();
-                let tex = match rgba_to_texture(&creator, &rgba, 32, 32) {
-                    Ok(t) => t,
-                    Err(_) => continue,
-                };
-                // Anchor: left texture's right edge at dst_cx; right texture's
-                // left edge at dst_cx. Both sit with their top at dst_cy-32.
-                let (tx, ty) = if slot == 0 {
-                    (dst_cx - (TILE_WIDTH / 2), dst_cy - TILE_HEIGHT)
-                } else {
-                    (dst_cx, dst_cy - TILE_HEIGHT)
-                };
-                let _ = canvas.copy(
-                    &tex,
-                    None,
-                    Rect::new(tx, ty, (TILE_WIDTH / 2) as u32, TILE_HEIGHT as u32),
-                );
-                drawn += 1;
+            // Select the ONE sub-tile (32x32 block) for this micro-tile position.
+            // A mega-tile covers a 2x2 grid of micro-tiles; the block index is
+            // determined by (wx%2, wy%2): block 0=top-left, 1=top-right,
+            // 2=bottom-left, 3=bottom-right. Each block is a full 32x32 CEL frame
+            // with its own type (Square/Triangle/Trapezoid). We draw the entire
+            // frame as one blit, not as two halves.
+            let block_idx = ((wy.rem_euclid(2)) * 2 + (wx.rem_euclid(2))) as usize;
+            let block = &mega.blocks[block_idx.min(3)];
+            if !block.has_value() {
+                skipped += 1;
+                continue;
             }
+            let canvas = window.canvas_mut();
+            let rgba = match TileDecoder::decode_tile(
+                &level.level_cel,
+                block.frame(),
+                block.tile_type(),
+                &level.palette,
+            ) {
+                Some(r) => r,
+                None => continue,
+            };
+            let creator = canvas.texture_creator();
+            let tex = match rgba_to_texture(&creator, &rgba, 32, 32) {
+                Ok(t) => t,
+                Err(_) => continue,
+            };
+            // A 32x32 sub-tile is drawn with its bottom-centre at the tile's iso
+            // projection point (dst_cx, dst_cy). The texture's top-left is at
+            // (dst_cx - 16, dst_cy - 32).
+            let tx = dst_cx - 16;
+            let ty = dst_cy - 32;
+            let _ = canvas.copy(
+                &tex,
+                None,
+                Rect::new(tx, ty, 32, 32),
+            );
+            drawn += 1;
         }
     }
 
@@ -1092,38 +1090,32 @@ fn draw_dungeon(
                 continue;
             }
 
-            let canvas = window.canvas_mut();
-            for (slot, block) in [(0usize, &mega.blocks[0]), (1, &mega.blocks[1])] {
-                if !block.has_value() {
-                    continue;
-                }
-                // Per-tile safe texture rebuild (Plan A). See draw_tristram.
-                let rgba = match TileDecoder::decode_tile(
-                    &level.level_cel,
-                    block.frame(),
-                    block.tile_type(),
-                    &level.palette,
-                ) {
-                    Some(r) => r,
-                    None => continue,
-                };
-                let creator = canvas.texture_creator();
-                let tex = match rgba_to_texture(&creator, &rgba, 32, 32) {
-                    Ok(t) => t,
-                    Err(_) => continue,
-                };
-                let (tx, ty) = if slot == 0 {
-                    (dst_cx - (TILE_WIDTH / 2), dst_cy - TILE_HEIGHT)
-                } else {
-                    (dst_cx, dst_cy - TILE_HEIGHT)
-                };
-                let _ = canvas.copy(
-                    &tex,
-                    None,
-                    Rect::new(tx, ty, (TILE_WIDTH / 2) as u32, TILE_HEIGHT as u32),
-                );
-                drawn += 1;
+            let block_idx = ((wy.rem_euclid(2)) * 2 + (wx.rem_euclid(2))) as usize;
+            let block = &mega.blocks[block_idx.min(3)];
+            if !block.has_value() {
+                continue;
             }
+            let canvas = window.canvas_mut();
+            let rgba = match TileDecoder::decode_tile(
+                &level.level_cel,
+                block.frame(),
+                block.tile_type(),
+                &level.palette,
+            ) {
+                Some(r) => r,
+                None => continue,
+            };
+            let creator = canvas.texture_creator();
+            let tex = match rgba_to_texture(&creator, &rgba, 32, 32) {
+                Ok(t) => t,
+                Err(_) => continue,
+            };
+            let _ = canvas.copy(
+                &tex,
+                None,
+                Rect::new(dst_cx - 16, dst_cy - 32, 32, 32),
+            );
+            drawn += 1;
         }
     }
 
