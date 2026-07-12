@@ -1012,11 +1012,10 @@ fn draw_tristram(
                 Ok(t) => t,
                 Err(_) => continue,
             };
-            // A 32x32 sub-tile is drawn with its bottom-centre at the tile's iso
-            // projection point (dst_cx, dst_cy). The texture's top-left is at
-            // (dst_cx - 16, dst_cy - 32).
+            // A 32x32 sub-tile is drawn with its centre at the tile's iso
+            // projection point (dst_cx, dst_cy).
             let tx = dst_cx - 16;
-            let ty = dst_cy - 32;
+            let ty = dst_cy - 16;
             let _ = canvas.copy(
                 &tex,
                 None,
