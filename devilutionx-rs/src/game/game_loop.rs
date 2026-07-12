@@ -985,43 +985,35 @@ fn draw_tristram(
                 continue;
             }
 
-            // Select the ONE sub-tile (32x32 block) for this micro-tile position.
-            // A mega-tile covers a 2x2 grid of micro-tiles; the block index is
-            // determined by (wx%2, wy%2): block 0=top-left, 1=top-right,
-            // 2=bottom-left, 3=bottom-right. Each block is a full 32x32 CEL frame
-            // with its own type (Square/Triangle/Trapezoid). We draw the entire
-            // frame as one blit, not as two halves.
-            let block_idx = ((wy.rem_euclid(2)) * 2 + (wx.rem_euclid(2))) as usize;
-            let block = &mega.blocks[block_idx.min(3)];
-            if !block.has_value() {
-                skipped += 1;
-                continue;
-            }
+            // C++ scrollrt.cpp (DrawTile): for each dPiece, draw mt[0] (left
+            // half) and mt[1] (right half). Each is a 32x32 CEL frame drawn as
+            // a 16x32 half-diamond. Together they form the full 32x32 tile.
+            // We do NOT select by (wx%2,wy%2) — the dPiece grid already maps
+            // each micro-tile to the correct mega entry.
             let canvas = window.canvas_mut();
-            let rgba = match TileDecoder::decode_tile(
-                &level.level_cel,
-                block.frame(),
-                block.tile_type(),
-                &level.palette,
-            ) {
-                Some(r) => r,
-                None => continue,
-            };
-            let creator = canvas.texture_creator();
-            let tex = match rgba_to_texture(&creator, &rgba, 32, 32) {
-                Ok(t) => t,
-                Err(_) => continue,
-            };
-            // A 32x32 sub-tile is drawn with its centre at the tile's iso
-            // projection point (dst_cx, dst_cy).
-            let tx = dst_cx - 16;
-            let ty = dst_cy - 16;
-            let _ = canvas.copy(
-                &tex,
-                None,
-                Rect::new(tx, ty, 32, 32),
-            );
-            drawn += 1;
+            for (slot, block) in [(0usize, &mega.blocks[0]), (1, &mega.blocks[1])] {
+                if !block.has_value() { continue; }
+                let rgba = match TileDecoder::decode_tile(
+                    &level.level_cel, block.frame(), block.tile_type(), &level.palette,
+                ) {
+                    Some(r) => r,
+                    None => continue,
+                };
+                let creator = canvas.texture_creator();
+                let tex = match rgba_to_texture(&creator, &rgba, 32, 32) {
+                    Ok(t) => t,
+                    Err(_) => continue,
+                };
+                // Left half: right edge at dst_cx. Right half: left edge at dst_cx.
+                // Both sit with top at dst_cy - 32 (bottom-centre anchor).
+                let (tx, ty) = if slot == 0 {
+                    (dst_cx - (TILE_WIDTH / 2), dst_cy - TILE_HEIGHT)
+                } else {
+                    (dst_cx, dst_cy - TILE_HEIGHT)
+                };
+                let _ = canvas.copy(&tex, None, Rect::new(tx, ty, (TILE_WIDTH / 2) as u32, TILE_HEIGHT as u32));
+                drawn += 1;
+            }
         }
     }
 
@@ -1089,32 +1081,28 @@ fn draw_dungeon(
                 continue;
             }
 
-            let block_idx = ((wy.rem_euclid(2)) * 2 + (wx.rem_euclid(2))) as usize;
-            let block = &mega.blocks[block_idx.min(3)];
-            if !block.has_value() {
-                continue;
-            }
             let canvas = window.canvas_mut();
-            let rgba = match TileDecoder::decode_tile(
-                &level.level_cel,
-                block.frame(),
-                block.tile_type(),
-                &level.palette,
-            ) {
-                Some(r) => r,
-                None => continue,
-            };
-            let creator = canvas.texture_creator();
-            let tex = match rgba_to_texture(&creator, &rgba, 32, 32) {
-                Ok(t) => t,
-                Err(_) => continue,
-            };
-            let _ = canvas.copy(
-                &tex,
-                None,
-                Rect::new(dst_cx - 16, dst_cy - 32, 32, 32),
-            );
-            drawn += 1;
+            for (slot, block) in [(0usize, &mega.blocks[0]), (1, &mega.blocks[1])] {
+                if !block.has_value() { continue; }
+                let rgba = match TileDecoder::decode_tile(
+                    &level.level_cel, block.frame(), block.tile_type(), &level.palette,
+                ) {
+                    Some(r) => r,
+                    None => continue,
+                };
+                let creator = canvas.texture_creator();
+                let tex = match rgba_to_texture(&creator, &rgba, 32, 32) {
+                    Ok(t) => t,
+                    Err(_) => continue,
+                };
+                let (tx, ty) = if slot == 0 {
+                    (dst_cx - (TILE_WIDTH / 2), dst_cy - TILE_HEIGHT)
+                } else {
+                    (dst_cx, dst_cy - TILE_HEIGHT)
+                };
+                let _ = canvas.copy(&tex, None, Rect::new(tx, ty, (TILE_WIDTH / 2) as u32, TILE_HEIGHT as u32));
+                drawn += 1;
+            }
         }
     }
 
