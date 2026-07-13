@@ -313,9 +313,17 @@ impl Object {
         }
     }
 
-    /// Stop animation at current frame
+    /// Stop animation at current frame.
     ///
-    /// Reference: Source/objects.cpp ObjectStopAnim()
+    /// This is the high-level Rust helper used by the door/sarc/shrine
+    /// animation update paths: it clears `anim_flag` so
+    /// [`update_animation`] becomes a no-op. For the byte-faithful C++
+    /// `ObjectStopAnim()` semantics (freeze-on-last-frame without clearing the
+    /// flag), use the standalone [`object_stop_anim`] function.
+    ///
+    /// Reference: `ObjectStopAnim()` in Source/objects.cpp:1537-1543 (C++
+    /// variant) and the Rust animation-update callers that historically
+    /// cleared `anim_flag` directly.
     pub fn stop_animation(&mut self) {
         self.anim_flag = false;
     }
@@ -745,6 +753,64 @@ pub fn operate_chest(chest: &mut Object, _player_pos: Point, _send_loot_msg: boo
         chest.is_trap = false;
     }
     true
+}
+
+/// Result of opening a chest — exposes the trap missile id (if any) so the
+/// caller can spawn the projectile via the missile subsystem.
+///
+/// **C++ Reference**: `OperateChest()` (objects.cpp:2020-2073)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ChestOpenResult {
+    /// `true` if the chest was opened (was interactive).
+    pub opened: bool,
+    /// If the chest was trapped, the missile id the caller should spawn at the
+    /// player. `None` for un-trapped chests. See `chest_trap_missile_id()`.
+    pub trap_missile_id: Option<i32>,
+    /// Number of loot items the caller should spawn (`chest.ovar1` at open
+    /// time). Loot category is governed by `chest.ovar2` (non-zero ⇒ magic
+    /// items via `CreateRndItem`, zero ⇒ useful item via `CreateRndUseful`).
+    pub loot_count: i32,
+    /// `true` when the loot should be magic-quality (`ovar2 != 0`).
+    pub loot_magic: bool,
+}
+
+/// Operate a chest and report what the caller needs to do (loot + trap).
+///
+/// **C++ Reference**: `OperateChest()` (objects.cpp:2020-2073)
+///
+/// This is the full-fidelity variant of [`operate_chest`]: it performs the
+/// same object-state mutations and additionally returns a [`ChestOpenResult`]
+/// describing the loot count/magic-flag and the trap missile id (if any) so
+/// the caller can drive the item/missile subsystems.
+pub fn operate_chest_full(chest: &mut Object, _player_pos: Point) -> ChestOpenResult {
+    if !chest.can_interact_with() {
+        return ChestOpenResult::default();
+    }
+
+    let loot_count = chest.ovar1;
+    let loot_magic = chest.ovar2 != 0;
+
+    // C++: PlaySfxLoc(SfxID::ChestOpen, chest.position);
+    chest.selection_region = SelectionRegion::None;
+    chest.anim_frame += 2;
+    // C++: SetRndSeed(chest._oRndSeed); loot spawning is the caller's job.
+
+    let trap_missile_id = if chest.is_trapped_chest() {
+        // Select missile id from `_oVar4` exactly as in C++.
+        let mtype = chest_trap_missile_id(chest.ovar4);
+        // Disarm to mirror `chest._oTrapFlag = false`.
+        chest.is_trap = false;
+        Some(mtype)
+    } else {
+        None
+    };
+
+    ChestOpenResult {
+        opened: true,
+        trap_missile_id,
+        loot_count,
+        loot_magic,
+    }
 }
 
 /// Return the chest-trap missile id for a given `_oVar4` value.
@@ -1377,6 +1443,61 @@ pub fn operate_trap_lever(lever: &mut Object) -> bool {
     lever.anim_frame = 2;
     lever.ovar1 = if lever.ovar1 == 0 { 1 } else { 0 };
     true
+}
+
+/// Halt an object's animation once it reaches its final frame.
+///
+/// **C++ Reference**: `ObjectStopAnim()` in Source/objects.cpp:1537-1543
+///
+/// Only stops the object if the current animation frame equals the total
+/// frame count. Freezing is done by zeroing `_oAnimCnt` and setting
+/// `_oAnimDelay = 1000` (effectively pausing). `anim_flag` is intentionally
+/// left unchanged — C++ never clears `_oAnimFlag` in this routine.
+pub fn object_stop_anim(object: &mut Object) {
+    if object.anim_frame == object.anim_len {
+        object.anim_cnt = 0;
+        object.anim_delay = 1000;
+    }
+}
+
+/// Sync the Na-Krul lever state for the level-24 (Crypt) quest.
+///
+/// **C++ Reference**: `OperateLever()` level-24 branch in
+/// Source/objects.cpp:1834-1838, plus the lever/book spawn layout in
+/// `AddNakrulGate()` / `AddNakrulLever()` (objects.cpp:757-804).
+///
+/// When the Na-Krul lever on level 24 is pulled, C++ plays the crypt-door
+/// sound at `(UberRow, UberCol)` and marks `Q_NAKRUL` as `QUEST_DONE`, then
+/// sends the quest update over the network. This helper performs the
+/// object-state half (so the visual lever matches) and reports whether the
+/// caller should fire the quest/SFX/network side-effects.
+///
+/// Returns `true` when the lever was on level 24 and the quest should be
+/// completed; `false` for any other level (a no-op for the caller).
+pub fn sync_nakrul_lever(lever: &mut Object, current_level: i32) -> bool {
+    if current_level != 24 {
+        return false;
+    }
+    if !lever.can_interact_with() {
+        return false;
+    }
+    // Mirror the `UpdateLeverState()` side-effects the C++ lever path performs
+    // (disable selection + advance animation frame).
+    lever.selection_region = SelectionRegion::None;
+    lever.anim_frame = lever.anim_frame.saturating_add(1);
+    // Caller responsibilities (require quest/sound/network subsystems):
+    //   PlaySfxLoc(SfxID::CryptDoorOpen, { UberRow, UberCol });
+    //   Quests[Q_NAKRUL]._qactive = QUEST_DONE;
+    //   NetSendCmdQuest(true, Quests[Q_NAKRUL]);
+    true
+}
+
+/// Predicate: is this object the Na-Krul lever (`OBJ_L5LEVER`) on level 24?
+///
+/// **C++ Reference**: `AddNakrulLever()` in Source/objects.cpp:757-767 spawns
+/// `OBJ_L5LEVER` at `(UberRow + 3, UberCol - 1)` for the Na-Krul gate.
+pub fn is_nakrul_lever(object: &Object, current_level: i32) -> bool {
+    current_level == 24 && matches!(object.otype, ObjectId::Lever | ObjectId::L5Lever)
 }
 
 /// Operate the Pedestal of Blood (Arkaine's Valor quest).
@@ -4474,6 +4595,131 @@ mod tests {
         );
         assert_eq!(pedestal.ovar6, 3);
         assert_eq!(pedestal.selection_region, SelectionRegion::None);
+    }
+
+    #[test]
+    fn test_object_stop_anim_freezes_on_last_frame() {
+        let mut obj = Object::new(ObjectId::Chest1, Point::new(5, 5));
+        obj.anim_flag = true;
+        obj.anim_delay = 5;
+        obj.anim_len = 10;
+        obj.anim_frame = 10; // at the last frame
+        obj.anim_cnt = 3;
+        object_stop_anim(&mut obj);
+        assert_eq!(obj.anim_cnt, 0);
+        assert_eq!(obj.anim_delay, 1000);
+        // anim_flag intentionally left unchanged.
+        assert!(obj.anim_flag);
+    }
+
+    #[test]
+    fn test_object_stop_anim_noop_before_last_frame() {
+        let mut obj = Object::new(ObjectId::Chest1, Point::new(5, 5));
+        obj.anim_delay = 5;
+        obj.anim_len = 10;
+        obj.anim_frame = 5;
+        obj.anim_cnt = 3;
+        object_stop_anim(&mut obj);
+        // Not at the last frame → unchanged.
+        assert_eq!(obj.anim_cnt, 3);
+        assert_eq!(obj.anim_delay, 5);
+    }
+
+    #[test]
+    fn test_stop_animation_method_clears_flag() {
+        let mut obj = Object::new(ObjectId::Chest1, Point::new(5, 5));
+        obj.anim_flag = true;
+        obj.stop_animation();
+        // The high-level helper clears anim_flag (legacy Rust behaviour).
+        assert!(!obj.anim_flag);
+    }
+
+    #[test]
+    fn test_sync_nakrul_lever_wrong_level() {
+        let mut lever = Object::new(ObjectId::L5Lever, Point::new(10, 10));
+        lever.selection_region = SelectionRegion::Bottom;
+        // Not level 24 → no-op.
+        assert!(!sync_nakrul_lever(&mut lever, 16));
+        assert_ne!(lever.selection_region, SelectionRegion::None);
+    }
+
+    #[test]
+    fn test_sync_nakrul_lever_level24() {
+        let mut lever = Object::new(ObjectId::L5Lever, Point::new(10, 10));
+        lever.selection_region = SelectionRegion::Bottom;
+        lever.anim_frame = 1;
+        assert!(sync_nakrul_lever(&mut lever, 24));
+        assert_eq!(lever.selection_region, SelectionRegion::None);
+        assert_eq!(lever.anim_frame, 2);
+    }
+
+    #[test]
+    fn test_sync_nakrul_lever_not_interactive() {
+        let mut lever = Object::new(ObjectId::L5Lever, Point::new(10, 10));
+        lever.selection_region = SelectionRegion::None; // not selectable
+        assert!(!sync_nakrul_lever(&mut lever, 24));
+    }
+
+    #[test]
+    fn test_is_nakrul_lever() {
+        let lever = Object::new(ObjectId::L5Lever, Point::new(10, 10));
+        assert!(is_nakrul_lever(&lever, 24));
+        assert!(!is_nakrul_lever(&lever, 16));
+        let chest = Object::new(ObjectId::Chest1, Point::new(10, 10));
+        assert!(!is_nakrul_lever(&chest, 24));
+    }
+
+    #[test]
+    fn test_operate_chest_full_un_trapped() {
+        let mut chest = Object::new(ObjectId::Chest1, Point::new(5, 5));
+        chest.selection_region = SelectionRegion::Bottom;
+        chest.ovar1 = 2; // two loot items
+        chest.ovar2 = 1; // magic loot
+        chest.is_trap = false;
+        let res = operate_chest_full(&mut chest, Point::new(6, 6));
+        assert!(res.opened);
+        assert!(res.trap_missile_id.is_none());
+        assert_eq!(res.loot_count, 2);
+        assert!(res.loot_magic);
+        assert_eq!(chest.selection_region, SelectionRegion::None);
+    }
+
+    #[test]
+    fn test_operate_chest_full_trapped_arrow() {
+        let mut chest = Object::new(ObjectId::Chest1, Point::new(5, 5));
+        chest.selection_region = SelectionRegion::Bottom;
+        chest.is_trap = true;
+        chest.ovar4 = 0; // Arrow trap
+        chest.ovar1 = 1;
+        chest.ovar2 = 0; // useful (non-magic) loot
+        let res = operate_chest_full(&mut chest, Point::new(6, 6));
+        assert!(res.opened);
+        assert_eq!(res.trap_missile_id, Some(MISSILE_ARROW));
+        // Trap flag disarmed.
+        assert!(!chest.is_trap);
+        assert!(!res.loot_magic);
+    }
+
+    #[test]
+    fn test_operate_chest_full_trapped_fire_variants() {
+        let trap_ids = [(1, MISSILE_FIRE_ARROW), (2, MISSILE_NOVA), (3, MISSILE_RING_OF_FIRE), (4, MISSILE_STEAL_POTIONS), (5, MISSILE_STEAL_MANA)];
+        for (var4, expected) in trap_ids {
+            let mut chest = Object::new(ObjectId::Chest1, Point::new(5, 5));
+            chest.selection_region = SelectionRegion::Bottom;
+            chest.is_trap = true;
+            chest.ovar4 = var4;
+            let res = operate_chest_full(&mut chest, Point::new(6, 6));
+            assert_eq!(res.trap_missile_id, Some(expected), "var4={}", var4);
+        }
+    }
+
+    #[test]
+    fn test_operate_chest_full_not_interactive() {
+        let mut chest = Object::new(ObjectId::Chest1, Point::new(5, 5));
+        chest.selection_region = SelectionRegion::None; // not selectable
+        let res = operate_chest_full(&mut chest, Point::new(6, 6));
+        assert!(!res.opened);
+        assert!(res.trap_missile_id.is_none());
     }
 }
 

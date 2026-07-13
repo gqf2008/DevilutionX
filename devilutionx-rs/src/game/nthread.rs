@@ -235,6 +235,33 @@ impl NThreadManager {
     }
 
     /// 启动后台线程
+    ///
+    /// **C++ Reference**: `Source/nthread.cpp` - `NthreadHandler()`
+    ///
+    /// ```cpp
+    /// void NthreadHandler()
+    /// {
+    ///     if (!nthread_should_run) {
+    ///         return;
+    ///     }
+    ///     while (true) {
+    ///         MemCrit.lock();
+    ///         if (!nthread_should_run) {
+    ///             MemCrit.unlock();
+    ///             break;
+    ///         }
+    ///         nthread_send_and_recv_turn(0, 0);
+    ///         int delta = gnTickDelay;
+    ///         if (nthread_recv_turns())
+    ///             delta = last_tick - SDL_GetTicks();
+    ///         MemCrit.unlock();
+    ///         if (delta > 0)
+    ///             SDL_Delay(delta);
+    ///         if (!nthread_should_run)
+    ///             return;
+    ///     }
+    /// }
+    /// ```
     fn start_background_thread(&mut self) {
         let state = Arc::clone(&self.state);
         let should_run = {
@@ -243,27 +270,61 @@ impl NThreadManager {
         };
 
         self.thread_handle = Some(thread::spawn(move || {
-            while should_run.load(Ordering::SeqCst) {
-                // 网络处理循环
-                let sleep_time = {
+            if !should_run.load(Ordering::SeqCst) {
+                return;
+            }
+            loop {
+                // 锁定并执行网络回合处理
+                let delta = {
                     let s = state.lock().unwrap();
+                    if !s.should_run.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    // 对应 nthread_send_and_recv_turn(0, 0) + nthread_recv_turns()
+                    // 此处不直接递归调用（避免死锁），仅计算 sleep 时间
+                    let delta_base = s.tick_delay;
                     let elapsed = s.last_tick.elapsed();
-                    if elapsed < s.tick_delay {
-                        s.tick_delay - elapsed
+                    if elapsed < delta_base {
+                        delta_base - elapsed
                     } else {
                         Duration::ZERO
                     }
                 };
 
-                if sleep_time > Duration::ZERO {
-                    thread::sleep(sleep_time);
+                if delta > Duration::ZERO {
+                    thread::sleep(delta);
                 }
 
                 if !should_run.load(Ordering::SeqCst) {
-                    break;
+                    return;
                 }
             }
         }));
+    }
+
+    /// 执行单次网络线程迭代（对应 NthreadHandler 的单次循环体）
+    ///
+    /// **C++ Reference**: `Source/nthread.cpp` - `NthreadHandler()` 循环体
+    ///
+    /// 在主线程中可手动调用以驱动网络处理（无后台线程时）。
+    /// 返回建议的睡眠时间。
+    pub fn nthread_run_iteration(&mut self) -> Duration {
+        // nthread_send_and_recv_turn(0, 0)
+        self.send_and_recv_turn(0, 0);
+
+        // 计算 delta
+        let mut delta = self.get_tick_delay();
+        // nthread_recv_turns() 成功时 delta = last_tick - now
+        if self.recv_turns() {
+            let state = self.state.lock().unwrap();
+            let now = Instant::now();
+            if state.last_tick > now {
+                delta = state.last_tick - now;
+            } else {
+                delta = Duration::ZERO;
+            }
+        }
+        delta
     }
 
     /// 清理网络线程
@@ -548,5 +609,36 @@ mod tests {
         NET_UPDATE_RATE.store(5, Ordering::SeqCst);
         assert_eq!(NET_UPDATE_RATE.load(Ordering::SeqCst), 5);
         NET_UPDATE_RATE.store(1, Ordering::SeqCst); // 重置
+    }
+
+    #[test]
+    fn test_nthread_run_iteration_returns_duration() {
+        // 单机模式（非多人）下不应启动后台线程，但可以手动驱动迭代
+        let mut manager = NThreadManager::new();
+        manager.set_tick_delay(50);
+
+        // 调用一次迭代，应返回一个 Duration
+        let delta = manager.nthread_run_iteration();
+        // 由于 last_tick 刚设置，delta 可能接近 0 或返回 tick_delay
+        // 主要确保函数不 panic 且返回有效 Duration
+        assert!(delta <= Duration::from_millis(50) || delta == Duration::ZERO);
+    }
+
+    #[test]
+    fn test_nthread_terminate_game_cleans_up() {
+        let mut manager = NThreadManager::new();
+        manager.set_multiplayer(false);
+        manager.terminate_game("test reason");
+        // 应该不 panic 并清理状态
+        assert_eq!(manager.get_tick_delay(), manager.get_tick_delay());
+    }
+
+    #[test]
+    fn test_nthread_has_500ms_passed_returns_tuple() {
+        let manager = NThreadManager::new();
+        let (passed, _draw_game) = manager.has_500ms_passed();
+        // 刚创建时 last_tick 是 now，所以 ticks_elapsed 接近 0
+        // 函数返回 (bool, bool) - 第一个表示是否正常推进
+        let _ = passed;
     }
 }

@@ -523,6 +523,117 @@ pub fn slider_set_from_position(item: &mut MenuItem, position: i32, slider_width
     item.value = new_value.clamp(0, item.max_value);
 }
 
+// ============================================================================
+// C++ 匹配的滑块 API - 严格对应 Source/gmenu.cpp 的 gmenu_slider_* 函数
+//
+// C++ 中 TMenuItem.dwFlags 的位域布局:
+//   bits 0..11  (mask 0x000FFF): sliderStep  (当前步)
+//   bits 12..23 (mask 0xFFF000): sliderSteps (总步数)
+//   bit 30:      GMENU_SLIDER
+//   bit 31:      GMENU_ENABLED
+// ============================================================================
+
+/// 滑块项标志字段布局常量（与 C++ gmenu.h 一致）
+pub mod slider_flags {
+    /// GMENU_SLIDER = 0x40000000
+    pub const SLIDER: u32 = 0x4000_0000;
+    /// GMENU_ENABLED = 0x80000000
+    pub const ENABLED: u32 = 0x8000_0000;
+    /// 步数位掩码（低 12 位）
+    pub const STEP_MASK: u32 = 0x0000_0FFF;
+    /// 总步数位掩码（位 12-23）
+    pub const STEPS_MASK: u32 = 0x00FF_F000;
+    /// 总步数移位
+    pub const STEPS_SHIFT: u32 = 12;
+}
+
+/// 从标志字段读取当前滑块步数
+///
+/// **C++ Reference**: `Source/gmenu.h` - `TMenuItem::sliderStep()`
+#[inline]
+pub fn slider_step(flags: u32) -> u16 {
+    (flags & slider_flags::STEP_MASK) as u16
+}
+
+/// 从标志字段读取总步数
+///
+/// **C++ Reference**: `Source/gmenu.h` - `TMenuItem::sliderSteps()`
+#[inline]
+pub fn slider_steps(flags: u32) -> u16 {
+    ((flags & slider_flags::STEPS_MASK) >> slider_flags::STEPS_SHIFT) as u16
+}
+
+/// 在标志字段中设置总步数
+///
+/// **C++ Reference**: `Source/gmenu.h` - `TMenuItem::setSliderSteps()`
+#[inline]
+pub fn set_slider_steps_raw(flags: u32, steps: u16) -> u32 {
+    (flags & !slider_flags::STEPS_MASK) | (((steps as u32) << slider_flags::STEPS_SHIFT) & slider_flags::STEPS_MASK)
+}
+
+/// 在标志字段中设置当前步数
+///
+/// **C++ Reference**: `Source/gmenu.h` - `TMenuItem::setSliderStep()`
+#[inline]
+pub fn set_slider_step_raw(flags: u32, step: u16) -> u32 {
+    (flags & !slider_flags::STEP_MASK) | ((step as u32) & slider_flags::STEP_MASK)
+}
+
+/// 设置滑块项的总步数
+///
+/// **C++ Reference**: `Source/gmenu.cpp:gmenu_slider_steps()`
+///
+/// ```cpp
+/// void gmenu_slider_steps(TMenuItem *pItem, int steps)
+/// {
+///     pItem->dwFlags &= 0xFF000FFF;
+///     pItem->setSliderSteps(steps);
+/// }
+/// ```
+pub fn gmenu_slider_steps(flags: &mut u32, steps: u16) {
+    *flags &= 0xFF000FFF;
+    *flags = set_slider_steps_raw(*flags, steps);
+}
+
+/// 根据数值设置滑块的当前步数
+///
+/// **C++ Reference**: `Source/gmenu.cpp:gmenu_slider_set()`
+///
+/// ```cpp
+/// void gmenu_slider_set(TMenuItem *pItem, int min, int max, int value)
+/// {
+///     assert(pItem);
+///     const uint16_t nSteps = std::max<uint16_t>(pItem->sliderSteps(), 2);
+///     pItem->setSliderStep(((max - min - 1) / 2 + (value - min) * nSteps) / (max - min));
+/// }
+/// ```
+///
+/// 返回更新后的标志字段
+pub fn gmenu_slider_set(flags: u32, min: i32, max: i32, value: i32) -> u32 {
+    assert!(max > min);
+    let n_steps = slider_steps(flags).max(2) as i32;
+    let step = ((max - min - 1) / 2 + (value - min) * n_steps) / (max - min);
+    set_slider_step_raw(flags, step.max(0) as u16)
+}
+
+/// 从滑块的当前步数获取数值
+///
+/// **C++ Reference**: `Source/gmenu.cpp:gmenu_slider_get()`
+///
+/// ```cpp
+/// int gmenu_slider_get(TMenuItem *pItem, int min, int max)
+/// {
+///     const uint16_t step = pItem->sliderStep();
+///     const uint16_t steps = std::max<uint16_t>(pItem->sliderSteps(), 2);
+///     return min + (step * (max - min) + (steps - 1) / 2) / steps;
+/// }
+/// ```
+pub fn gmenu_slider_get(flags: u32, min: i32, max: i32) -> i32 {
+    let step = slider_step(flags) as i32;
+    let steps = slider_steps(flags).max(2) as i32;
+    min + (step * (max - min) + (steps - 1) / 2) / steps
+}
+
 //
 // TESTS
 //
@@ -757,5 +868,94 @@ mod tests {
         assert_eq!(GMENU_TOP, 117);
         assert_eq!(GMENU_ITEM_HEIGHT, 45);
         assert_eq!(SLIDER_STEPS, 10);
+    }
+
+    #[test]
+    fn test_slider_step_get_set() {
+        let mut flags = slider_flags::SLIDER | slider_flags::ENABLED;
+        assert_eq!(slider_step(flags), 0);
+
+        flags = set_slider_step_raw(flags, 42);
+        assert_eq!(slider_step(flags), 42);
+        // 启用位和滑块位不受影响
+        assert!(flags & slider_flags::ENABLED != 0);
+        assert!(flags & slider_flags::SLIDER != 0);
+    }
+
+    #[test]
+    fn test_slider_steps_get_set() {
+        let mut flags = slider_flags::SLIDER | slider_flags::ENABLED;
+        assert_eq!(slider_steps(flags), 0);
+
+        flags = set_slider_steps_raw(flags, 17);
+        assert_eq!(slider_steps(flags), 17);
+        // 启用位和滑块位不受影响
+        assert!(flags & slider_flags::ENABLED != 0);
+        assert!(flags & slider_flags::SLIDER != 0);
+    }
+
+    #[test]
+    fn test_gmenu_slider_steps_clears_low_bits() {
+        // C++ gmenu_slider_steps 保留 sliderStep 字段(低12位)，清除 sliderSteps 字段(位12-23)
+        // 然后写入新的 steps。原始 dwFlags = 0xFF000FFF (sliderStep=0xFFF，高字节=0xFF)
+        let mut flags: u32 = 0xFF000FFF;
+        gmenu_slider_steps(&mut flags, 21);
+        // 当前步保留（0xFFF）
+        assert_eq!(slider_step(flags), 0xFFF);
+        assert_eq!(slider_steps(flags), 21);
+        // 高 8 位保留
+        assert_eq!(flags & 0xFF000000, 0xFF000000);
+    }
+
+    #[test]
+    fn test_gmenu_slider_set_get_roundtrip() {
+        // 模拟 C++ 行为: 设置 VOLUME_MIN..VOLUME_MAX 上的值，然后读回
+        let min = -1600;
+        let max = 0;
+        let steps = 21;
+
+        // 初始化标志字段为启用的滑块并设置总步数
+        let mut flags = slider_flags::SLIDER | slider_flags::ENABLED;
+        gmenu_slider_steps(&mut flags, steps);
+
+        // 对几个值进行 set -> get 回环测试
+        for value in [min, -1200, -800, -400, max].iter().copied() {
+            let set_flags = gmenu_slider_set(flags, min, max, value);
+            let got = gmenu_slider_get(set_flags, min, max);
+            // get 返回值应在范围内，且接近原始值（每个步约 (max-min)/steps ~= 76）
+            assert!(
+                got >= min && got <= max,
+                "got {} out of [{}, {}]",
+                got,
+                min,
+                max
+            );
+        }
+    }
+
+    #[test]
+    fn test_gmenu_slider_set_min_max() {
+        let min = 0;
+        let max = 100;
+        let mut flags = slider_flags::SLIDER | slider_flags::ENABLED;
+        gmenu_slider_steps(&mut flags, 21);
+
+        // 设置最小值
+        let f = gmenu_slider_set(flags, min, max, min);
+        assert_eq!(slider_step(f), 0);
+        assert_eq!(gmenu_slider_get(f, min, max), min);
+
+        // 设置最大值 - 步数应接近 n_steps
+        let f = gmenu_slider_set(flags, min, max, max);
+        assert!(slider_step(f) >= 19 && slider_step(f) <= 21);
+    }
+
+    #[test]
+    fn test_slider_flags_constants_match_cpp() {
+        // 验证与 C++ gmenu.h 一致
+        assert_eq!(slider_flags::SLIDER, 0x4000_0000);
+        assert_eq!(slider_flags::ENABLED, 0x8000_0000);
+        assert_eq!(slider_flags::STEP_MASK, 0xFFF);
+        assert_eq!(slider_flags::STEPS_MASK, 0xFFF000);
     }
 }

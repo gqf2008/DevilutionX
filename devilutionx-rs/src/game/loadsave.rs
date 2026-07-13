@@ -2223,6 +2223,237 @@ pub fn build_game_snapshot(
     }
 }
 
+// ============================================================================
+// Sectioned save/load helpers — Delta / Misc / NObjects
+//
+// These mirror the *sections* of the C++ SaveGameData/SaveLevel pipeline
+// (Source/loadsave.cpp) rather than single C++ functions, so the Rust engine
+// can stream each section independently without owning the full global state.
+//
+// Each pair is byte-compatible with the corresponding slice of the vanilla
+// blob on the wire, and round-trips through the `*DeltaData`/`*MiscData`/
+// `*NObjectsData` structs defined below.
+// ============================================================================
+
+/// "Delta" section — per-level seed deltas written by `SaveLevelSeeds()`.
+///
+/// **C++ Reference**: `SaveLevelSeeds()` / `LoadLevelSeeds()` in
+/// Source/loadsave.cpp:1901-1926.
+///
+/// Format: for each level `i`, a `u8` "present" flag followed by a `le u32`
+/// seed when present. `None` levels serialise as a single `0` byte.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DeltaData {
+    /// Per-level seed deltas; `None` means "not yet generated".
+    pub level_seeds: Vec<Option<u32>>,
+}
+
+impl DeltaData {
+    /// Number of bytes this delta section occupies on the wire.
+    pub fn byte_len(&self) -> usize {
+        // 1 byte flag per level + 4 bytes seed when present.
+        let present = self.level_seeds.iter().filter(|s| s.is_some()).count();
+        self.level_seeds.len() + present * 4
+    }
+
+    /// Serialise the delta section into `file`.
+    ///
+    /// **C++ Reference**: `SaveLevelSeeds()` Source/loadsave.cpp:1901-1911.
+    pub fn save_delta(&self, file: &mut SaveHelper) {
+        for seed in &self.level_seeds {
+            match seed {
+                Some(s) => {
+                    file.write_u8(1);
+                    file.write_le_u32(*s);
+                }
+                None => file.write_u8(0),
+            }
+        }
+    }
+
+    /// Parse a delta section of `count` levels from `file`.
+    ///
+    /// **C++ Reference**: `LoadLevelSeeds()` Source/loadsave.cpp:1913-1926.
+    pub fn load_delta(file: &mut LoadHelper, count: usize) -> Self {
+        let mut out = Self::default();
+        for _ in 0..count {
+            if file.next_u8() != 0 {
+                out.level_seeds.push(Some(file.next_le_u32()));
+            } else {
+                out.level_seeds.push(None);
+            }
+        }
+        out
+    }
+}
+
+/// Save the delta (level-seed) section into a standalone blob.
+pub fn save_delta_blob(data: &DeltaData) -> Vec<u8> {
+    let mut file = SaveHelper::new(data.byte_len().max(16));
+    data.save_delta(&mut file);
+    file.into_data()
+}
+
+/// Load a delta section of `count` levels from a standalone blob.
+pub fn load_delta_blob(blob: &[u8], count: usize) -> DeltaData {
+    let mut file = LoadHelper::new(blob.to_vec());
+    DeltaData::load_delta(&mut file, count)
+}
+
+/// "Misc" section — the trailing miscellaneous game data written by the tail
+/// of `SaveGameData()`: premium-item count/level, the premium items themselves,
+/// the automap-active flag, and the automap scale.
+///
+/// **C++ Reference**: tail of `SaveGameData()` in Source/loadsave.cpp:2916-2923.
+#[derive(Debug, Clone, Default)]
+pub struct MiscData {
+    /// Number of premium (Wirt) items currently for sale.
+    pub premium_item_count: i32,
+    /// Current premium item level.
+    pub premium_item_level: i32,
+    /// Premium item bodies (compact engine form).
+    pub premium_items: Vec<BinaryItemData>,
+    /// Whether the automap overlay is active.
+    pub automap_active: bool,
+    /// Automap zoom scale.
+    pub automap_scale: i32,
+}
+
+impl MiscData {
+    /// Serialise the misc section into `file`.
+    ///
+    /// **C++ Reference**: `SaveGameData()` tail in Source/loadsave.cpp:2916-2923.
+    pub fn save_misc(&self, file: &mut SaveHelper, hellfire_premium_slots: usize, is_hellfire: bool) {
+        file.write_be_i32(self.premium_item_count);
+        file.write_be_i32(self.premium_item_level);
+
+        // Premium items — C++ writes exactly giNumberOfSmithPremiumItems slots
+        // (6 for Diablo, 15 for Hellfire). We pad with default items.
+        let slots = hellfire_premium_slots.max(self.premium_items.len());
+        let dummy = BinaryItemData::default();
+        for i in 0..slots {
+            let it = self.premium_items.get(i).unwrap_or(&dummy);
+            it.to_binary(file, is_hellfire);
+        }
+
+        file.write_bool8(self.automap_active);
+        file.write_be_i32(self.automap_scale);
+    }
+
+    /// Parse the misc section from `file`.
+    pub fn load_misc(file: &mut LoadHelper, hellfire_premium_slots: usize, is_hellfire: bool) -> Self {
+        let mut out = Self::default();
+        out.premium_item_count = file.next_be_i32();
+        out.premium_item_level = file.next_be_i32();
+        for _ in 0..hellfire_premium_slots {
+            out.premium_items
+                .push(BinaryItemData::from_binary(file, is_hellfire));
+        }
+        out.automap_active = file.next_bool8();
+        out.automap_scale = file.next_be_i32();
+        out
+    }
+}
+
+/// Save the misc section into a standalone blob.
+pub fn save_misc_blob(
+    data: &MiscData,
+    hellfire_premium_slots: usize,
+    is_hellfire: bool,
+) -> Vec<u8> {
+    // Worst-case size: counts (8) + premium items + automap (5).
+    let item_bytes = if is_hellfire { 372 } else { 368 };
+    let cap = 16 + hellfire_premium_slots * item_bytes + 8;
+    let mut file = SaveHelper::new(cap);
+    data.save_misc(&mut file, hellfire_premium_slots, is_hellfire);
+    file.into_data()
+}
+
+/// Load the misc section from a standalone blob.
+pub fn load_misc_blob(blob: &[u8], hellfire_premium_slots: usize, is_hellfire: bool) -> MiscData {
+    let mut file = LoadHelper::new(blob.to_vec());
+    MiscData::load_misc(&mut file, hellfire_premium_slots, is_hellfire)
+}
+
+/// "NObjects" section — the network-sync object slots written by
+/// `SaveLevel()`/`SaveGameData()`: the `ActiveObjects[]` and
+/// `AvailableObjects[]` i8 index arrays (each `MAX_OBJECTS` long) followed by
+/// the per-object bodies for every active object.
+///
+/// **C++ Reference**: object-slot writes inside `SaveLevel()` /
+/// `SaveGameData()` in Source/loadsave.cpp:1961-1967 / 2843-2848.
+#[derive(Debug, Clone, Default)]
+pub struct NObjectsData {
+    /// Active object slot indices (C++ `ActiveObjects[]`, length MAX_OBJECTS).
+    pub active: Vec<i8>,
+    /// Free object slot indices (C++ `AvailableObjects[]`, length MAX_OBJECTS).
+    pub available: Vec<i8>,
+    /// Bodies of the active objects, in active order.
+    pub objects: Vec<BinaryObjectData>,
+}
+
+impl NObjectsData {
+    /// Serialise the object-slot section into `file`.
+    ///
+    /// **C++ Reference**: object-slot block in `SaveLevel()`
+    /// Source/loadsave.cpp:1961-1967.
+    pub fn save_nobjects(&self, file: &mut SaveHelper) {
+        debug_assert!(
+            self.active.len() <= MAX_OBJECTS,
+            "active object list overflow"
+        );
+        debug_assert!(
+            self.available.len() <= MAX_OBJECTS,
+            "available object list overflow"
+        );
+        // Pad both arrays to MAX_OBJECTS with the -1 sentinel C++ uses for
+        // empty slots.
+        let neg = -1i8;
+        for i in 0..MAX_OBJECTS {
+            file.write_i8(self.active.get(i).copied().unwrap_or(neg));
+        }
+        for i in 0..MAX_OBJECTS {
+            file.write_i8(self.available.get(i).copied().unwrap_or(neg));
+        }
+        for o in &self.objects {
+            o.to_binary(file);
+        }
+    }
+
+    /// Parse the object-slot section for `object_count` active objects.
+    ///
+    /// **C++ Reference**: object-slot block in `LoadLevel()`
+    /// Source/loadsave.cpp:2039-2044.
+    pub fn load_nobjects(file: &mut LoadHelper, object_count: usize) -> Self {
+        let mut out = Self::default();
+        for _ in 0..MAX_OBJECTS {
+            out.active.push(file.next_i8());
+        }
+        for _ in 0..MAX_OBJECTS {
+            out.available.push(file.next_i8());
+        }
+        for _ in 0..object_count {
+            out.objects.push(BinaryObjectData::from_binary(file));
+        }
+        out
+    }
+}
+
+/// Save the object-slot section into a standalone blob.
+pub fn save_nobjects_blob(data: &NObjectsData) -> Vec<u8> {
+    // Two MAX_OBJECTS i8 arrays + one body per active object (~100 bytes).
+    let cap = MAX_OBJECTS * 2 + data.objects.len() * 128;
+    let mut file = SaveHelper::new(cap.max(16));
+    data.save_nobjects(&mut file);
+    file.into_data()
+}
+
+/// Load the object-slot section for `object_count` active objects from a blob.
+pub fn load_nobjects_blob(blob: &[u8], object_count: usize) -> NObjectsData {
+    let mut file = LoadHelper::new(blob.to_vec());
+    NObjectsData::load_nobjects(&mut file, object_count)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2601,5 +2832,131 @@ mod tests {
         assert_eq!(env_game, back_game);
         assert_eq!(back_game.to_snapshot().curr_level, 7);
         assert_eq!(back_level.to_snapshot().monsters.len(), 1);
+    }
+
+    #[test]
+    fn test_delta_section_roundtrip() {
+        let data = DeltaData {
+            level_seeds: vec![Some(0x1111_2222), None, Some(0x3333_4444), None, Some(0)],
+        };
+        let expected_bytes = data.byte_len();
+        let blob = save_delta_blob(&data);
+        assert_eq!(blob.len(), expected_bytes);
+        let back = load_delta_blob(&blob, data.level_seeds.len());
+        assert_eq!(back, data);
+    }
+
+    #[test]
+    fn test_delta_section_empty_levels() {
+        let data = DeltaData {
+            level_seeds: vec![None, None, None],
+        };
+        let blob = save_delta_blob(&data);
+        // 3 absent levels = 3 flag bytes, no seed bytes.
+        assert_eq!(blob.len(), 3);
+        let back = load_delta_blob(&blob, 3);
+        assert_eq!(back, data);
+    }
+
+    #[test]
+    fn test_delta_section_all_present() {
+        let data = DeltaData {
+            level_seeds: vec![Some(1), Some(2), Some(3), Some(4)],
+        };
+        let blob = save_delta_blob(&data);
+        // 4 flag bytes + 4 * 4 seed bytes.
+        assert_eq!(blob.len(), 4 + 16);
+        let back = load_delta_blob(&blob, 4);
+        assert_eq!(back, data);
+    }
+
+    #[test]
+    fn test_misc_section_roundtrip() {
+        let data = MiscData {
+            premium_item_count: 3,
+            premium_item_level: 7,
+            premium_items: vec![BinaryItemData::default(); 2],
+            automap_active: true,
+            automap_scale: 2,
+        };
+        // Hellfire uses 15 premium slots; we pad to that.
+        let blob = save_misc_blob(&data, 15, true);
+        let back = load_misc_blob(&blob, 15, true);
+        assert_eq!(back.premium_item_count, 3);
+        assert_eq!(back.premium_item_level, 7);
+        assert_eq!(back.premium_items.len(), 15);
+        assert!(back.automap_active);
+        assert_eq!(back.automap_scale, 2);
+    }
+
+    #[test]
+    fn test_misc_section_diablo_slots() {
+        let data = MiscData {
+            premium_item_count: 0,
+            premium_item_level: 0,
+            premium_items: vec![],
+            automap_active: false,
+            automap_scale: 1,
+        };
+        let blob = save_misc_blob(&data, 6, false);
+        let back = load_misc_blob(&blob, 6, false);
+        assert_eq!(back.premium_items.len(), 6);
+        assert!(!back.automap_active);
+        assert_eq!(back.automap_scale, 1);
+    }
+
+    #[test]
+    fn test_nobjects_section_roundtrip() {
+        let data = NObjectsData {
+            active: vec![0, 1, 2],
+            available: vec![3, 4],
+            objects: vec![
+                BinaryObjectData {
+                    object_type: 5,
+                    position_x: 10,
+                    position_y: 20,
+                    rnd_seed: 0xABCDEF01,
+                    ..Default::default()
+                },
+                BinaryObjectData {
+                    object_type: 7,
+                    position_x: 30,
+                    position_y: 40,
+                    ..Default::default()
+                },
+            ],
+        };
+        let blob = save_nobjects_blob(&data);
+        let back = load_nobjects_blob(&blob, data.objects.len());
+        // Both slot arrays are padded to MAX_OBJECTS.
+        assert_eq!(back.active.len(), MAX_OBJECTS);
+        assert_eq!(back.available.len(), MAX_OBJECTS);
+        // First slots carry the active/available ids we wrote.
+        assert_eq!(back.active[0..3], [0i8, 1, 2]);
+        assert_eq!(back.available[0..2], [3i8, 4]);
+        // Tail slots are the -1 sentinel.
+        assert_eq!(back.active[3], -1);
+        assert_eq!(back.available[2], -1);
+        // Bodies round-trip.
+        assert_eq!(back.objects.len(), 2);
+        assert_eq!(back.objects[0].object_type, 5);
+        assert_eq!(back.objects[0].position_x, 10);
+        assert_eq!(back.objects[0].rnd_seed, 0xABCDEF01);
+        assert_eq!(back.objects[1].object_type, 7);
+    }
+
+    #[test]
+    fn test_nobjects_section_empty() {
+        let data = NObjectsData::default();
+        let blob = save_nobjects_blob(&data);
+        // Two MAX_OBJECTS arrays of i8, no bodies.
+        assert_eq!(blob.len(), MAX_OBJECTS * 2);
+        let back = load_nobjects_blob(&blob, 0);
+        assert_eq!(back.active.len(), MAX_OBJECTS);
+        assert_eq!(back.available.len(), MAX_OBJECTS);
+        assert!(back.objects.is_empty());
+        // Every slot is the -1 sentinel.
+        assert!(back.active.iter().all(|&v| v == -1));
+        assert!(back.available.iter().all(|&v| v == -1));
     }
 }

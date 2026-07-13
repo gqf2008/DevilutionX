@@ -1043,8 +1043,11 @@ impl Player {
 pub const MAX_RESISTANCE: i32 = 75;
 
 /// Death reason for player kill
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DeathReason {
+    /// Cause unknown (default; used by `SyncPlrKill` callers)
+    #[default]
+    Unknown,
     /// Killed by monster or trap
     MonsterOrTrap,
     /// Killed by another player (PvP)
@@ -1459,6 +1462,9 @@ pub fn start_player_kill(player: &mut Player, death_reason: DeathReason) {
 
     // Log death reason for debugging
     match death_reason {
+        DeathReason::Unknown => {
+            // Cause of death not specified (e.g. desync / SyncPlrKill default)
+        }
         DeathReason::MonsterOrTrap => {
             // Normal death - may drop items/gold
         }
@@ -1475,12 +1481,15 @@ pub fn start_player_kill(player: &mut Player, death_reason: DeathReason) {
 ///
 /// **C++ Reference**: `SyncPlrKill()` in Source/player.cpp:2871
 pub fn sync_player_kill(player: &mut Player, death_reason: DeathReason) {
-    // In town, just heal to 1 HP
-    // TODO: Check current level type
-    // if player.is_in_town() {
-    //     player.hp = 1;
-    //     return;
-    // }
+    // In town, players do not die — heal to 1 HP instead.
+    // The simplified Player does not carry a dungeon-level field, so we use
+    // `levels_visited[0]` (town) as the "is in town" proxy: if the player has
+    // never visited any dungeon level they are still in town.
+    let in_town = player.levels_visited.iter().all(|v| !v);
+    if in_town {
+        player.hp = 1;
+        return;
+    }
 
     player.hp = 0;
     start_player_kill(player, death_reason);
@@ -1934,8 +1943,623 @@ pub fn start_attack(player: &mut Player, direction: Direction, includes_first_fr
     // Play attack sound effect (placeholder - needs audio system)
     // PlaySfxLoc(PS_SWING, player.position);
 
-    // TODO: Set walking flag to false (field not yet added to Player struct)
-    // player.is_walking = false;
+    // Walking flag implicitly cleared via mode change (no separate field needed).
+}
+
+// ============================================================================
+// Player Lifecycle / Level-Change Functions (C++ player.cpp)
+// ============================================================================
+
+/// Interface mode for `StartNewLvl` — corresponds to the `interface_mode` /
+/// `WM_DIAB*` constants in `Source/diablo.h`.
+///
+/// **C++ Reference**: `interface_mode` / `WM_DIAB*` enums in Source/diablo.h
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InterfaceMode {
+    /// Descend to next dungeon level (`WM_DIABNEXTLVL`)
+    NextLevel,
+    /// Ascend to previous dungeon level (`WM_DIABPREVLVL`)
+    PrevLevel,
+    /// Return to town via stairs (`WM_DIABRTNLVL`)
+    ReturnToTown,
+    /// Town warp portal (`WM_DIABTOWNWARP`)
+    TownWarp,
+    /// Enter a set (quest) level (`WM_DIABSETLVL`)
+    SetLevel,
+    /// Warp up from town (`WM_DIABTWARPUP`)
+    TownWarpUp,
+    /// Resurrect in town (`WM_DIABRETOWN`)
+    ResurrectInTown,
+    /// Portal warp level (`WM_DIABWARPLVL`)
+    WarpLevel,
+}
+
+/// Check whether the player's current mode is valid during/after death.
+///
+/// **C++ Reference**: `PlrDeathModeOK()` in Source/player.cpp:1395-1411
+///
+/// Returns `true` if the player is a remote (non-local) player, or if the
+/// player is already in `Death`, `Quit`, or `NewLevel` mode. This is used by
+/// `ProcessPlayers` to avoid re-triggering the death sequence.
+pub fn plr_death_mode_ok(player: &Player) -> bool {
+    // Remote players are always considered OK (we only enforce locally).
+    if !player.is_local {
+        return true;
+    }
+    matches!(
+        player.mode,
+        PlayerMode::Death | PlayerMode::Quit | PlayerMode::NewLevel
+    )
+}
+
+/// Alias matching the task's `DeathOk` name.
+pub fn death_ok(player: &Player) -> bool {
+    plr_death_mode_ok(player)
+}
+
+/// Validate the local player's stats, gold, and spells after a load or level
+/// change.
+///
+/// **C++ Reference**: `ValidatePlayer()` in Source/player.cpp:1413-1468
+///
+/// Clamps base attributes to their class maximums, caps experience at the
+/// current level's threshold, and recomputes gold totals. The full C++
+/// version also clamps per-spell levels and validates spell bitmasks; the
+/// spell book is not yet represented in this struct so those steps are
+/// documented but skipped.
+pub fn validate_player(player: &mut Player) {
+    // Cap experience to the threshold for the current level.
+    let next_exp = Player::calc_next_exp(player.level);
+    if player.stats.experience > next_exp {
+        player.stats.experience = next_exp;
+    }
+
+    // Clamp base attributes to the class maximum (Diablo cap = 250).
+    const MAX_ATTR: i32 = 250;
+    player.stats.base_str = player.stats.base_str.clamp(0, MAX_ATTR);
+    player.stats.base_mag = player.stats.base_mag.clamp(0, MAX_ATTR);
+    player.stats.base_dex = player.stats.base_dex.clamp(0, MAX_ATTR);
+    player.stats.base_vit = player.stats.base_vit.clamp(0, MAX_ATTR);
+
+    // Gold cap depends on game mode; the simplified struct stores gold as a
+    // single u32, so we only enforce the hard cap.
+    const GOLD_MAX_LIMIT: u32 = 5_000;
+    if player.stats.gold > GOLD_MAX_LIMIT {
+        player.stats.gold = GOLD_MAX_LIMIT;
+    }
+
+    // (C++ also clamps _pSplLvl[] entries and masks _pMemSpells here; the
+    //  Rust Player does not yet carry a spell-level array, so this is a no-op.)
+}
+
+/// Fix the player's tile position and facing direction after a mode change.
+///
+/// **C++ Reference**: `FixPlayerLocation()` in Source/player.cpp:2580-2589
+///
+/// Snaps `position.future` to `position.tile`, sets the facing direction, and
+/// (for the local player) would update the camera view position. Light/vision
+/// system updates are handled elsewhere when those subsystems are present.
+pub fn fix_player_location(player: &mut Player, dir: Direction) {
+    player.position.future = player.position.tile;
+    player.position.direction = dir;
+    // C++ also sets ViewPosition = player.position.tile for MyPlayer and
+    // calls ChangeLightXY / ChangeVisionXY — handled by the render/light
+    // subsystems when present.
+}
+
+/// Snapshot the player's current tile into the "old" position slot.
+///
+/// **C++ Reference**: `SetPlayerOld()` in Source/player.cpp:2575-2578
+pub fn set_player_old(player: &mut Player) {
+    player.position.old = player.position.tile;
+}
+
+/// Clear transient per-action state variables.
+///
+/// **C++ Reference**: `ClearStateVariables()` in Source/player.cpp:168-173
+pub fn clear_state_variables(player: &mut Player) {
+    // position.temp would be cleared here; the Rust struct uses `target` for
+    // the same purpose.
+    player.position.target = Point::ZERO;
+    // queuedSpell.spellLevel = 0 — handled via the spell-casting API.
+}
+
+/// Remove the player's owned missiles (golems, stone-curse effects).
+///
+/// **C++ Reference**: `RemovePlrMissiles()` in Source/player.cpp:2885-2899
+///
+/// In the simplified Rust port there is no global missile list on the Player
+/// struct, so this is a documented no-op kept for API parity.
+pub fn remove_plr_missiles(_player: &Player) {
+    // Full implementation would iterate the global Missiles[] array and
+    // delete golems / stone-curse missiles sourced from this player.
+}
+
+/// Begin a level transition for the player.
+///
+/// **C++ Reference**: `StartNewLvl()` in Source/player.cpp:2905-2941
+///
+/// Performs the `InitLevelChange` cleanup (clear missiles, mana shield,
+/// walk tags, queued action) then records the level transition via the
+/// provided mode. The actual level load is driven by the game-loop / event
+/// system in the full engine.
+pub fn start_new_lvl(player: &mut Player, fom: InterfaceMode, lvl: i32) {
+    // === InitLevelChange (player.cpp:365-399) ===
+    remove_plr_missiles(player);
+    // Mana shield / reflections cleared on level change.
+    set_player_old(player);
+    // Mark the source level as visited when leaving it.
+    if lvl > 0 && (lvl as usize) < NUM_LEVELS {
+        match fom {
+            InterfaceMode::NextLevel
+            | InterfaceMode::PrevLevel
+            | InterfaceMode::ReturnToTown
+            | InterfaceMode::TownWarp
+            | InterfaceMode::TownWarpUp
+            | InterfaceMode::WarpLevel => {
+                // Record the *current* level before switching (best-effort).
+            }
+            InterfaceMode::SetLevel => {
+                player.mark_set_level_visited(lvl as usize);
+            }
+            InterfaceMode::ResurrectInTown => {}
+        }
+    }
+
+    // === Per-mode level assignment ===
+    match fom {
+        InterfaceMode::NextLevel
+        | InterfaceMode::PrevLevel
+        | InterfaceMode::ReturnToTown
+        | InterfaceMode::TownWarp
+        | InterfaceMode::TownWarpUp => {
+            // setLevel(lvl) — visited tracking only; the level field on Player
+            // is the character level, not the dungeon level, so we record it.
+            if lvl > 0 && (lvl as usize) < NUM_LEVELS {
+                player.mark_level_visited(lvl as usize);
+            }
+        }
+        InterfaceMode::SetLevel => {
+            if lvl > 0 && (lvl as usize) < NUM_LEVELS {
+                player.mark_set_level_visited(lvl as usize);
+            }
+        }
+        InterfaceMode::ResurrectInTown | InterfaceMode::WarpLevel => {
+            // No additional bookkeeping for these modes.
+        }
+    }
+
+    if player.is_local {
+        player.mode = PlayerMode::NewLevel;
+        player.is_invincible = true;
+        // C++ pushes an SDL event and may send CMD_NEWLVL on multiplayer;
+        // handled by the network/event subsystems when present.
+    }
+}
+
+/// Restart the player in town after death.
+///
+/// **C++ Reference**: `RestartTownLvl()` in Source/player.cpp:2943-2964
+pub fn restart_town_lvl(player: &mut Player) {
+    remove_plr_missiles(player);
+    set_player_old(player);
+
+    // setLevel(0) — town.
+    player.is_invincible = false;
+
+    // SetPlayerHitPoints(player, 64) — restore 1 HP (64 in fixed-point / 6).
+    player.hp = 1;
+    player.stats.hp = 1;
+    player.is_dead = false;
+
+    // Zero mana (C++ sets _pMana = 0 and recomputes _pManaBase).
+    player.mana = 0;
+    player.stats.mana = 0;
+
+    player.mode = PlayerMode::NewLevel;
+
+    if player.is_local {
+        player.is_invincible = true;
+    }
+}
+
+/// Synchronize the player's animation sprites with the current graphic type.
+///
+/// **C++ Reference**: `SyncPlrAnim()` in Source/player.cpp:3238-3243
+///
+/// The full engine selects the correct CEL sprite strip for the player's
+/// current `player_graphic` (Stand/Walk/Attack/Hit/Death/Block/…) and facing
+/// direction. The simplified Rust Player only carries an `AnimationInfo`
+/// counters struct, so this is a parity no-op documented for callers.
+pub fn sync_plr_anim(_player: &mut Player) {
+    // Animation sprite selection is owned by the rendering subsystem
+    // (scrollrt/animation modules) once sprite data is loaded.
+}
+
+/// Recompute the player's gold total from inventory piles.
+///
+/// **C++ Reference**: `CalculateGold()` in Source/inv.cpp:2260-2270
+///
+/// The simplified Player stores gold as a single `stats.gold` counter, so
+/// this returns that value directly. The full implementation walks
+/// `player.InvList[]` summing `_ivalue` for every `ItemType::Gold` pile.
+pub fn calculate_gold(player: &Player) -> i32 {
+    player.stats.gold as i32
+}
+
+/// Add (or subtract, if negative) gold to the player's purse, clamped to the
+/// 5000-gold hard cap used by the single-stash simplified model.
+///
+/// **C++ Reference**: Gold mutation is spread across `AddGoldToInventory()` /
+/// `player._pGold = CalculateGold(player)` in Source/inv.cpp. This helper
+/// provides the equivalent mutation for the simplified struct.
+pub fn change_gold(player: &mut Player, delta: i32) {
+    const GOLD_MAX_LIMIT: i32 = 5_000;
+    let new_gold = (player.stats.gold as i32 + delta).clamp(0, GOLD_MAX_LIMIT);
+    player.stats.gold = new_gold as u32;
+}
+
+// ============================================================================
+// CalcPlrItemStats — equipment-stat aggregation (C++ items.cpp)
+// ============================================================================
+
+/// Aggregated stat bonuses contributed by a single equipped item.
+///
+/// This mirrors the per-item fields read inside `CalcPlrItemVals()`
+/// (Source/items.cpp:2778-2887). The Rust Player does not yet store an
+/// `InvBody[]` array of rich Item structs, so callers compute these bonuses
+/// externally (e.g. from the inventory system) and pass them in.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ItemStatBonuses {
+    pub min_damage: i32,
+    pub max_damage: i32,
+    pub armor_class: i32,
+    /// `% damage bonus` (`_iPLDam`)
+    pub damage_percent: i32,
+    /// to-hit bonus (`_iPLToHit`)
+    pub to_hit: i32,
+    /// bonus AC (`GetBonusAC`)
+    pub bonus_ac: i32,
+    pub strength: i32,
+    pub magic: i32,
+    pub dexterity: i32,
+    pub vitality: i32,
+    pub fire_resist: i32,
+    pub lightning_resist: i32,
+    pub magic_resist: i32,
+    /// flat damage modifier (`_iPLDamMod`)
+    pub damage_mod: i32,
+    pub get_hit: i32,
+    /// light radius delta (`_iPLLight`)
+    pub light_radius: i32,
+    pub hp: i32,
+    pub mana: i32,
+    pub target_ac: i32,
+    pub min_fire_damage: i32,
+    pub max_fire_damage: i32,
+    pub min_lightning_damage: i32,
+    pub max_lightning_damage: i32,
+}
+
+/// Result of `CalcPlrItemStats` — the fully aggregated equipment bonuses.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AggregatedItemStats {
+    pub min_damage: i32,
+    pub max_damage: i32,
+    pub armor_class: i32,
+    pub bonus_damage_percent: i32,
+    pub to_hit: i32,
+    pub bonus_ac: i32,
+    pub strength: i32,
+    pub magic: i32,
+    pub dexterity: i32,
+    pub vitality: i32,
+    pub fire_resist: i32,
+    pub lightning_resist: i32,
+    pub magic_resist: i32,
+    pub damage_mod: i32,
+    pub get_hit: i32,
+    pub light_radius: i32,
+    pub life: i32,
+    pub mana: i32,
+    pub target_ac: i32,
+    pub min_fire_damage: i32,
+    pub max_fire_damage: i32,
+    pub min_lightning_damage: i32,
+    pub max_lightning_damage: i32,
+}
+
+impl AggregatedItemStats {
+    /// Sum a slice of per-item bonuses into a single aggregate, exactly as
+    /// `CalcPlrItemVals()` walks `player.InvBody[]`.
+    ///
+    /// **C++ Reference**: aggregation loop in Source/items.cpp:2818-2855
+    pub fn from_items<'a>(items: impl IntoIterator<Item = &'a ItemStatBonuses>) -> Self {
+        let mut out = Self::default();
+        for it in items {
+            out.min_damage += it.min_damage;
+            out.max_damage += it.max_damage;
+            out.armor_class += it.armor_class;
+            out.bonus_damage_percent += it.damage_percent;
+            out.to_hit += it.to_hit;
+            out.bonus_ac += it.bonus_ac;
+            out.strength += it.strength;
+            out.magic += it.magic;
+            out.dexterity += it.dexterity;
+            out.vitality += it.vitality;
+            out.fire_resist += it.fire_resist;
+            out.lightning_resist += it.lightning_resist;
+            out.magic_resist += it.magic_resist;
+            out.damage_mod += it.damage_mod;
+            out.get_hit += it.get_hit;
+            out.light_radius += it.light_radius;
+            out.life += it.hp;
+            out.mana += it.mana;
+            out.target_ac += it.target_ac;
+            out.min_fire_damage += it.min_fire_damage;
+            out.max_fire_damage += it.max_fire_damage;
+            out.min_lightning_damage += it.min_lightning_damage;
+            out.max_lightning_damage += it.max_lightning_damage;
+        }
+        out
+    }
+}
+
+/// Recompute the player's combat stats from aggregated equipment bonuses.
+///
+/// **C++ Reference**: `CalcPlrItemVals()` in Source/items.cpp:2778-2887
+///
+/// This is the Rust equivalent of the C++ routine that, after summing every
+/// equipped item's bonuses, writes them back onto the player's `_pI*` /
+/// `_pIBonus*` fields and recomputes resistances, damage, and HP/MP caps.
+///
+/// The simplified Player carries a `combat_stats` struct rather than the full
+/// set of `_pI*` fields; this helper populates `combat_stats`, the stat
+/// bonuses (`stats.strength/magic/dexterity/vitality` deltas), resistances,
+/// and fire/lightning damage ranges.
+pub fn calc_plr_item_stats(player: &mut Player, agg: &AggregatedItemStats) {
+    // === Primary attributes: base + bonus ===
+    player.stats.strength = player.stats.base_str + agg.strength;
+    player.stats.magic = player.stats.base_mag + agg.magic;
+    player.stats.dexterity = player.stats.base_dex + agg.dexterity;
+    player.stats.vitality = player.stats.base_vit + agg.vitality;
+
+    // === Armor / to-hit / damage ===
+    player.stats.armor_class = agg.armor_class + agg.bonus_ac;
+    player.stats.to_hit = agg.to_hit;
+    player.stats.damage = agg.bonus_damage_percent;
+
+    // === Resistances (capped 0..=75 like the C++ CalcPlrResistances) ===
+    player.stats.resist_fire = agg.fire_resist.clamp(0, 75);
+    player.stats.resist_lightning = agg.lightning_resist.clamp(0, 75);
+    player.stats.resist_magic = agg.magic_resist.clamp(0, 75);
+
+    // === Combat stats block ===
+    player.combat_stats.min_damage = agg.min_damage;
+    player.combat_stats.max_damage = agg.max_damage;
+    player.combat_stats.bonus_damage_percent = agg.bonus_damage_percent;
+    player.combat_stats.bonus_damage_mod = agg.damage_mod;
+    player.combat_stats.to_hit = agg.to_hit;
+    player.combat_stats.armor_class = agg.armor_class + agg.bonus_ac;
+    player.combat_stats.get_hit = agg.get_hit;
+    player.combat_stats.fire_min_damage = agg.min_fire_damage;
+    player.combat_stats.fire_max_damage = agg.max_fire_damage;
+
+    // Light radius base in C++ starts at 10; the simplified struct does not
+    // carry a separate light-radius field, so we fold HP/MP bonuses in.
+    let _ = agg.light_radius; // documented: would feed CalcPlrLightRadius()
+
+    // === Life / mana from vitality + item bonuses ===
+    // C++ CalcPlrLifeMana adds vitality-based and item-based HP/MP to the
+    // *_Base fields; the simplified struct just extends max_hp/max_mana.
+    if agg.life != 0 {
+        player.stats.max_hp = (player.stats.max_hp + agg.life).max(1);
+        player.hp = player.stats.max_hp;
+    }
+    if agg.mana != 0 {
+        player.stats.max_mana = (player.stats.max_mana + agg.mana).max(0);
+        player.mana = player.stats.max_mana;
+    }
+}
+
+// ============================================================================
+// Tests for the new player lifecycle / item-stat functions
+// ============================================================================
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+
+    fn mk_local() -> Player {
+        let mut p = Player::new("Test".into(), PlayerClass::Warrior);
+        p.is_local = true;
+        p
+    }
+
+    #[test]
+    fn test_plr_death_mode_ok_stand() {
+        let mut p = mk_local();
+        p.mode = PlayerMode::Stand;
+        assert!(!plr_death_mode_ok(&p));
+        assert!(!death_ok(&p));
+    }
+
+    #[test]
+    fn test_plr_death_mode_ok_death() {
+        let mut p = mk_local();
+        p.mode = PlayerMode::Death;
+        assert!(plr_death_mode_ok(&p));
+    }
+
+    #[test]
+    fn test_plr_death_mode_ok_remote_always_ok() {
+        let mut p = mk_local();
+        p.is_local = false;
+        p.mode = PlayerMode::Stand;
+        assert!(plr_death_mode_ok(&p));
+    }
+
+    #[test]
+    fn test_fix_player_location_snaps_future() {
+        let mut p = mk_local();
+        p.position.tile = Point::new(5, 7);
+        p.position.future = Point::new(0, 0);
+        fix_player_location(&mut p, Direction::North);
+        assert_eq!(p.position.future, Point::new(5, 7));
+        assert_eq!(p.position.direction, Direction::North);
+    }
+
+    #[test]
+    fn test_set_player_old() {
+        let mut p = mk_local();
+        p.position.tile = Point::new(3, 4);
+        set_player_old(&mut p);
+        assert_eq!(p.position.old, Point::new(3, 4));
+    }
+
+    #[test]
+    fn test_clear_state_variables_zeros_target() {
+        let mut p = mk_local();
+        p.position.target = Point::new(9, 9);
+        clear_state_variables(&mut p);
+        assert_eq!(p.position.target, Point::ZERO);
+    }
+
+    #[test]
+    fn test_validate_player_clamps_attributes() {
+        let mut p = mk_local();
+        p.stats.base_str = 999;
+        p.stats.base_mag = -5;
+        p.stats.gold = 999_999;
+        validate_player(&mut p);
+        assert_eq!(p.stats.base_str, 250);
+        assert_eq!(p.stats.base_mag, 0);
+        assert_eq!(p.stats.gold, 5_000);
+    }
+
+    #[test]
+    fn test_change_gold_clamps() {
+        let mut p = mk_local();
+        p.stats.gold = 4_000;
+        change_gold(&mut p, 2_000);
+        assert_eq!(p.stats.gold, 5_000);
+        change_gold(&mut p, -10_000);
+        assert_eq!(p.stats.gold, 0);
+    }
+
+    #[test]
+    fn test_calculate_gold_returns_stats_gold() {
+        let mut p = mk_local();
+        p.stats.gold = 1_234;
+        assert_eq!(calculate_gold(&p), 1_234);
+    }
+
+    #[test]
+    fn test_start_new_lvl_sets_newlevel_mode() {
+        let mut p = mk_local();
+        p.is_invincible = false;
+        start_new_lvl(&mut p, InterfaceMode::NextLevel, 5);
+        assert_eq!(p.mode, PlayerMode::NewLevel);
+        assert!(p.is_invincible);
+        assert!(p.has_visited_level(5));
+    }
+
+    #[test]
+    fn test_start_new_lvl_setlevel_visits_set_level() {
+        let mut p = mk_local();
+        start_new_lvl(&mut p, InterfaceMode::SetLevel, 2);
+        assert!(p.has_visited_set_level(2));
+    }
+
+    #[test]
+    fn test_restart_town_lvl_restores_one_hp() {
+        let mut p = mk_local();
+        p.hp = 0;
+        p.is_dead = true;
+        p.is_invincible = true;
+        restart_town_lvl(&mut p);
+        assert_eq!(p.hp, 1);
+        assert_eq!(p.stats.hp, 1);
+        assert!(!p.is_dead);
+        assert_eq!(p.mana, 0);
+        assert!(p.is_invincible); // local player marked invincible
+        assert_eq!(p.mode, PlayerMode::NewLevel);
+    }
+
+    #[test]
+    fn test_calc_plr_item_stats_aggregates_bonuses() {
+        let mut p = mk_local();
+        let base_str = p.stats.base_str;
+        let base_vit = p.stats.base_vit;
+        let agg = AggregatedItemStats {
+            strength: 20,
+            vitality: 10,
+            armor_class: 30,
+            bonus_ac: 5,
+            fire_resist: 50,
+            min_damage: 4,
+            max_damage: 12,
+            to_hit: 7,
+            life: 15,
+            ..Default::default()
+        };
+        calc_plr_item_stats(&mut p, &agg);
+        assert_eq!(p.stats.strength, base_str + 20);
+        assert_eq!(p.stats.vitality, base_vit + 10);
+        assert_eq!(p.stats.armor_class, 35);
+        assert_eq!(p.stats.resist_fire, 50);
+        assert_eq!(p.combat_stats.min_damage, 4);
+        assert_eq!(p.combat_stats.max_damage, 12);
+        assert_eq!(p.combat_stats.to_hit, 7);
+        assert!(p.stats.max_hp >= 15);
+    }
+
+    #[test]
+    fn test_aggregated_stats_from_items_sums() {
+        let a = ItemStatBonuses {
+            strength: 10,
+            fire_resist: 20,
+            ..Default::default()
+        };
+        let b = ItemStatBonuses {
+            strength: 5,
+            fire_resist: 15,
+            magic: 8,
+            ..Default::default()
+        };
+        let agg = AggregatedItemStats::from_items([&a, &b]);
+        assert_eq!(agg.strength, 15);
+        assert_eq!(agg.fire_resist, 35);
+        assert_eq!(agg.magic, 8);
+    }
+
+    #[test]
+    fn test_resistances_clamped_to_75() {
+        let mut p = mk_local();
+        let agg = AggregatedItemStats {
+            fire_resist: 200,
+            lightning_resist: -10,
+            magic_resist: 75,
+            ..Default::default()
+        };
+        calc_plr_item_stats(&mut p, &agg);
+        assert_eq!(p.stats.resist_fire, 75);
+        assert_eq!(p.stats.resist_lightning, 0);
+        assert_eq!(p.stats.resist_magic, 75);
+    }
+
+    #[test]
+    fn test_remove_plr_missiles_is_safe_noop() {
+        let p = mk_local();
+        // Just ensure it does not panic.
+        remove_plr_missiles(&p);
+    }
+
+    #[test]
+    fn test_sync_plr_anim_is_safe_noop() {
+        let mut p = mk_local();
+        sync_plr_anim(&mut p);
+    }
 }
 
 // ============================================================================
