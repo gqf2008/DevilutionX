@@ -28,6 +28,22 @@ pub type LightingTable = [u8; LIGHT_TABLE_SIZE];
 /// 所有光照级别的映射表
 pub type AllLightingTables = [LightingTable; NUM_LIGHTING_LEVELS];
 
+/// Light-grid tile coordinate used by `do_lighting` / `do_vision`.
+///
+/// Kept as a thin local type to avoid pulling the cursor module's `Point`
+/// into the engine layer (the engine must not depend on the game layer).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Point {
+    pub x: i32,
+    pub y: i32,
+}
+
+impl Point {
+    pub const fn new(x: i32, y: i32) -> Self {
+        Self { x, y }
+    }
+}
+
 /// 光源
 #[derive(Clone, Copy, Debug)]
 pub struct Light {
@@ -235,6 +251,234 @@ impl LightManager {
             light.active = false;
         }
     }
+
+    /// Apply `DoLighting` to a pre-allocated light grid.
+    ///
+    /// Port of `DoLighting(position, radius, offset)` from `lighting.cpp`.
+    /// Writes the minimum of the existing grid value and the falloff value
+    /// into every tile within the radius (a 31x31 diamond-bounded square).
+    pub fn do_lighting(
+        &self,
+        grid: &mut [u8],
+        grid_width: usize,
+        position: Point,
+        radius: u8,
+    ) {
+        let radius = (radius as usize).min(NUM_LIGHT_RADIUS - 1);
+
+        // Source tile is fully lit (value 0).
+        if let Some(v) = grid_get_mut(grid, grid_width, position.x, position.y) {
+            *v = (*v).min(0);
+        }
+
+        // Scan the surrounding tiles (a square of side 2*15+1) and apply the
+        // precomputed falloff based on the linear (rotated-diamond) distance.
+        for dy in -15i32..=15 {
+            for dx in -15i32..=15 {
+                if dx == 0 && dy == 0 {
+                    continue;
+                }
+                let tx = position.x + dx;
+                let ty = position.y + dy;
+                if tx < 0 || ty < 0 {
+                    continue;
+                }
+                let dist = light_cone_distance(dx, dy);
+                if dist >= 128 {
+                    continue;
+                }
+                let falloff = light_falloff(radius, dist);
+                if let Some(v) = grid_get_mut(grid, grid_width, tx, ty) {
+                    if falloff < *v {
+                        *v = falloff;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Apply `DoVision` to a visibility flag grid.
+    ///
+    /// Port of `DoVision(position, radius, doAutomap, visible)` from
+    /// `lighting.cpp`. Marks every tile inside the radius as visible/lit and
+    /// explored by setting the corresponding bits in the supplied flag grid.
+    pub fn do_vision(
+        &self,
+        flags: &mut [u8],
+        grid_width: usize,
+        position: Point,
+        radius: u8,
+        visible: bool,
+    ) {
+        let r = radius.max(1) as i32;
+
+        for dy in -r..=r {
+            for dx in -r..=r {
+                let tx = position.x + dx;
+                let ty = position.y + dy;
+                if tx < 0 || ty < 0 {
+                    continue;
+                }
+                let dist = floor_sqrt(dx * dx + dy * dy);
+                if dist > r {
+                    continue;
+                }
+                if let Some(f) = grid_get_mut(flags, grid_width, tx, ty) {
+                    // Visible + Explored bits (mirrors DungeonFlag::Visible|Lit|Explored).
+                    *f |= VISION_FLAG_VISIBLE | VISION_FLAG_EXPLORED;
+                    if visible {
+                        *f |= VISION_FLAG_LIT;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Regenerate the procedural light tables (MakeLightTable port).
+    ///
+    /// Mirrors the generation in `MakeLightTable()` from `lighting.cpp`: 16
+    /// shade tables where each successive level darkens the palette by
+    /// folding entries towards index 0. Level 15 (the last table) is left
+    /// entirely black, which matches the C++ behaviour
+    /// (`LightTables[15] = {};`).
+    pub fn make_light_table(&mut self) {
+        let steps_table: [u8; 18] =
+            [16, 16, 16, 16, 16, 16, 16, 16, 8, 8, 8, 8, 16, 16, 16, 16, 16, 16];
+
+        for shade in 0..NUM_LIGHTING_LEVELS {
+            let table = &mut self.tables[shade];
+            let mut color_index: usize = 0;
+            for &steps in &steps_table {
+                let shading = shade * steps as usize / 16;
+                let shade_start = color_index;
+                let shade_end = shade_start + steps as usize - 1;
+                for step in 0..steps as usize {
+                    if color_index == 0 {
+                        // Black stays black.
+                        table[0] = 0;
+                        color_index = 1;
+                        continue;
+                    }
+                    let mut color = shade_start + step + shading;
+                    if color > shade_end || color_index == 255 {
+                        color = 0;
+                    }
+                    table[color_index] = color as u8;
+                    color_index += 1;
+                }
+            }
+        }
+
+        // Last table is pitch black.
+        self.tables[LIGHTS_MAX as usize].fill(0);
+    }
+}
+
+/// Vision flag bits written by `do_vision` (mirrors `DungeonFlag`).
+pub const VISION_FLAG_VISIBLE: u8 = 1 << 0;
+pub const VISION_FLAG_LIT: u8 = 1 << 1;
+pub const VISION_FLAG_EXPLORED: u8 = 1 << 2;
+
+/// Number of supported light radii (matches C++ `NumLightRadiuses`).
+const NUM_LIGHT_RADIUS: usize = 16;
+
+/// Integer square root helper (matches `std::sqrt` truncation behaviour).
+///
+/// Implemented as a free function rather than a trait method because the
+/// standard library's inherent `i32::isqrt` (stabilised in Rust 1.84) takes
+/// precedence over trait methods at call sites and panics on negatives.
+fn floor_sqrt(value: i32) -> i32 {
+    if value <= 0 {
+        return 0;
+    }
+    let mut x = value;
+    let mut y = (x + 1) / 2;
+    while y < x {
+        x = y;
+        y = (x + value / x) / 2;
+    }
+    x
+}
+
+/// Index a `[width * h]` grid with signed coordinates, returning a mutable ref.
+fn grid_get_mut(grid: &mut [u8], width: usize, x: i32, y: i32) -> Option<&mut u8> {
+    if x < 0 || y < 0 {
+        return None;
+    }
+    let idx = y as usize * width + x as usize;
+    grid.get_mut(idx)
+}
+
+/// Linear cone distance for the light falloff lookup.
+///
+/// Port of the `LightConeInterpolations` table build in `MakeLightTable`:
+/// `sqrt((8*x - offsetX)^2 + (8*y - offsetY)^2)` with no sub-tile offset.
+fn light_cone_distance(dx: i32, dy: i32) -> usize {
+    let a = 8 * dx;
+    let b = 8 * dy;
+    ((a * a + b * b) as f32).sqrt() as usize
+}
+
+/// Light falloff value for a given radius and distance.
+///
+/// Port of the linear-falloff branch of `MakeLightTable`:
+/// `factor = distance / maxDistance; scaled = factor * 15 + 0.5`.
+fn light_falloff(radius: usize, distance: usize) -> u8 {
+    let max_distance = (radius + 1) * 8;
+    if distance > max_distance {
+        return LIGHTS_MAX;
+    }
+    let factor = distance as f32 / max_distance as f32;
+    let scaled = factor * (LIGHTS_MAX as f32) + 0.5;
+    scaled.clamp(0.0, LIGHTS_MAX as f32) as u8
+}
+
+/// Player light offset used to centre the player's vision/light on their tile.
+///
+/// Port of the conceptual `CalcPlrLightOffset` helper: returns the tile-space
+/// displacement that should be subtracted from the player's position before
+/// running `DoLighting`/`DoVision`, so the light cone stays aligned with the
+/// rendered sprite when the player is between tiles.
+///
+/// The original C++ folds this offset into `DoLighting` via the
+/// `offset.deltaX/deltaY < 0` adjustments; for the headless Rust port we expose
+/// it as a standalone signed displacement.
+pub fn calc_plr_light_offset(walking: bool, facing_x: i32, facing_y: i32) -> (i32, i32) {
+    if !walking {
+        return (0, 0);
+    }
+    // Half-tile bias in the direction the player is facing.
+    (facing_x.signum(), facing_y.signum())
+}
+
+/// Update a single player's vision + light sources for this frame.
+///
+/// Conceptual port of the per-player light bookkeeping scattered across
+/// `ProcessLightList`/`ProcessVisionList` in `lighting.cpp`. Returns the
+/// index of the player's vision light if one was activated.
+pub fn light_player(
+    manager: &mut LightManager,
+    vision_slot: usize,
+    player_x: i32,
+    player_y: i32,
+    light_radius: u8,
+) -> Option<usize> {
+    if vision_slot >= MAX_VISION {
+        return None;
+    }
+    manager.vision_lights[vision_slot] = Light::new(player_x, player_y, light_radius as i32);
+    manager.vision_lights[vision_slot].player_controlled = true;
+    manager.vision_lights[vision_slot].id = vision_slot as i32;
+    Some(vision_slot)
+}
+
+/// Attach a follow-light to the cursor position (spell targeting cursor etc.).
+///
+/// There is no direct C++ equivalent (the original game uses a dedicated
+/// cursor light in `player.cpp`); this helper exposes the same idea for the
+/// headless port: register a small radius light at the cursor tile.
+pub fn light_cursor(manager: &mut LightManager, cursor_x: i32, cursor_y: i32) -> Option<usize> {
+    manager.add_light(cursor_x, cursor_y, 3)
 }
 
 /// 光照映射图
@@ -433,5 +677,141 @@ mod tests {
         for i in 0..256 {
             assert_eq!(manager.apply_light(0, i as u8), i as u8);
         }
+    }
+
+    #[test]
+    fn test_do_lighting_centres_brightness() {
+        let manager = LightManager::new();
+        let w = 32usize;
+        let mut grid = vec![LIGHTS_MAX; w * w];
+        let pos = Point::new(16, 16);
+
+        manager.do_lighting(&mut grid, w, pos, 8);
+
+        // Source tile becomes fully lit.
+        assert_eq!(grid[16 * w + 16], 0);
+        // A tile well inside the radius is brighter than the ambient floor.
+        assert!(grid[16 * w + 18] < LIGHTS_MAX);
+        // A tile outside the radius keeps the ambient value.
+        assert_eq!(grid[1 * w + 1], LIGHTS_MAX);
+    }
+
+    #[test]
+    fn test_do_lighting_never_increases_brightness() {
+        let manager = LightManager::new();
+        let w = 16usize;
+        // Pre-light some tiles brighter than the falloff could ever reach.
+        let mut grid = vec![3u8; w * w];
+        manager.do_lighting(&mut grid, w, Point::new(8, 8), 4);
+
+        // Every touched tile must be <= its previous value (min semantics).
+        for v in grid.iter() {
+            assert!(*v <= 3);
+        }
+    }
+
+    #[test]
+    fn test_do_vision_marks_visible_and_explored() {
+        let manager = LightManager::new();
+        let w = 16usize;
+        let mut flags = vec![0u8; w * w];
+
+        manager.do_vision(&mut flags, w, Point::new(8, 8), 3, true);
+
+        // Centre must have all three bits set.
+        assert_eq!(
+            flags[8 * w + 8] & (VISION_FLAG_VISIBLE | VISION_FLAG_LIT | VISION_FLAG_EXPLORED),
+            VISION_FLAG_VISIBLE | VISION_FLAG_LIT | VISION_FLAG_EXPLORED
+        );
+        // A far tile is untouched.
+        assert_eq!(flags[0], 0);
+    }
+
+    #[test]
+    fn test_do_vision_hidden_when_visible_false() {
+        let manager = LightManager::new();
+        let w = 16usize;
+        let mut flags = vec![0u8; w * w];
+
+        manager.do_vision(&mut flags, w, Point::new(8, 8), 3, false);
+
+        assert_eq!(flags[8 * w + 8] & VISION_FLAG_LIT, 0);
+        assert_ne!(flags[8 * w + 8] & VISION_FLAG_VISIBLE, 0);
+    }
+
+    #[test]
+    fn test_make_light_table_black_last_level() {
+        let mut manager = LightManager::new();
+        manager.make_light_table();
+
+        // Last level must be all-black (matches `LightTables[15] = {};`).
+        for &v in &manager.tables[LIGHTS_MAX as usize] {
+            assert_eq!(v, 0);
+        }
+        // Level 0 keeps index 0 as black.
+        assert_eq!(manager.tables[0][0], 0);
+    }
+
+    #[test]
+    fn test_light_falloff_monotonic() {
+        // Falloff must never decrease as distance grows.
+        let mut prev = 0u8;
+        for dist in 0..128 {
+            let v = light_falloff(4, dist);
+            assert!(v >= prev, "non-monotonic at dist={dist}: {v} < {prev}");
+            prev = v;
+        }
+        assert_eq!(light_falloff(4, 127), LIGHTS_MAX);
+    }
+
+    #[test]
+    fn test_light_cone_distance_origin() {
+        assert_eq!(light_cone_distance(0, 0), 0);
+        assert!(light_cone_distance(1, 0) > 0);
+    }
+
+    #[test]
+    fn test_calc_plr_light_offset() {
+        // Idle player -> no offset.
+        assert_eq!(calc_plr_light_offset(false, 1, 0), (0, 0));
+        // Walking east biases by sign of facing.
+        assert_eq!(calc_plr_light_offset(true, 1, 0), (1, 0));
+        assert_eq!(calc_plr_light_offset(true, -1, -1), (-1, -1));
+    }
+
+    #[test]
+    fn test_light_player_activates_vision_slot() {
+        let mut manager = LightManager::new();
+        let slot = light_player(&mut manager, 0, 50, 50, 8).unwrap();
+        assert_eq!(slot, 0);
+        assert!(manager.vision_lights[0].active);
+        assert!(manager.vision_lights[0].player_controlled);
+        assert_eq!(manager.vision_lights[0].x, 50);
+    }
+
+    #[test]
+    fn test_light_player_rejects_bad_slot() {
+        let mut manager = LightManager::new();
+        assert!(light_player(&mut manager, MAX_VISION, 0, 0, 8).is_none());
+    }
+
+    #[test]
+    fn test_light_cursor_adds_light() {
+        let mut manager = LightManager::new();
+        let id = light_cursor(&mut manager, 10, 12).unwrap();
+        assert_eq!(manager.lights[id].x, 10);
+        assert_eq!(manager.lights[id].y, 12);
+        assert!(manager.lights[id].active);
+    }
+
+    #[test]
+    fn test_isqrt() {
+        assert_eq!(floor_sqrt(0), 0);
+        assert_eq!(floor_sqrt(1), 1);
+        assert_eq!(floor_sqrt(4), 2);
+        assert_eq!(floor_sqrt(9), 3);
+        assert_eq!(floor_sqrt(15), 3);
+        assert_eq!(floor_sqrt(16), 4);
+        assert_eq!(floor_sqrt(-5), 0);
     }
 }

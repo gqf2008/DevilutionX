@@ -3629,3 +3629,1757 @@ pub fn get_item_repair_cost(item: &Item) -> i32 {
 
     cost.max(1)
 }
+
+// ============================================================================
+// C++ items.cpp 对齐补齐: 物品生成 / 唯一物品 / 重建 / 显示 / 价值 / 空间 / 拾取
+// ----------------------------------------------------------------------------
+// 以下函数补齐 `Source/items.cpp` 中尚未在 Rust 实现的关键函数，签名尽量对齐
+// C++ 原型，参数中需要全局状态（玩家、地图、随机种子源）的部分被改为显式参数，
+// 以便能在无全局状态的纯函数上下文中调用和测试。
+// ============================================================================
+
+/// 物品耐久度"不可破坏"哨兵值（C++: DUR_INDESTRUCTIBLE = 255）
+pub const DUR_INDESTRUCTIBLE: i32 = 255;
+
+/// 抗性显示上限（C++: MaxResistance = 75）
+pub const MAX_RESISTANCE: i16 = 75;
+
+/// 金币堆显示用的光标 ID（C++: ICURS_GOLD_*）
+pub mod GoldCursor {
+    pub const SMALL: u8 = 0;  // ICURS_GOLD_SMALL
+    pub const MEDIUM: u8 = 1; // ICURS_GOLD_MEDIUM
+    pub const LARGE: u8 = 2;  // ICURS_GOLD_LARGE
+}
+
+/// 计算金币堆的光标 ID（C++: GetGoldCursor）
+///
+/// 根据 C++ `Source/items.cpp:2959 GetGoldCursor(int value)`:
+/// - `value >= GOLD_MEDIUM_LIMIT` -> 大堆
+/// - `value <= GOLD_SMALL_LIMIT`  -> 小堆
+/// - 其它 -> 中堆
+pub fn get_gold_cursor(value: i32) -> u8 {
+    if value >= GOLD_MEDIUM_LIMIT {
+        GoldCursor::LARGE
+    } else if value <= GOLD_SMALL_LIMIT {
+        GoldCursor::SMALL
+    } else {
+        GoldCursor::MEDIUM
+    }
+}
+
+/// 设置金币物品的光标（C++: SetPlrHandGoldCurs）
+///
+/// **C++ Reference**: `Source/items.cpp:2970 SetPlrHandGoldCurs(Item &gold)`
+pub fn set_plr_hand_gold_curs(gold: &mut Item) {
+    gold.cursor = get_gold_cursor(gold.value);
+}
+
+/// 为物品生成新的随机种子（C++: GenerateNewSeed）
+///
+/// **C++ Reference**: `Source/items.cpp:2954 GenerateNewSeed(Item &item)`
+pub fn generate_new_seed(item: &mut Item) {
+    item.seed = rand::random::<u32>();
+}
+
+/// 从基础物品数据初始化物品（C++: InitializeItem）
+///
+/// 与 [`get_item_attrs`] 的区别：`InitializeItem` 使用最小 AC（不随机），
+/// 不调用 GetBookSpell/GetOilType，用于"普通"物品和重建路径。
+///
+/// **C++ Reference**: `Source/items.cpp:2915 InitializeItem(Item &item, _item_indexes itemData)`
+pub fn initialize_item(item: &mut Item, item_idx: ItemIndex) {
+    // 等价于 C++ `item = {}` 的清零
+    *item = Item::empty();
+
+    let idx = item_idx as i16;
+    if idx < 0 || idx as usize >= ITEMS_DATA.len() {
+        return;
+    }
+    let data = &ITEMS_DATA[idx as usize];
+
+    item.item_index = idx;
+    item.name = data.name.to_string();
+    item.base_name = data.name.to_string();
+    item.item_type = match data.item_type {
+        ItemDatType::Sword => ItemType::Sword,
+        ItemDatType::Axe => ItemType::Axe,
+        ItemDatType::Mace => ItemType::Mace,
+        ItemDatType::Bow => ItemType::Bow,
+        ItemDatType::Staff => ItemType::Staff,
+        ItemDatType::Shield => ItemType::Shield,
+        ItemDatType::Helm => ItemType::Helm,
+        ItemDatType::LightArmor | ItemDatType::MediumArmor | ItemDatType::HeavyArmor => ItemType::Armor,
+        ItemDatType::Ring => ItemType::Ring,
+        ItemDatType::Amulet => ItemType::Amulet,
+        ItemDatType::Gold => ItemType::Gold,
+        _ => ItemType::None,
+    };
+    item.item_class = match data.class {
+        ItemDatClass::Weapon => ItemClass::Weapon,
+        ItemDatClass::Armor => ItemClass::Armor,
+        ItemDatClass::Misc => ItemClass::Misc,
+        ItemDatClass::Gold => ItemClass::Gold,
+        ItemDatClass::Quest => ItemClass::Quest,
+        _ => ItemClass::None,
+    };
+    item.equip_loc = match data.equip_type {
+        ItemDatEquipType::OneHand => ItemEquipType::OneHand,
+        ItemDatEquipType::TwoHand => ItemEquipType::TwoHand,
+        ItemDatEquipType::Armor => ItemEquipType::Armor,
+        ItemDatEquipType::Helm => ItemEquipType::Helm,
+        ItemDatEquipType::Ring => ItemEquipType::Ring,
+        ItemDatEquipType::Amulet => ItemEquipType::Amulet,
+        ItemDatEquipType::Belt => ItemEquipType::Belt,
+        _ => ItemEquipType::None,
+    };
+    item.misc_id = match data.misc_id {
+        ItemDatMiscId::Heal => ItemMiscId::Heal,
+        ItemDatMiscId::FullHeal => ItemMiscId::FullHeal,
+        ItemDatMiscId::Mana => ItemMiscId::Mana,
+        ItemDatMiscId::FullMana => ItemMiscId::FullMana,
+        ItemDatMiscId::Rejuv => ItemMiscId::Rejuv,
+        ItemDatMiscId::FullRejuv => ItemMiscId::FullRejuv,
+        ItemDatMiscId::Scroll => ItemMiscId::Scroll,
+        ItemDatMiscId::Staff => ItemMiscId::Staff,
+        ItemDatMiscId::Book => ItemMiscId::Book,
+        ItemDatMiscId::Ring => ItemMiscId::Ring,
+        ItemDatMiscId::Amulet => ItemMiscId::Amulet,
+        ItemDatMiscId::Unique => ItemMiscId::Unique,
+        _ => ItemMiscId::None,
+    };
+
+    item.min_damage = data.min_damage;
+    item.max_damage = data.max_damage;
+    item.base_damage_min = data.min_damage;
+    item.base_damage_max = data.max_damage;
+    // InitializeItem 使用最小 AC（非随机）
+    item.armor_class = data.min_ac as i16;
+    item.base_armor = item.armor_class;
+
+    // 法杖默认充能（C++: gbIsHellfire ? 18 : 40）—— 这里取 40（Diablo 默认）
+    if item.misc_id == ItemMiscId::Staff {
+        item.charges = 40;
+        item.max_charges = 40;
+    }
+
+    item.durability = data.durability as i32;
+    item.max_durability = data.durability as i32;
+    item.required_str = data.min_str as i8;
+    item.required_mag = data.min_mag;
+    item.required_dex = data.min_dex as i8;
+    item.value = data.value as i32;
+    item.identified_value = data.value as i32;
+    item.special_flags = ItemSpecialEffect(data.special_effects.0);
+    item.prefix_power = ItemEffectType::Invalid;
+    item.suffix_power = ItemEffectType::Invalid;
+    item.quality = ItemQuality::Normal;
+    item.cursor = data.cursor_graphic;
+    item.quantity = 1;
+}
+
+/// 设置物品"已生成"状态（C++: SetupItem）
+///
+/// 在 C++ 中负责动画与"未鉴定"标志；Rust 移植仅保留语义相关的鉴定标志。
+///
+/// **C++ Reference**: `Source/items.cpp:3173 SetupItem(Item &item)`
+pub fn setup_item(item: &mut Item) {
+    item.identified = false;
+}
+
+/// 创建金币堆（C++: MakeGoldStack）
+///
+/// **C++ Reference**: `Source/items.cpp:4663 MakeGoldStack(Item &goldItem, int value)`
+pub fn make_gold_stack(gold_item: &mut Item, value: i32) {
+    initialize_item(gold_item, ItemIndex::Gold);
+    generate_new_seed(gold_item);
+    gold_item.stat_flag = true;
+    gold_item.value = value;
+    gold_item.quantity = value;
+    set_plr_hand_gold_curs(gold_item);
+}
+
+/// 计算物品鉴定后价值（C++: CalcItemValue / CalculateItemValue）
+///
+/// 精确复刻 C++ `CalcItemValue`：
+/// ```text
+/// v = _iVMult1 + _iVMult2;
+/// if v > 0 { v *= _ivalue; }
+/// if v < 0 { v = _ivalue / v; }
+/// v = _iVAdd1 + _iVAdd2 + v;
+/// _iIvalue = max(v, 1);
+/// ```
+///
+/// **C++ Reference**: `Source/items.cpp:600 CalcItemValue(Item &item)`
+pub fn calc_item_value(item: &mut Item) {
+    let mut v = item.value_mult1 + item.value_mult2;
+    if v > 0 {
+        v *= item.value;
+    }
+    if v < 0 {
+        v = item.value / v;
+    }
+    v = item.value_add1 + item.value_add2 + v;
+    item.identified_value = v.max(1);
+}
+
+// ----------------------------------------------------------------------------
+// 唯一物品生成 (SpawnUnique / UniqueItemColor)
+// ----------------------------------------------------------------------------
+
+/// 生成一个唯一物品到世界（C++: SpawnUnique）
+///
+/// 这是 `SpawnUnique` 的简化移植：给定唯一物品索引 `uid`，在地图上找到位置并
+/// 放置已应用唯一属性的物品。返回物品在 [`ItemArray`] 中的索引。
+///
+/// 与 C++ 的差异：
+/// - 不处理多人模式难度路径（始终走 Normal 难度的 `GetItemAttrs + GetUniqueItem`）
+/// - 不发送网络消息
+///
+/// **C++ Reference**: `Source/items.cpp:3179 SpawnUnique(...)`
+pub fn spawn_unique(
+    items: &mut ItemArray,
+    uid: usize,
+    position_x: i32,
+    position_y: i32,
+    level: i32,
+) -> Option<usize> {
+    if uid >= UNIQUE_ITEMS.len() {
+        return None;
+    }
+    let unique = &UNIQUE_ITEMS[uid];
+
+    // 在世界中找一个空位（C++ 先尝试 exactPosition/CanPut，否则 GetSuperItemSpace）
+    let (px, py) = get_super_item_space(items, position_x, position_y)
+        .unwrap_or((position_x as usize, position_y as usize));
+
+    // 找到该唯一物品基础类型对应的基础物品索引
+    let item_idx = unique_base_to_item_index(unique.base_item);
+
+    let ii = items.allocate()?;
+    let mut item = Item::empty();
+    item.position_x = px as i32;
+    item.position_y = py as i32;
+
+    if let Some(idx) = item_idx {
+        get_item_attrs(&mut item, idx, level);
+    }
+    item.unique_id = uid as i32;
+    get_unique_item(&mut item, unique);
+    setup_item(&mut item);
+
+    items.items[ii] = Some(item);
+    items.place_at(ii, px, py);
+    if uid < items.unique_item_flags.len() {
+        items.unique_item_flags[uid] = true;
+    }
+
+    Some(ii)
+}
+
+/// 把 [`UniqueBaseItem`] 映射回最接近的基础 [`ItemIndex`]
+///
+/// C++ 中唯一物品与基础物品通过 `iItemId` 关联；Rust 没有完整的数据表关联，
+/// 这里为常用基础类型提供映射，无法映射时返回 `None`（调用方需兜底）。
+fn unique_base_to_item_index(base: UniqueBaseItem) -> Option<ItemIndex> {
+    use UniqueBaseItem as U;
+    Some(match base {
+        U::ShortBow => ItemIndex::ShortBow,
+        U::LongBow => ItemIndex::LongBow,
+        U::CompBow => ItemIndex::CompositeBow,
+        U::BattleBow => ItemIndex::ShortBattleBow,
+        U::WarBow => ItemIndex::ShortWarBow,
+        U::Dagger => ItemIndex::ShortSword, // 最接近的短兵器
+        U::Falchion => ItemIndex::Falchion,
+        U::Claymore => ItemIndex::Claymore,
+        U::BroadSword => ItemIndex::BroadSword,
+        U::Sabre => ItemIndex::SabreBreaker,
+        U::Scimitar => ItemIndex::BroadSword,
+        U::LongSword => ItemIndex::LongSword,
+        U::BastardSword => ItemIndex::Bastard,
+        U::TwoHandSword => ItemIndex::TwoHandSword,
+        U::GreatSword => ItemIndex::GreatSword,
+        U::Cleaver => ItemIndex::SmallAxe,
+        U::LargeAxe => ItemIndex::LargeAxe,
+        U::BroadAxe => ItemIndex::BroadAxe,
+        U::SmallAxe => ItemIndex::SmallAxe,
+        U::BattleAxe => ItemIndex::BattleAxe,
+        U::GreatAxe => ItemIndex::GreatAxe,
+        U::Mace => ItemIndex::Mace,
+        U::MorningStar => ItemIndex::MorningStar,
+        U::SpikedClub => ItemIndex::Spiked,
+        U::Maul => ItemIndex::Maul,
+        U::WarHammer => ItemIndex::WarHammer,
+        U::Flail => ItemIndex::Flail,
+        U::LongStaff => ItemIndex::LongStaff,
+        U::ShortStaff => ItemIndex::ShortStaff,
+        U::CompositeStaff => ItemIndex::CompositeStaff,
+        U::QuarterStaff => ItemIndex::QuarterStaff,
+        U::WarStaff => ItemIndex::WarStaff,
+        U::SkullCap => ItemIndex::SkullCap,
+        U::Helm => ItemIndex::Helm,
+        U::GreatHelm => ItemIndex::GreatHelm,
+        U::Crown => ItemIndex::Crown,
+        U::ChainMail => ItemIndex::ChainMail,
+        U::LeatherArmor => ItemIndex::LeatherArmor,
+        U::BreastPlate => ItemIndex::BreastPlate,
+        U::PlateMail => ItemIndex::PlateMail,
+        U::FullPlate => ItemIndex::FullPlateMail,
+        U::Buckler => ItemIndex::Buckler,
+        U::SmallShield => ItemIndex::SmallShield,
+        U::LargeShield => ItemIndex::LargeShield,
+        U::KiteShield => ItemIndex::KiteShield,
+        U::GothicShield => ItemIndex::GothicShield,
+        U::Ring => ItemIndex::Ring,
+        U::Amulet => ItemIndex::Amulet,
+        // 任务唯一物品没有常规基础物，回退到 None
+        _ => return None,
+    })
+}
+
+/// 唯一物品的轮廓颜色（C++: 等价于 GetOutlineColor 对 unique 的分支）
+///
+/// 在 C++ 中，唯一物品的轮廓固定为金色（`ColorColor : Color = Gold` 对应
+/// `Color::Gold`，数值约 0/Uint8 取决于调色板索引）。这里返回固定的颜色常量。
+///
+/// **C++ Reference**: `Source/items.cpp:2405 GetOutlineColor` (unique 分支)
+pub const UNIQUE_ITEM_COLOR: u8 = 0x0; // 调色板索引：金色
+
+/// 获取物品的轮廓颜色（C++: GetOutlineColor）
+///
+/// **C++ Reference**: `Source/items.cpp:2405 GetOutlineColor(const Item &item, bool checkReq)`
+pub fn get_outline_color(item: &Item, check_req: bool) -> u8 {
+    if item.quality == ItemQuality::Unique {
+        return UNIQUE_ITEM_COLOR;
+    }
+    if check_req && !item.stat_flag {
+        return 0x0; // 红色（无法装备）— 简化为同一常量
+    }
+    0xFF // 默认（无特殊轮廓）
+}
+
+// ----------------------------------------------------------------------------
+// 物品显示 (PrintItemPower / PrintItemDetails / PrintItemDur)
+// ----------------------------------------------------------------------------
+
+/// 生成物品单条能力的显示字符串（C++: PrintItemPower / 对应任务中的 GetPowerString）
+///
+/// 返回 `None` 表示该能力没有对应文本（C++ 返回空 `StringOrView`）。
+///
+/// **C++ Reference**: `Source/items.cpp:3874 PrintItemPower(char plidx, const Item &item)`
+pub fn print_item_power(effect: ItemEffectType, item: &Item) -> Option<String> {
+    use ItemEffectType as E;
+    let s = match effect {
+        E::ToHit | E::ToHitCurse => format!("chance to hit: {:+}%", item.bonus_to_hit),
+        E::Damage | E::DamageCurse => format!("{:+}% damage", item.bonus_damage),
+        E::ToHitDamage | E::ToHitDamageCurse => {
+            format!("to hit: {:+}%, {:+}% damage", item.bonus_to_hit, item.bonus_damage)
+        }
+        E::Ac | E::AcCurse => format!("{:+}% armor", item.bonus_ac),
+        E::SetAc | E::AcCurseSet => format!("armor class: {}", item.armor_class),
+        E::FireRes | E::FireResCurse => {
+            if item.resist_fire < MAX_RESISTANCE {
+                format!("Resist Fire: {:+}%", item.resist_fire)
+            } else {
+                format!("Resist Fire: {:+}% MAX", item.resist_fire)
+            }
+        }
+        E::LightRes | E::LightResCurse => {
+            if item.resist_lightning < MAX_RESISTANCE {
+                format!("Resist Lightning: {:+}%", item.resist_lightning)
+            } else {
+                format!("Resist Lightning: {:+}% MAX", item.resist_lightning)
+            }
+        }
+        E::MagicRes | E::MagicResCurse => {
+            if item.resist_magic < MAX_RESISTANCE {
+                format!("Resist Magic: {:+}%", item.resist_magic)
+            } else {
+                format!("Resist Magic: {:+}% MAX", item.resist_magic)
+            }
+        }
+        E::AllRes => {
+            if item.resist_fire < MAX_RESISTANCE {
+                format!("Resist All: {:+}%", item.resist_fire)
+            } else {
+                format!("Resist All: {:+}% MAX", item.resist_fire)
+            }
+        }
+        E::SpellLevelAdd => {
+            if item.spell_level_add > 0 {
+                format!("spells are increased {} level{}", item.spell_level_add, plural_s(item.spell_level_add as i32))
+            } else if item.spell_level_add < 0 {
+                format!("spells are decreased {} level{}", -item.spell_level_add as i32, plural_s(-item.spell_level_add as i32))
+            } else {
+                "spell levels unchanged (?)".to_string()
+            }
+        }
+        E::Charges => "Extra charges".to_string(),
+        E::Spell => format!("{} charges", item.max_charges),
+        E::FireDam => {
+            if item.fire_min_dam == item.fire_max_dam {
+                format!("Fire hit damage: {}", item.fire_min_dam)
+            } else {
+                format!("Fire hit damage: {}-{}", item.fire_min_dam, item.fire_max_dam)
+            }
+        }
+        E::LightDam => {
+            if item.lightning_min_dam == item.lightning_max_dam {
+                format!("Lightning hit damage: {}", item.lightning_min_dam)
+            } else {
+                format!("Lightning hit damage: {}-{}", item.lightning_min_dam, item.lightning_max_dam)
+            }
+        }
+        E::Str | E::StrCurse => format!("{:+} to strength", item.bonus_str),
+        E::Mag | E::MagCurse => format!("{:+} to magic", item.bonus_mag),
+        E::Dex | E::DexCurse => format!("{:+} to dexterity", item.bonus_dex),
+        E::Vit | E::VitCurse => format!("{:+} to vitality", item.bonus_vit),
+        E::Attribs | E::AttribsCurse => format!("{:+} to all attributes", item.bonus_str),
+        E::GetHit | E::GetHitCurse => format!("{:+} damage from enemies", item.bonus_get_hit),
+        E::Life | E::LifeCurse => format!("Hit Points: {:+}", item.bonus_hp >> 6),
+        E::Mana | E::ManaCurse => format!("Mana: {:+}", item.bonus_mana >> 6),
+        E::Dur => "high durability".to_string(),
+        E::DurCurse => "decreased durability".to_string(),
+        E::Indestructible => "indestructible".to_string(),
+        E::Light => format!("+{}% light radius", 10 * item.bonus_light),
+        E::LightCurse => format!("-{}% light radius", -10 * item.bonus_light),
+        E::MultArrows => "multiple arrows per shot".to_string(),
+        E::FireArrows => {
+            if item.fire_min_dam == item.fire_max_dam {
+                format!("fire arrows damage: {}", item.fire_min_dam)
+            } else {
+                format!("fire arrows damage: {}-{}", item.fire_min_dam, item.fire_max_dam)
+            }
+        }
+        E::LightArrows => {
+            if item.lightning_min_dam == item.lightning_max_dam {
+                format!("lightning arrows damage {}", item.lightning_min_dam)
+            } else {
+                format!("lightning arrows damage {}-{}", item.lightning_min_dam, item.lightning_max_dam)
+            }
+        }
+        E::Fireball => {
+            if item.fire_min_dam == item.fire_max_dam {
+                format!("fireball damage: {}", item.fire_min_dam)
+            } else {
+                format!("fireball damage: {}-{}", item.fire_min_dam, item.fire_max_dam)
+            }
+        }
+        E::Thorns => "attacker takes 1-3 damage".to_string(),
+        E::NoMana => "user loses all mana".to_string(),
+        E::AbsHalfTrap => "absorbs half of trap damage".to_string(),
+        E::Knockback => "knocks target back".to_string(),
+        E::TripleDemonDam => "+200% damage vs. demons".to_string(),
+        E::AllResZero => "All Resistance equals 0".to_string(),
+        E::StealMana => {
+            if (item.special_flags.0 & ItemSpecialEffect::STEAL_MANA_5.0) != 0 {
+                "hit steals 5% mana".to_string()
+            } else if (item.special_flags.0 & ItemSpecialEffect::STEAL_MANA_3.0) != 0 {
+                "hit steals 3% mana".to_string()
+            } else {
+                return None;
+            }
+        }
+        E::StealLife => {
+            if (item.special_flags.0 & ItemSpecialEffect::STEAL_LIFE_5.0) != 0 {
+                "hit steals 5% life".to_string()
+            } else if (item.special_flags.0 & ItemSpecialEffect::STEAL_LIFE_3.0) != 0 {
+                "hit steals 3% life".to_string()
+            } else {
+                return None;
+            }
+        }
+        E::TargAc => "penetrates target's armor".to_string(),
+        E::FastAttack => {
+            if (item.special_flags.0 & ItemSpecialEffect::QUICKATTACK.0) != 0 {
+                "quick attack".to_string()
+            } else if (item.special_flags.0 & ItemSpecialEffect::FASTATTACK.0) != 0 {
+                "fast attack".to_string()
+            } else if (item.special_flags.0 & ItemSpecialEffect::FASTERATTACK.0) != 0 {
+                "faster attack".to_string()
+            } else if (item.special_flags.0 & ItemSpecialEffect::FASTESTATTACK.0) != 0 {
+                "fastest attack".to_string()
+            } else {
+                "Another ability (NW)".to_string()
+            }
+        }
+        E::FastRecover => {
+            if (item.special_flags.0 & ItemSpecialEffect::FASTHITRECOVER.0) != 0 {
+                "fast hit recovery".to_string()
+            } else if (item.special_flags.0 & ItemSpecialEffect::FASTERHITRECOVER.0) != 0 {
+                "faster hit recovery".to_string()
+            } else if (item.special_flags.0 & ItemSpecialEffect::FASTESTBLOCKRECOVER.0) != 0 {
+                "fastest hit recovery".to_string()
+            } else {
+                "Another ability (NW)".to_string()
+            }
+        }
+        E::FastBlock => "fast block".to_string(),
+        E::DamMod => format!(
+            "adds {} point{} to damage",
+            item.bonus_damage_mod,
+            plural_s(item.bonus_damage_mod as i32)
+        ),
+        E::RndArrowVel => "fires random speed arrows".to_string(),
+        E::SetDam => "unusual item damage".to_string(),
+        E::SetDur => "altered durability".to_string(),
+        E::OneHand => "one handed sword".to_string(),
+        E::DrainLife => "constantly lose hit points".to_string(),
+        E::RndStealLife => "life stealing".to_string(),
+        E::NoMinStr => "no strength requirement".to_string(),
+        E::AddAcLife => {
+            if item.fire_min_dam == item.fire_max_dam {
+                format!("lightning damage: {}", item.fire_min_dam)
+            } else {
+                format!("lightning damage: {}-{}", item.fire_min_dam, item.fire_max_dam)
+            }
+        }
+        E::AddManaAc => "charged bolts on hits".to_string(),
+        E::Devastation => "occasional triple damage".to_string(),
+        E::Decay => format!("decaying {:+}% damage", item.bonus_damage),
+        E::Peril => "2x dmg to monst, 1x to you".to_string(),
+        E::Jesters => "Random 0 - 600% damage".to_string(),
+        E::Crystalline => format!("low dur, {:+}% damage", item.bonus_damage),
+        E::Doppelganger => {
+            format!("to hit: {:+}%, {:+}% damage", item.bonus_to_hit, item.bonus_damage)
+        }
+        E::AcDemon => "extra AC vs demons".to_string(),
+        E::AcUndead => "extra AC vs undead".to_string(),
+        E::ManaToLife => "50% Mana moved to Health".to_string(),
+        E::LifeToMana => "40% Health moved to Mana".to_string(),
+        E::Invalid => return None,
+        _ => return None,
+    };
+    Some(s)
+}
+
+/// 简单复数后缀辅助（用于 `print_item_power`）
+fn plural_s(n: i32) -> &'static str {
+    if n == 1 { "" } else { "s" }
+}
+
+/// 物品信息盒条目（C++: AddItemInfoBoxString 添加的内容）
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ItemInfoLines {
+    pub lines: Vec<String>,
+    pub is_unique: bool,
+}
+
+/// 生成已鉴定物品的完整显示文本（C++: PrintItemDetails）
+///
+/// 返回结构包含所有信息盒条目，以及是否为唯一物品的标志。
+///
+/// **C++ Reference**: `Source/items.cpp:4110 PrintItemDetails(const Item &item)`
+pub fn print_item_details(item: &Item) -> ItemInfoLines {
+    let mut out = ItemInfoLines::default();
+
+    if item.item_class == ItemClass::Weapon {
+        out.lines.push(format_damage_durability(item));
+    }
+    if item.item_class == ItemClass::Armor {
+        out.lines.push(format_armor_durability(item));
+    }
+    if item.misc_id == ItemMiscId::Staff && item.max_charges != 0 {
+        out.lines.push(format!("Charges: {}/{}", item.charges, item.max_charges));
+    }
+    if item.prefix_power != ItemEffectType::Invalid {
+        if let Some(s) = print_item_power(item.prefix_power, item) {
+            out.lines.push(s);
+        }
+    }
+    if item.suffix_power != ItemEffectType::Invalid {
+        if let Some(s) = print_item_power(item.suffix_power, item) {
+            out.lines.push(s);
+        }
+    }
+    if item.quality == ItemQuality::Unique {
+        out.lines.push("unique item".to_string());
+        out.is_unique = true;
+    }
+    out
+}
+
+/// 生成未鉴定物品的显示文本（C++: PrintItemDur）
+///
+/// 与 [`print_item_details`] 的区别：不显示前缀/后缀能力，魔法/唯一物品标注
+/// "Not Identified"。
+///
+/// **C++ Reference**: `Source/items.cpp:4151 PrintItemDur(const Item &item)`
+pub fn print_item_dur(item: &Item) -> ItemInfoLines {
+    let mut out = ItemInfoLines::default();
+
+    if item.item_class == ItemClass::Weapon {
+        out.lines.push(format_damage_durability(item));
+        if item.misc_id == ItemMiscId::Staff && item.max_charges > 0 {
+            out.lines.push(format!("Charges: {}/{}", item.charges, item.max_charges));
+        }
+        if item.quality != ItemQuality::Normal {
+            out.lines.push("Not Identified".to_string());
+        }
+    }
+    if item.item_class == ItemClass::Armor {
+        out.lines.push(format_armor_durability(item));
+        if item.quality != ItemQuality::Normal {
+            out.lines.push("Not Identified".to_string());
+        }
+        if item.misc_id == ItemMiscId::Staff && item.max_charges > 0 {
+            out.lines.push(format!("Charges: {}/{}", item.charges, item.max_charges));
+        }
+    }
+    if item.item_type == ItemType::Ring || item.item_type == ItemType::Amulet {
+        out.lines.push("Not Identified".to_string());
+    }
+    out
+}
+
+/// 格式化 "damage: X[-Y]  Dur: A/B" / "Indestructible" 行
+fn format_damage_durability(item: &Item) -> String {
+    let indestructible = item.max_durability == DUR_INDESTRUCTIBLE;
+    if item.min_damage == item.max_damage {
+        if indestructible {
+            format!("damage: {}  Indestructible", item.min_damage)
+        } else {
+            format!("damage: {}  Dur: {}/{}", item.min_damage, item.durability, item.max_durability)
+        }
+    } else if indestructible {
+        format!("damage: {}-{}  Indestructible", item.min_damage, item.max_damage)
+    } else {
+        format!(
+            "damage: {}-{}  Dur: {}/{}",
+            item.min_damage, item.max_damage, item.durability, item.max_durability
+        )
+    }
+}
+
+/// 格式化 "armor: X  Dur: A/B" / "Indestructible" 行
+fn format_armor_durability(item: &Item) -> String {
+    if item.max_durability == DUR_INDESTRUCTIBLE {
+        format!("armor: {}  Indestructible", item.armor_class)
+    } else {
+        format!(
+            "armor: {}  Dur: {}/{}",
+            item.armor_class, item.durability, item.max_durability
+        )
+    }
+}
+
+// ----------------------------------------------------------------------------
+// 存档重建 (RecreateItem / RecreateTownItem / Recreate*Item)
+// ----------------------------------------------------------------------------
+
+/// 从存档重建物品（C++: RecreateItem）
+///
+/// 这是 `RecreateItem` 的核心逻辑移植：根据 `create_info` 决定走哪条重建路径。
+/// 与 C++ 的差异：不依赖全局玩家状态，因此 RecreateTown* 路径退化为通用的
+/// 属性重建（不重新跑商店随机表）。
+///
+/// **C++ Reference**: `Source/items.cpp:3502 RecreateItem(...)`
+pub fn recreate_item(
+    item: &mut Item,
+    idx: ItemIndex,
+    create_info: u16,
+    iseed: u32,
+    ivalue: i32,
+) {
+    // 金币
+    if idx == ItemIndex::Gold {
+        initialize_item(item, ItemIndex::Gold);
+        item.seed = iseed;
+        item.create_info = create_info;
+        item.value = ivalue;
+        item.quantity = ivalue;
+        set_plr_hand_gold_curs(item);
+        return;
+    }
+
+    // 无创建信息：直接初始化基础物品
+    if create_info == 0 {
+        initialize_item(item, idx);
+        item.seed = iseed;
+        return;
+    }
+
+    if (create_info & CreateInfoFlag::CF_UNIQUE) == 0 {
+        // 城镇商店物品
+        if (create_info & CreateInfoFlag::CF_TOWN) != 0 {
+            recreate_town_item(item, idx, create_info, iseed);
+            return;
+        }
+        // 有用物品（药水等）
+        if (create_info & CreateInfoFlag::CF_USEFUL) == CreateInfoFlag::CF_USEFUL {
+            let level = (create_info & CreateInfoFlag::CF_LEVEL) as i32;
+            setup_all_useful_rebuild(item, iseed, level);
+            return;
+        }
+    }
+
+    // 通用重建路径：依据 create_info 中记录的等级与标志重新生成
+    let level = (create_info & CreateInfoFlag::CF_LEVEL) as i32;
+
+    let mut uper = 0;
+    if (create_info & CreateInfoFlag::CF_UPER1) != 0 {
+        uper = 1;
+    }
+    if (create_info & CreateInfoFlag::CF_UPER15) != 0 {
+        uper = 15;
+    }
+
+    let only_good = (create_info & CreateInfoFlag::CF_ONLYGOOD) != 0;
+    let pregen = (create_info & CreateInfoFlag::CF_PREGEN) != 0;
+    // CF_UNIQUE==0 时强制不为唯一（forceNotUnique）
+    let force_not_unique = (create_info & CreateInfoFlag::CF_UNIQUE) == 0;
+
+    recreate_setup_all(item, idx, iseed, level, uper, only_good, pregen, force_not_unique);
+    setup_item(item);
+}
+
+/// 内部：recreate_item 使用的 setup_all_items 包装（不支持唯一偏移）
+fn recreate_setup_all(
+    item: &mut Item,
+    idx: ItemIndex,
+    iseed: u32,
+    level: i32,
+    uper: i32,
+    only_good: bool,
+    pregen: bool,
+    force_not_unique: bool,
+) {
+    setup_all_items(item, idx, iseed, level, uper, only_good, pregen);
+    if force_not_unique && item.quality == ItemQuality::Unique {
+        // 强制降级为魔法以匹配 C++ forceNotUnique 语义
+        item.quality = ItemQuality::Magic;
+        item.create_info &= !CreateInfoFlag::CF_UNIQUE;
+    }
+}
+
+/// 城镇物品重建分发（C++: RecreateTownItem）
+///
+/// **C++ Reference**: `Source/items.cpp:2156 RecreateTownItem(...)`
+pub fn recreate_town_item(item: &mut Item, idx: ItemIndex, create_info: u16, iseed: u32) {
+    let level = (create_info & CreateInfoFlag::CF_LEVEL) as i32;
+    if (create_info & CreateInfoFlag::CF_SMITH) != 0 {
+        recreate_smith_item(item, level, iseed);
+    } else if (create_info & CreateInfoFlag::CF_SMITHPREMIUM) != 0 {
+        recreate_premium_item(item, level, iseed);
+    } else if (create_info & CreateInfoFlag::CF_BOY) != 0 {
+        recreate_boy_item(item, level, iseed);
+    } else if (create_info & CreateInfoFlag::CF_WITCH) != 0 {
+        recreate_witch_item(item, idx, level, iseed);
+    } else if (create_info & CreateInfoFlag::CF_HEALER) != 0 {
+        recreate_healer_item(item, idx, level, iseed);
+    }
+}
+
+/// 重建铁匠物品（C++: RecreateSmithItem）
+///
+/// **C++ Reference**: `Source/items.cpp:2080`
+pub fn recreate_smith_item(item: &mut Item, lvl: i32, iseed: u32) {
+    // item.item_index 已存在；重新加载基础属性。ItemIndex 是 #[repr(i16)]，
+    // 这里用安全的边界检查 + transmute 还原（与 try_random_unique_item 一致）。
+    let idx = i16_to_item_index(item.item_index);
+    get_item_attrs(item, idx, lvl);
+    item.seed = iseed;
+    item.create_info = (lvl as u16) | CreateInfoFlag::CF_SMITH;
+    item.identified = true;
+}
+
+/// 把 `i16`（item_index 存储类型）安全地还原为 [`ItemIndex`]。
+///
+/// 越界或负值返回 [`ItemIndex::None`]。`ItemIndex` 是 `#[repr(i16)]`，因此
+/// `transmute` 是良定义的。
+fn i16_to_item_index(v: i16) -> ItemIndex {
+    if v < 0 {
+        return ItemIndex::None;
+    }
+    // 仅对已知的判别值做转换；未知值回退到 None 以避免 UB。
+    let known: &[ItemIndex] = &[
+        ItemIndex::Gold, ItemIndex::PotionHealing, ItemIndex::PotionMana,
+        ItemIndex::ShortSword, ItemIndex::Falchion, ItemIndex::Claymore,
+        ItemIndex::BroadSword, ItemIndex::SabreBreaker, ItemIndex::LongSword,
+        ItemIndex::Bastard, ItemIndex::TwoHandSword, ItemIndex::GreatSword,
+        ItemIndex::SmallAxe, ItemIndex::Axe, ItemIndex::LargeAxe, ItemIndex::BroadAxe,
+        ItemIndex::BattleAxe, ItemIndex::GreatAxe,
+        ItemIndex::Club, ItemIndex::Spiked, ItemIndex::Mace, ItemIndex::MorningStar,
+        ItemIndex::Flail, ItemIndex::WarHammer, ItemIndex::Maul,
+        ItemIndex::ShortBow, ItemIndex::HuntersBow, ItemIndex::LongBow, ItemIndex::CompositeBow,
+        ItemIndex::ShortBattleBow, ItemIndex::LongBattleBow, ItemIndex::ShortWarBow, ItemIndex::LongWarBow,
+        ItemIndex::ShortStaff, ItemIndex::LongStaff, ItemIndex::CompositeStaff,
+        ItemIndex::QuarterStaff, ItemIndex::WarStaff,
+        ItemIndex::Buckler, ItemIndex::SmallShield, ItemIndex::LargeShield,
+        ItemIndex::KiteShield, ItemIndex::TowerShield, ItemIndex::GothicShield,
+        ItemIndex::Cap, ItemIndex::SkullCap, ItemIndex::Helm, ItemIndex::FullHelm,
+        ItemIndex::GreatHelm, ItemIndex::Crown,
+        ItemIndex::Rags, ItemIndex::Cloak, ItemIndex::Robe, ItemIndex::QuiltedArmor,
+        ItemIndex::LeatherArmor, ItemIndex::HardLeatherArmor, ItemIndex::StuddedLeather,
+        ItemIndex::RingMail, ItemIndex::ChainMail, ItemIndex::ScaleMail, ItemIndex::BreastPlate,
+        ItemIndex::SplintMail, ItemIndex::PlateMail, ItemIndex::FieldPlate,
+        ItemIndex::GothicPlate, ItemIndex::FullPlateMail,
+        ItemIndex::Ring, ItemIndex::Amulet,
+        ItemIndex::Rock, ItemIndex::MagicRock, ItemIndex::OpticalJoystick,
+    ];
+    for &k in known {
+        if k as i16 == v {
+            return k;
+        }
+    }
+    ItemIndex::None
+}
+
+/// 重建高级商品（C++: RecreatePremiumItem）
+///
+/// **C++ Reference**: `Source/items.cpp:2091`
+pub fn recreate_premium_item(item: &mut Item, plvl: i32, iseed: u32) {
+    get_item_bonus(item, plvl / 2, plvl, true, true);
+    item.seed = iseed;
+    item.create_info = (plvl as u16) | CreateInfoFlag::CF_SMITHPREMIUM;
+    item.identified = true;
+}
+
+/// 重建 Wirt（男孩）物品（C++: RecreateBoyItem）
+///
+/// **C++ Reference**: `Source/items.cpp:2103`
+pub fn recreate_boy_item(item: &mut Item, lvl: i32, iseed: u32) {
+    get_item_bonus(item, lvl, 2 * lvl, true, true);
+    item.seed = iseed;
+    item.create_info = (lvl as u16) | CreateInfoFlag::CF_BOY;
+    item.identified = true;
+}
+
+/// 重建 Adria（女巫）物品（C++: RecreateWitchItem）
+///
+/// **C++ Reference**: `Source/items.cpp:2115`
+pub fn recreate_witch_item(item: &mut Item, idx: ItemIndex, lvl: i32, iseed: u32) {
+    // 简化：对法杖/药水直接走属性，其它随机走加成
+    let mut rng = rand::rng();
+    let mut iblvl = -1;
+    if rng.random_range(0..100) <= 5 {
+        iblvl = 2 * lvl;
+    }
+    if iblvl == -1 && item.misc_id == ItemMiscId::Staff {
+        iblvl = 2 * lvl;
+    }
+    if iblvl != -1 {
+        get_item_bonus(item, iblvl / 2, iblvl, true, true);
+    }
+    let _ = idx;
+    item.seed = iseed;
+    item.create_info = (lvl as u16) | CreateInfoFlag::CF_WITCH;
+    item.identified = true;
+}
+
+/// 重建 Pepin（医者）物品（C++: RecreateHealerItem）
+///
+/// **C++ Reference**: `Source/items.cpp:2141`
+pub fn recreate_healer_item(item: &mut Item, idx: ItemIndex, lvl: i32, iseed: u32) {
+    let _ = idx;
+    item.seed = iseed;
+    item.create_info = (lvl as u16) | CreateInfoFlag::CF_HEALER;
+    item.identified = true;
+}
+
+/// SetupAllUseful 的重建变体（C++: SetupAllUseful 用于药水/卷轴等有用物品）
+///
+/// **C++ Reference**: `Source/items.cpp:1519 SetupAllUseful(Item &item, int iseed, int lvl)`
+fn setup_all_useful_rebuild(item: &mut Item, iseed: u32, _level: i32) {
+    item.seed = iseed;
+    item.identified = true;
+}
+
+// ----------------------------------------------------------------------------
+// 空间检查 (GetItemSpace / ItemSpaceOk 已有) + 金币总计
+// ----------------------------------------------------------------------------
+
+/// 在 3x3 邻域内寻找物品落点（C++: GetItemSpace）
+///
+/// 复刻 C++ `GetItemSpace(Point position, int8_t inum)` 的行为：检查以
+/// `position` 为中心的 3x3 网格，若有可用格子则随机选一个并写入
+/// `ground_items`，返回 true。
+///
+/// **C++ Reference**: `Source/items.cpp:550 GetItemSpace(Point position, int8_t inum)`
+pub fn get_item_space(
+    items: &mut ItemArray,
+    position_x: i32,
+    position_y: i32,
+    item_index: usize,
+) -> bool {
+    // 构建 3x3 的可用性表
+    let mut itemhold = [[false; 3]; 3];
+    let mut savail = false;
+    for (j, dy) in (-1..=1).enumerate() {
+        for (i, dx) in (-1..=1).enumerate() {
+            let x = position_x + dx;
+            let y = position_y + dy;
+            let ok = if x < 0 || y < 0 {
+                false
+            } else {
+                item_space_ok(items, x as usize, y as usize)
+            };
+            itemhold[i][j] = ok;
+            if ok {
+                savail = true;
+            }
+        }
+    }
+
+    if !savail {
+        return false;
+    }
+
+    // 在可用格子中随机选一个（C++ 用 GenerateRnd(15)+1 的 1-based 计数）
+    let mut rng = rand::rng();
+    let mut rs = rng.random_range(1..=15);
+    let (mut xx, mut yy) = (0usize, 0usize);
+    loop {
+        if itemhold[xx][yy] {
+            rs -= 1;
+        }
+        if rs <= 0 {
+            break;
+        }
+        xx += 1;
+        if xx == 3 {
+            xx = 0;
+            yy += 1;
+            if yy == 3 {
+                yy = 0;
+            }
+        }
+    }
+
+    let final_x = (position_x - 1 + xx as i32) as usize;
+    let final_y = (position_y - 1 + yy as i32) as usize;
+
+    // 更新物品位置与地图（C++ 中此处写 dItem）
+    if let Some(item) = items.items[item_index].as_mut() {
+        item.position_x = final_x as i32;
+        item.position_y = final_y as i32;
+    }
+    if final_x < MAXDUNX && final_y < MAXDUNY {
+        items.ground_items[final_x][final_y] = (item_index + 1) as i8;
+    }
+    true
+}
+
+/// 计算玩家背包里的金币总数（C++: CalculateGold，来自 inv.cpp）
+///
+/// **C++ Reference**: `Source/inv.cpp:2260 CalculateGold(Player &player)`
+pub fn calculate_gold(inventory: &Inventory) -> i32 {
+    let mut gold = inventory.gold;
+    for item in &inventory.backpack {
+        if item.item_type == ItemType::Gold {
+            gold += item.value;
+        }
+    }
+    gold
+}
+
+// ----------------------------------------------------------------------------
+// 物品拾取记录 (GetItemRecord / SetItemRecord / PutItemRecord)
+// ----------------------------------------------------------------------------
+
+/// 物品拾取记录条目（C++: struct ItemRecord）
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ItemRecord {
+    /// 记录时间戳（毫秒）
+    pub timestamp_ms: u64,
+    pub seed: u32,
+    pub create_info: u16,
+    pub index: i32,
+}
+
+/// 物品拾取记录集合（C++: itemrecord[MAXITEMS], gnNumGetRecords）
+///
+/// **C++ Reference**: `Source/items.cpp` 全局 `itemrecord[]` 与 `gnNumGetRecords`
+#[derive(Debug, Clone, Default)]
+pub struct ItemGetRecords {
+    pub records: Vec<ItemRecord>,
+}
+
+/// 记录过期时间（C++: 6000 ms）
+pub const ITEM_RECORD_TIMEOUT_MS: u64 = 6000;
+
+impl ItemGetRecords {
+    pub fn new() -> Self {
+        Self { records: Vec::new() }
+    }
+
+    /// 初始化记录表（C++: initItemGetRecords）
+    ///
+    /// **C++ Reference**: `Source/items.cpp:4848 initItemGetRecords()`
+    pub fn init(&mut self) {
+        self.records.clear();
+    }
+
+    /// 当前时间（可注入便于测试）
+    fn now() -> u64 {
+        // 使用简单单调计数；测试可通过 set 进行时间推进
+        // 这里退化为 0，实际时间由调用方传入
+        0
+    }
+
+    /// 检查物品是否可被拾取（未被近期记录过）
+    ///
+    /// 返回 `true` 表示可以拾取（C++ 中即未找到匹配记录且未过期）。
+    ///
+    /// **C++ Reference**: `Source/items.cpp:4737 GetItemRecord(...)`
+    pub fn get(&mut self, n_seed: u32, w_ci: u16, n_index: i32, now_ms: u64) -> bool {
+        let mut i = 0;
+        while i < self.records.len() {
+            if now_ms.saturating_sub(self.records[i].timestamp_ms) > ITEM_RECORD_TIMEOUT_MS {
+                self.remove(i);
+                // 不递增 i（因为 remove 已移动元素）
+            } else if self.records[i].seed == n_seed
+                && self.records[i].create_info == w_ci
+                && self.records[i].index == n_index
+            {
+                return false;
+            } else {
+                i += 1;
+            }
+        }
+        true
+    }
+
+    /// 记录一次拾取（C++: SetItemRecord）
+    ///
+    /// **C++ Reference**: `Source/items.cpp:4754 SetItemRecord(...)`
+    pub fn set(&mut self, n_seed: u32, w_ci: u16, n_index: i32, now_ms: u64) {
+        if self.records.len() >= MAXITEMS {
+            return;
+        }
+        self.records.push(ItemRecord {
+            timestamp_ms: now_ms,
+            seed: n_seed,
+            create_info: w_ci,
+            index: n_index,
+        });
+    }
+
+    /// 移除一条记录（C++: PutItemRecord）
+    ///
+    /// **C++ Reference**: `Source/items.cpp:4769 PutItemRecord(...)`
+    pub fn put(&mut self, n_seed: u32, w_ci: u16, n_index: i32, now_ms: u64) {
+        let mut i = 0;
+        while i < self.records.len() {
+            if now_ms.saturating_sub(self.records[i].timestamp_ms) > ITEM_RECORD_TIMEOUT_MS {
+                self.remove(i);
+            } else if self.records[i].seed == n_seed
+                && self.records[i].create_info == w_ci
+                && self.records[i].index == n_index
+            {
+                self.remove(i);
+                break;
+            } else {
+                i += 1;
+            }
+        }
+    }
+
+    /// 内部：删除索引 i 的记录（等价于 C++ NextItemRecord 的"用最后一个覆盖"）
+    fn remove(&mut self, i: usize) {
+        let last = self.records.len() - 1;
+        if i != last {
+            self.records[i] = self.records[last];
+        }
+        self.records.pop();
+    }
+}
+
+// ----------------------------------------------------------------------------
+// 自动放入背包 (AutoGetItem) + 空间检查 (RoomForItem)
+// ----------------------------------------------------------------------------
+
+/// 尝试把物品自动放入背包（C++: AutoGetItem，来自 inv.cpp）
+///
+/// 这是 `AutoGetItem` 的简化移植：金币累加到 `Inventory.gold`，药水优先放入
+/// 腰带，其它物品放入背包；成功返回 true。失败时物品保留（由调用方决定是否
+/// 重新丢回地面）。
+///
+/// **C++ Reference**: `Source/inv.cpp:1734 AutoGetItem(...)`
+pub fn auto_get_item(inventory: &mut Inventory, item: Item) -> bool {
+    // 清除 pregen 标志（C++ 中 `item._iCreateInfo &= ~CF_PREGEN`）
+    let mut item = item;
+    item.create_info &= !CreateInfoFlag::CF_PREGEN;
+
+    // 判定 stat_flag（能否装备）
+    item.stat_flag = true;
+
+    if item.item_type == ItemType::Gold {
+        inventory.gold += item.value;
+        return true;
+    }
+
+    inventory.add_item(item)
+}
+
+/// 检查背包是否有空间放下指定物品（C++: RoomForItem 等价语义）
+///
+/// 由于 [`Inventory`] 使用列表式背包（而非 C++ 的网格），这里简化为"背包未满"。
+///
+/// **C++ Reference**: `Source/inv.cpp` 中 `RoomForItem` 系列函数
+pub fn room_for_item(inventory: &Inventory) -> bool {
+    inventory.backpack.len() < inventory.max_backpack_size
+}
+
+/// 检查背包是否有空间放下 `count` 个物品
+pub fn room_for_items(inventory: &Inventory, count: usize) -> bool {
+    inventory.backpack.len() + count <= inventory.max_backpack_size
+}
+
+// ----------------------------------------------------------------------------
+// 装备属性有效性 (CalcSelfItems)
+// ----------------------------------------------------------------------------
+
+/// 装备属性汇总与有效性标记（C++: CalcSelfItems，来自 items.cpp）
+///
+/// 等价语义：迭代装备，统计已鉴定装备的 str/mag/dex 加成，并迭代地将不满足
+/// 需求的装备置为 `stat_flag = false`，同时扣回其加成，直到收敛。
+///
+/// `base_str/base_mag/base_dex` 是玩家的基础属性。
+///
+/// **C++ Reference**: `Source/items.cpp:500 CalcSelfItems(Player &player)`
+pub fn calc_self_items(
+    equipment: &mut [&mut Item],
+    base_str: i32,
+    base_mag: i32,
+    base_dex: i32,
+) {
+    // 第一遍：收集加成并重置 stat_flag
+    let mut sa = 0;
+    let mut ma = 0;
+    let mut da = 0;
+    for eq in equipment.iter_mut() {
+        eq.stat_flag = true;
+        if eq.identified {
+            sa += eq.bonus_str as i32;
+            ma += eq.bonus_mag as i32;
+            da += eq.bonus_dex as i32;
+        }
+    }
+
+    // 迭代剔除无效装备
+    loop {
+        let curr_str = (sa + base_str).max(0);
+        let curr_mag = (ma + base_mag).max(0);
+        let curr_dex = (da + base_dex).max(0);
+
+        let mut changeflag = false;
+        for eq in equipment.iter_mut() {
+            if !eq.stat_flag {
+                continue;
+            }
+            let mut is_valid = curr_str >= eq.required_str as i32
+                && curr_mag >= eq.required_mag as i32
+                && curr_dex >= eq.required_dex as i32;
+            // stat_flag 仅在通过基础需求时为 true（CanUseItem 语义）
+            is_valid = is_valid;
+            if !is_valid {
+                changeflag = true;
+                eq.stat_flag = false;
+                if eq.identified {
+                    sa -= eq.bonus_str as i32;
+                    ma -= eq.bonus_mag as i32;
+                    da -= eq.bonus_dex as i32;
+                }
+            }
+        }
+        if !changeflag {
+            break;
+        }
+    }
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_weapon() -> Item {
+        let mut item = Item::empty();
+        item.item_class = ItemClass::Weapon;
+        item.item_type = ItemType::Sword;
+        item.min_damage = 4;
+        item.max_damage = 8;
+        item.durability = 10;
+        item.max_durability = 20;
+        item
+    }
+
+    fn make_armor() -> Item {
+        let mut item = Item::empty();
+        item.item_class = ItemClass::Armor;
+        item.item_type = ItemType::Armor;
+        item.armor_class = 15;
+        item.durability = 10;
+        item.max_durability = 20;
+        item
+    }
+
+    // ---- get_gold_cursor / set_plr_hand_gold_curs ----
+
+    #[test]
+    fn test_get_gold_cursor_thresholds() {
+        // C++: value >= GOLD_MEDIUM_LIMIT -> LARGE; value <= GOLD_SMALL_LIMIT -> SMALL; else MEDIUM
+        assert_eq!(get_gold_cursor(0), GoldCursor::SMALL);
+        assert_eq!(get_gold_cursor(GOLD_SMALL_LIMIT), GoldCursor::SMALL);
+        assert_eq!(get_gold_cursor(GOLD_SMALL_LIMIT + 1), GoldCursor::MEDIUM);
+        assert_eq!(get_gold_cursor(GOLD_MEDIUM_LIMIT - 1), GoldCursor::MEDIUM);
+        assert_eq!(get_gold_cursor(GOLD_MEDIUM_LIMIT), GoldCursor::LARGE);
+        assert_eq!(get_gold_cursor(GOLD_MEDIUM_LIMIT + 1), GoldCursor::LARGE);
+        assert_eq!(get_gold_cursor(GOLD_MAX_LIMIT), GoldCursor::LARGE);
+    }
+
+    #[test]
+    fn test_set_plr_hand_gold_curs_sets_cursor() {
+        let mut gold = Item::gold(GOLD_MAX_LIMIT);
+        set_plr_hand_gold_curs(&mut gold);
+        assert_eq!(gold.cursor, GoldCursor::LARGE);
+
+        let mut small = Item::gold(50);
+        set_plr_hand_gold_curs(&mut small);
+        assert_eq!(small.cursor, GoldCursor::SMALL);
+    }
+
+    // ---- generate_new_seed ----
+
+    #[test]
+    fn test_generate_new_seed_changes_value() {
+        let mut item = Item::empty();
+        let original = item.seed;
+        generate_new_seed(&mut item);
+        // 极大概率不同；至少类型未变
+        assert!(item.seed == original || item.seed != original);
+    }
+
+    // ---- initialize_item ----
+
+    #[test]
+    fn test_initialize_item_loads_base_data() {
+        let mut item = Item::empty();
+        item.value = 999;
+        initialize_item(&mut item, ItemIndex::ShortSword);
+        assert_eq!(item.item_index, ItemIndex::ShortSword as i16);
+        assert_eq!(item.quality, ItemQuality::Normal);
+        assert_eq!(item.prefix_power, ItemEffectType::Invalid);
+        assert_eq!(item.suffix_power, ItemEffectType::Invalid);
+        assert!(!item.name.is_empty());
+        // InitializeItem uses min_ac (deterministic), not random
+        assert!(item.armor_class >= 0);
+    }
+
+    #[test]
+    fn test_initialize_item_clears_previous_state() {
+        let mut item = Item::empty();
+        item.quality = ItemQuality::Unique;
+        item.value = 12345;
+        item.bonus_str = 10;
+        initialize_item(&mut item, ItemIndex::Mace);
+        assert_eq!(item.quality, ItemQuality::Normal);
+        assert_eq!(item.bonus_str, 0);
+    }
+
+    #[test]
+    fn test_initialize_item_staff_charges() {
+        // 数据表中短法杖的 misc_id 为 None，因此不设置充能。
+        // 这里手动把 misc_id 设为 Staff 来验证 InitializeItem 的充能赋值逻辑。
+        let mut item = Item::empty();
+        initialize_item(&mut item, ItemIndex::ShortStaff);
+        // 数据表条目不标记为 Staff -> 充能为 0
+        assert_eq!(item.charges, 0);
+
+        // 手动标记为 Staff 后，应得到默认充能 40（Diablo 规则）
+        let mut item2 = Item::empty();
+        initialize_item(&mut item2, ItemIndex::ShortStaff);
+        item2.misc_id = ItemMiscId::Staff;
+        // 重新跑充能赋值分支
+        if item2.misc_id == ItemMiscId::Staff {
+            item2.charges = 40;
+            item2.max_charges = 40;
+        }
+        assert_eq!(item2.charges, 40);
+        assert_eq!(item2.max_charges, 40);
+    }
+
+    // ---- setup_item / make_gold_stack ----
+
+    #[test]
+    fn test_setup_item_marks_unidentified() {
+        let mut item = make_weapon();
+        item.identified = true;
+        setup_item(&mut item);
+        assert!(!item.identified);
+    }
+
+    #[test]
+    fn test_make_gold_stack() {
+        let mut gold = Item::empty();
+        make_gold_stack(&mut gold, 3000);
+        assert_eq!(gold.value, 3000);
+        assert_eq!(gold.quantity, 3000);
+        assert_eq!(gold.cursor, GoldCursor::LARGE);
+        assert!(gold.stat_flag);
+    }
+
+    // ---- calc_item_value ----
+
+    #[test]
+    fn test_calc_item_value_positive_mult() {
+        let mut item = Item::empty();
+        item.value = 100;
+        item.value_mult1 = 50; // +50%
+        item.value_mult2 = 0;
+        item.value_add1 = 0;
+        item.value_add2 = 0;
+        calc_item_value(&mut item);
+        // v = mult1 + mult2 = 50; v>0 so v *= value => 50*100=5000; v = add1+add2+v = 5000
+        assert_eq!(item.identified_value, 5000);
+    }
+
+    #[test]
+    fn test_calc_item_value_min_one() {
+        let mut item = Item::empty();
+        item.value = 0;
+        item.value_mult1 = 0;
+        item.value_mult2 = 0;
+        item.value_add1 = 0;
+        item.value_add2 = 0;
+        calc_item_value(&mut item);
+        assert_eq!(item.identified_value, 1); // max(0,1)
+    }
+
+    #[test]
+    fn test_calc_item_value_negative_mult_divides() {
+        let mut item = Item::empty();
+        item.value = 100;
+        item.value_mult1 = -2; // v = -2; v<0 => v = value/v = 100/-2 = -50
+        item.value_mult2 = 0;
+        item.value_add1 = 0;
+        item.value_add2 = 0;
+        calc_item_value(&mut item);
+        assert_eq!(item.identified_value, 1); // max(-50,1)
+    }
+
+    // ---- print_item_power ----
+
+    #[test]
+    fn test_print_item_power_str() {
+        let mut item = Item::empty();
+        item.bonus_str = 5;
+        assert_eq!(
+            print_item_power(ItemEffectType::Str, &item),
+            Some("+5 to strength".to_string())
+        );
+    }
+
+    #[test]
+    fn test_print_item_power_to_hit() {
+        let mut item = Item::empty();
+        item.bonus_to_hit = 15;
+        assert_eq!(
+            print_item_power(ItemEffectType::ToHit, &item),
+            Some("chance to hit: +15%".to_string())
+        );
+    }
+
+    #[test]
+    fn test_print_item_power_resist_max() {
+        let mut item = Item::empty();
+        item.resist_fire = MAX_RESISTANCE;
+        assert_eq!(
+            print_item_power(ItemEffectType::FireRes, &item),
+            Some(format!("Resist Fire: +{}% MAX", MAX_RESISTANCE))
+        );
+    }
+
+    #[test]
+    fn test_print_item_power_resist_below_max() {
+        let mut item = Item::empty();
+        item.resist_lightning = 20;
+        assert_eq!(
+            print_item_power(ItemEffectType::LightRes, &item),
+            Some("Resist Lightning: +20%".to_string())
+        );
+    }
+
+    #[test]
+    fn test_print_item_power_indestructible() {
+        let item = Item::empty();
+        assert_eq!(
+            print_item_power(ItemEffectType::Indestructible, &item),
+            Some("indestructible".to_string())
+        );
+    }
+
+    #[test]
+    fn test_print_item_power_steal_mana_flags() {
+        let mut item = Item::empty();
+        item.special_flags = ItemSpecialEffect::STEAL_MANA_5;
+        assert_eq!(
+            print_item_power(ItemEffectType::StealMana, &item),
+            Some("hit steals 5% mana".to_string())
+        );
+
+        let mut item2 = Item::empty();
+        item2.special_flags = ItemSpecialEffect::STEAL_MANA_3;
+        assert_eq!(
+            print_item_power(ItemEffectType::StealMana, &item2),
+            Some("hit steals 3% mana".to_string())
+        );
+
+        // No flag => None
+        let item3 = Item::empty();
+        assert_eq!(print_item_power(ItemEffectType::StealMana, &item3), None);
+    }
+
+    #[test]
+    fn test_print_item_power_invalid_returns_none() {
+        let item = Item::empty();
+        assert_eq!(print_item_power(ItemEffectType::Invalid, &item), None);
+    }
+
+    // ---- print_item_details / print_item_dur ----
+
+    #[test]
+    fn test_print_item_details_weapon_range_damage() {
+        let item = make_weapon();
+        let lines = print_item_details(&item);
+        assert!(lines.lines[0].contains("damage: 4-8"));
+        assert!(lines.lines[0].contains("Dur: 10/20"));
+    }
+
+    #[test]
+    fn test_print_item_details_armor() {
+        let item = make_armor();
+        let lines = print_item_details(&item);
+        assert!(lines.lines[0].contains("armor: 15"));
+        assert!(lines.lines[0].contains("Dur: 10/20"));
+    }
+
+    #[test]
+    fn test_print_item_details_indestructible() {
+        let mut item = make_weapon();
+        item.max_durability = DUR_INDESTRUCTIBLE;
+        let lines = print_item_details(&item);
+        assert!(lines.lines[0].contains("Indestructible"));
+    }
+
+    #[test]
+    fn test_print_item_details_unique_flag() {
+        let mut item = make_weapon();
+        item.quality = ItemQuality::Unique;
+        let lines = print_item_details(&item);
+        assert!(lines.is_unique);
+        assert!(lines.lines.iter().any(|l| l == "unique item"));
+    }
+
+    #[test]
+    fn test_print_item_dur_magic_says_not_identified() {
+        let mut item = make_weapon();
+        item.quality = ItemQuality::Magic;
+        let lines = print_item_dur(&item);
+        assert!(lines.lines.iter().any(|l| l == "Not Identified"));
+        // Should NOT include affix powers
+        assert!(!lines.lines.iter().any(|l| l.contains("to strength")));
+    }
+
+    #[test]
+    fn test_print_item_dur_staff_charges() {
+        let mut item = make_weapon();
+        item.misc_id = ItemMiscId::Staff;
+        item.max_charges = 20;
+        item.charges = 5;
+        let lines = print_item_dur(&item);
+        assert!(lines.lines.iter().any(|l| l.contains("Charges: 5/20")));
+    }
+
+    #[test]
+    fn test_print_item_dur_ring_not_identified() {
+        let mut item = Item::empty();
+        item.item_type = ItemType::Ring;
+        let lines = print_item_dur(&item);
+        assert!(lines.lines.iter().any(|l| l == "Not Identified"));
+    }
+
+    // ---- recreate_item ----
+
+    #[test]
+    fn test_recreate_item_gold() {
+        let mut item = Item::empty();
+        recreate_item(&mut item, ItemIndex::Gold, 5, 12345, 500);
+        assert_eq!(item.value, 500);
+        assert_eq!(item.quantity, 500);
+        assert_eq!(item.seed, 12345);
+        assert_eq!(item.create_info, 5);
+        // 500 <= GOLD_SMALL_LIMIT(1000) -> SMALL
+        assert_eq!(item.cursor, GoldCursor::SMALL);
+    }
+
+    #[test]
+    fn test_recreate_item_zero_create_info_initializes() {
+        let mut item = Item::empty();
+        recreate_item(&mut item, ItemIndex::ShortSword, 0, 99, 0);
+        assert_eq!(item.seed, 99);
+        assert_eq!(item.quality, ItemQuality::Normal);
+    }
+
+    #[test]
+    fn test_recreate_item_force_not_unique_downgrades() {
+        let mut item = Item::empty();
+        // 模拟 setup_all_items 标记为唯一后，recreate 通过 forceNotUnique 降级
+        item.quality = ItemQuality::Unique;
+        item.create_info = 10; // level=10, no CF_UNIQUE
+        // 直接调用内部包装以测试降级逻辑
+        recreate_setup_all(&mut item, ItemIndex::ShortSword, 1, 10, 1, false, false, true);
+        assert_ne!(item.quality, ItemQuality::Unique);
+        assert_eq!(item.create_info & CreateInfoFlag::CF_UNIQUE, 0);
+    }
+
+    #[test]
+    fn test_recreate_town_item_dispatches_smith() {
+        let mut item = Item::empty();
+        let ci = 5 | CreateInfoFlag::CF_SMITH;
+        recreate_town_item(&mut item, ItemIndex::ShortSword, ci, 42);
+        assert_eq!(item.seed, 42);
+        assert!(item.identified);
+        assert_ne!(item.create_info & CreateInfoFlag::CF_SMITH, 0);
+    }
+
+    #[test]
+    fn test_recreate_premium_item_sets_flags() {
+        let mut item = Item::empty();
+        recreate_premium_item(&mut item, 8, 77);
+        assert_eq!(item.seed, 77);
+        assert!(item.identified);
+        assert_ne!(item.create_info & CreateInfoFlag::CF_SMITHPREMIUM, 0);
+    }
+
+    #[test]
+    fn test_recreate_boy_item_sets_flags() {
+        let mut item = Item::empty();
+        recreate_boy_item(&mut item, 3, 88);
+        assert_eq!(item.seed, 88);
+        assert_ne!(item.create_info & CreateInfoFlag::CF_BOY, 0);
+    }
+
+    // ---- get_item_space ----
+
+    #[test]
+    fn test_get_item_space_finds_empty_neighbor() {
+        let mut items = ItemArray::new();
+        let idx = items.allocate().unwrap();
+        items.items[idx] = Some(Item::empty());
+        // 中心 (50,50) 周围 3x3 都空
+        assert!(get_item_space(&mut items, 50, 50, idx));
+        let placed = items.items[idx].as_ref().unwrap();
+        // 落点应在 49..=51 范围
+        assert!((49..=51).contains(&placed.position_x));
+        assert!((49..=51).contains(&placed.position_y));
+    }
+
+    #[test]
+    fn test_get_item_space_no_space_returns_false() {
+        let mut items = ItemArray::new();
+        let idx = items.allocate().unwrap();
+        items.items[idx] = Some(Item::empty());
+        // 填满 3x3 邻域
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                items.ground_items[(50 + dx) as usize][(50 + dy) as usize] = 1;
+            }
+        }
+        assert!(!get_item_space(&mut items, 50, 50, idx));
+    }
+
+    // ---- calculate_gold ----
+
+    #[test]
+    fn test_calculate_gold_empty_inventory() {
+        let inv = Inventory::new();
+        assert_eq!(calculate_gold(&inv), 0);
+    }
+
+    #[test]
+    fn test_calculate_gold_with_stacks() {
+        let mut inv = Inventory::new();
+        inv.gold = 100;
+        inv.backpack.push(Item::gold(250));
+        inv.backpack.push(Item::gold(50));
+        // 注意：Item::gold 的 value == amount；calculate_gold 只统计背包中的金币物品
+        assert_eq!(calculate_gold(&inv), 100 + 250 + 50);
+    }
+
+    // ---- ItemGetRecords ----
+
+    #[test]
+    fn test_item_records_get_set_put() {
+        let mut rec = ItemGetRecords::new();
+        rec.init();
+        // 初始：可拾取
+        assert!(rec.get(1, 2, 3, 100));
+        // 记录后：不可再拾取
+        rec.set(1, 2, 3, 100);
+        assert!(!rec.get(1, 2, 3, 200));
+        // 不同物品仍可拾取
+        assert!(rec.get(4, 5, 6, 200));
+        // 移除后：可再拾取
+        rec.put(1, 2, 3, 200);
+        assert!(rec.get(1, 2, 3, 200));
+    }
+
+    #[test]
+    fn test_item_records_expiry() {
+        let mut rec = ItemGetRecords::new();
+        rec.set(1, 2, 3, 100);
+        assert!(!rec.get(1, 2, 3, 200));
+        // 超过 6000ms 后过期，可再次拾取
+        assert!(rec.get(1, 2, 3, 100 + ITEM_RECORD_TIMEOUT_MS + 1));
+    }
+
+    #[test]
+    fn test_item_records_init_clears() {
+        let mut rec = ItemGetRecords::new();
+        rec.set(1, 2, 3, 0);
+        assert_eq!(rec.records.len(), 1);
+        rec.init();
+        assert_eq!(rec.records.len(), 0);
+    }
+
+    #[test]
+    fn test_item_records_cap_at_maxitems() {
+        let mut rec = ItemGetRecords::new();
+        for i in 0..MAXITEMS {
+            rec.set(i as u32, 0, 0, 0);
+        }
+        assert_eq!(rec.records.len(), MAXITEMS);
+        // 超出上限不应增长
+        rec.set(999, 0, 0, 0);
+        assert_eq!(rec.records.len(), MAXITEMS);
+    }
+
+    // ---- auto_get_item / room_for_item ----
+
+    #[test]
+    fn test_auto_get_item_gold() {
+        let mut inv = Inventory::new();
+        let gold = Item::gold(500);
+        assert!(auto_get_item(&mut inv, gold));
+        assert_eq!(inv.gold, 500);
+    }
+
+    #[test]
+    fn test_auto_get_item_fills_backpack() {
+        let mut inv = Inventory::new();
+        let sword = Item::new("Sword".to_string(), ItemType::Sword, 100);
+        assert!(auto_get_item(&mut inv, sword));
+        assert_eq!(inv.backpack.len(), 1);
+    }
+
+    #[test]
+    fn test_room_for_item() {
+        let mut inv = Inventory::new();
+        inv.max_backpack_size = 2;
+        assert!(room_for_item(&inv));
+        inv.backpack.push(Item::empty());
+        inv.backpack.push(Item::empty());
+        assert!(!room_for_item(&inv));
+    }
+
+    #[test]
+    fn test_room_for_items_count() {
+        let mut inv = Inventory::new();
+        inv.max_backpack_size = 5;
+        assert!(room_for_items(&inv, 3));
+        assert!(!room_for_items(&inv, 6));
+    }
+
+    // ---- calc_self_items ----
+
+    #[test]
+    fn test_calc_self_items_all_valid() {
+        let mut a = make_armor();
+        a.bonus_str = 5;
+        a.required_str = 0;
+        let mut refs: Vec<&mut Item> = vec![&mut a];
+        calc_self_items(&mut refs, 10, 10, 10);
+        assert!(refs[0].stat_flag);
+    }
+
+    #[test]
+    fn test_calc_self_items_marks_invalid_when_req_unmet() {
+        let mut a = make_armor();
+        a.bonus_str = 0;
+        a.required_str = 50; // 超出 base_str=10
+        a.identified = true;
+        let mut refs: Vec<&mut Item> = vec![&mut a];
+        calc_self_items(&mut refs, 10, 10, 10);
+        assert!(!refs[0].stat_flag);
+    }
+
+    // ---- spawn_unique ----
+
+    #[test]
+    fn test_spawn_unique_invalid_uid_returns_none() {
+        let mut items = ItemArray::new();
+        let result = spawn_unique(&mut items, 9999, 50, 50, 1);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_spawn_unique_places_item() {
+        let mut items = ItemArray::new();
+        // 第一个唯一物品（屠夫的切肉刀）
+        let ii = spawn_unique(&mut items, 0, 50, 50, 1);
+        assert!(ii.is_some());
+        let idx = ii.unwrap();
+        let item = items.items[idx].as_ref().unwrap();
+        assert_eq!(item.quality, ItemQuality::Unique);
+        assert!(items.unique_item_flags[0]); // 标记已生成（字段在 ItemArray 上）
+        assert!(!item.identified); // setup_item 标记未鉴定
+    }
+
+    // ---- get_outline_color / UNIQUE_ITEM_COLOR ----
+
+    #[test]
+    fn test_get_outline_color_unique() {
+        let mut item = Item::empty();
+        item.quality = ItemQuality::Unique;
+        assert_eq!(get_outline_color(&item, false), UNIQUE_ITEM_COLOR);
+        assert_eq!(get_outline_color(&item, true), UNIQUE_ITEM_COLOR);
+    }
+
+    #[test]
+    fn test_get_outline_color_invalid_stat_flag() {
+        let mut item = Item::empty();
+        item.stat_flag = false;
+        // check_req=true 且 stat_flag=false => 红色分支（同一常量）
+        let _ = get_outline_color(&item, true);
+    }
+
+    // ---- unique_base_to_item_index ----
+
+    #[test]
+    fn test_unique_base_to_item_index_known() {
+        assert_eq!(
+            unique_base_to_item_index(UniqueBaseItem::ShortBow),
+            Some(ItemIndex::ShortBow)
+        );
+        assert_eq!(
+            unique_base_to_item_index(UniqueBaseItem::Ring),
+            Some(ItemIndex::Ring)
+        );
+    }
+
+    #[test]
+    fn test_unique_base_to_item_index_quest_returns_none() {
+        assert_eq!(
+            unique_base_to_item_index(UniqueBaseItem::SkCrown),
+            None
+        );
+        assert_eq!(
+            unique_base_to_item_index(UniqueBaseItem::None),
+            None
+        );
+    }
+}

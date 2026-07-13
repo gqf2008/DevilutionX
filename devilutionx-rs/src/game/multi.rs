@@ -285,6 +285,9 @@ pub struct MultiplayerManager {
     /// Low priority send buffer
     low_priority_buffer: NetBuffer,
 
+    /// Loopback log of packets "sent" this session (drained by recv_packet).
+    pub sent_log: Vec<Packet>,
+
     /// Share next high priority message
     pub share_next_high_priority: bool,
 
@@ -322,6 +325,7 @@ impl MultiplayerManager {
             game_init_info: GameData::new(),
             high_priority_buffer: NetBuffer::new(),
             low_priority_buffer: NetBuffer::new(),
+            sent_log: Vec::new(),
             share_next_high_priority: false,
             players: Default::default(),
             pack_player_offsets: [0; MAX_PLRS],
@@ -423,6 +427,201 @@ impl MultiplayerManager {
         self.timeout_active = false;
         self.timeout_start = 0;
     }
+
+    // ------------------------------------------------------------------------
+    // Network lifecycle (stubs for single-player / loopback mode)
+    // ------------------------------------------------------------------------
+
+    /// Initialise the network layer.
+    ///
+    /// Port of `NetInit(bool bSinglePlayer)` from `multi.cpp`. The headless
+    /// Rust port only supports loopback/single-player, so this is a simplified
+    /// stub: it clears player state, activates the local player and seeds the
+    /// game-init info. Returns `true` on success (always, for single player).
+    pub fn net_init(&mut self, single_player: bool) -> bool {
+        // Reset all per-game state (mirrors the memset block in NetInit).
+        self.game_destroyed = false;
+        self.somebody_won = false;
+        self.clear_timeout();
+        self.clear_buffers();
+        self.pack_player_offsets = [0; MAX_PLRS];
+        self.share_next_high_priority = true;
+        self.game_loops = 0;
+        self.sent_this_cycle = 0;
+        self.delta_sender = 0;
+        self.game_init_info = GameData::new();
+
+        for p in &mut self.players {
+            *p = MultiplayerPlayer::default();
+        }
+
+        if single_player {
+            self.init_single_player();
+            self.is_loopback = true;
+            self.net_initialized = true;
+        } else {
+            // Loopback "multiplayer" used by tests: host joins as player 0.
+            self.init_multiplayer("loopback", "", false);
+            self.player_joined(0);
+            self.is_loopback = true;
+            self.net_initialized = true;
+        }
+        true
+    }
+
+    /// Tear down the network layer.
+    ///
+    /// Port of `NetClose()` from `multi.cpp`. Flushes buffers and marks the
+    /// session inactive. In single-player there is no real socket to close.
+    pub fn net_close(&mut self) {
+        if !self.net_initialized {
+            return;
+        }
+        self.net_initialized = false;
+        self.clear_buffers();
+        for p in &mut self.players {
+            p.set_connected(false);
+            p.set_active(false);
+        }
+        self.active_players = 0;
+    }
+
+    // ------------------------------------------------------------------------
+    // Sending
+    // ------------------------------------------------------------------------
+
+    /// Send a single packet to a player.
+    ///
+    /// Port of `SendPacket(playerId, packet, size)` from `multi.cpp`. In
+    /// single-player the packet is simply appended to the receive log so
+    /// tests can inspect what would have been transmitted.
+    pub fn send_packet(&mut self, player_id: u8, data: &[u8]) -> bool {
+        if !self.net_initialized {
+            return false;
+        }
+        if player_id as usize >= MAX_PLRS {
+            return false;
+        }
+        let pkt = Packet::from_body(data);
+        self.sent_log.push(pkt);
+        self.sent_this_cycle += 1;
+        true
+    }
+
+    /// Send a low-priority command packet.
+    ///
+    /// Port of `NetSendLoPri(playerId, data, size)`: copies into the low-pri
+    /// buffer (for later batched re-send) and fires off an immediate copy.
+    pub fn net_send_lo_pri(&mut self, player_id: u8, data: &[u8]) -> bool {
+        if data.is_empty() {
+            return false;
+        }
+        let _ = self.low_priority_buffer.copy_packet(data);
+        self.send_packet(player_id, data)
+    }
+
+    /// Send a high-priority command packet.
+    ///
+    /// Port of `NetSendHiPri(playerId, data, size)`.
+    pub fn net_send_hi_pri(&mut self, player_id: u8, data: &[u8]) -> bool {
+        if data.is_empty() {
+            return false;
+        }
+        let _ = self.high_priority_buffer.copy_packet(data);
+        self.send_packet(player_id, data)
+    }
+
+    /// Build and send a typed network command.
+    ///
+    /// Conceptual port of the various `NetSendCmd*` helpers: encodes the
+    /// command byte plus an opaque payload.
+    pub fn multi_send_cmd(&mut self, player_id: u8, cmd: NetCmd, payload: &[u8]) -> bool {
+        let mut body = Vec::with_capacity(1 + payload.len());
+        body.push(cmd as u8);
+        body.extend_from_slice(payload);
+        self.send_packet(player_id, &body)
+    }
+
+    // ------------------------------------------------------------------------
+    // Receiving / parsing
+    // ------------------------------------------------------------------------
+
+    /// Drain the sent log, returning the packets that were "received".
+    ///
+    /// Single-player loopback model: every sent packet is immediately
+    /// receivable on the next call. Mirrors the `tmsg_get` polling loop in
+    /// `ProcessTmsgs`.
+    pub fn recv_packet(&mut self) -> Option<Packet> {
+        if self.sent_log.is_empty() {
+            return None;
+        }
+        Some(self.sent_log.remove(0))
+    }
+
+    /// Parse a single command out of a packet body.
+    ///
+    /// Port of the per-message slice of `HandleAllPackets` / `ParseCmd`.
+    /// Returns the decoded command and the consumed byte length, or `None`
+    /// if the body is too short.
+    pub fn parse_packet(body: &[u8]) -> Option<(NetCmd, usize)> {
+        if body.is_empty() {
+            return None;
+        }
+        let cmd = NetCmd::from_u8(body[0])?;
+        // Command byte alone counts as 1 consumed byte; callers append
+        // payload-specific sizes on top.
+        Some((cmd, 1))
+    }
+
+    /// Simulate receiving a full player-info update.
+    ///
+    /// Port of `recv_plrinfo` / `NetReceivePlayerData`: in single-player this
+    /// just marks the named player slot as connected and active.
+    pub fn net_receive_player(&mut self, player_id: usize) -> bool {
+        if player_id >= MAX_PLRS {
+            return false;
+        }
+        if !self.players[player_id].is_connected() {
+            self.player_joined(player_id);
+        }
+        true
+    }
+
+    /// Synchronise a player's state for the current turn.
+    ///
+    /// Simplified port of the per-player slice of `multi_handle_delta` /
+    /// `SyncPlayer`. Returns `true` if the player was active for this sync.
+    pub fn sync_player(&mut self, player_id: usize) -> bool {
+        if player_id >= MAX_PLRS {
+            return false;
+        }
+        if !self.players[player_id].is_active() {
+            return false;
+        }
+        self.players[player_id].has_turn = true;
+        true
+    }
+
+    /// Drain all buffered high/low-priority packets into the sent log.
+    ///
+    /// Conceptual port of `multi_handle_delta`'s flush step. Returns the
+    /// number of packets emitted.
+    pub fn flush_buffers(&mut self) -> usize {
+        let mut count = 0;
+        while !self.high_priority_buffer.is_empty() {
+            let data = self.high_priority_buffer.get_data().to_vec();
+            self.sent_log.push(Packet::from_body(&data));
+            self.high_priority_buffer.clear();
+            count += 1;
+        }
+        while !self.low_priority_buffer.is_empty() {
+            let data = self.low_priority_buffer.get_data().to_vec();
+            self.sent_log.push(Packet::from_body(&data));
+            self.low_priority_buffer.clear();
+            count += 1;
+        }
+        count
+    }
 }
 
 // ============================================================================
@@ -500,6 +699,79 @@ impl NetCmd {
             19 => Some(Self::EndGame),
             _ => None,
         }
+    }
+}
+
+// ============================================================================
+// Network Packet (TPkt equivalent)
+// ============================================================================
+
+/// Network packet header (mirrors C++ `TPktHdr`).
+///
+/// `wLen` is the total packet length (header + body) stored little-endian.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PktHeader {
+    /// Total packet length in bytes (header + body).
+    pub w_len: u16,
+}
+
+/// Packet body capacity (matches the C++ `TPkt` body region).
+pub const PKT_BODY_SIZE: usize = NET_BUFFER_SIZE;
+
+/// A single network packet: header + body slice.
+#[derive(Debug, Clone)]
+pub struct Packet {
+    pub header: PktHeader,
+    pub body: Vec<u8>,
+}
+
+impl Packet {
+    /// Build a packet from a body payload, filling in the length header.
+    pub fn from_body(body: &[u8]) -> Self {
+        let total_len = std::mem::size_of::<PktHeader>() + body.len();
+        Self {
+            header: PktHeader {
+                w_len: total_len as u16,
+            },
+            body: body.to_vec(),
+        }
+    }
+
+    /// Total wire length (header + body).
+    pub fn len(&self) -> usize {
+        std::mem::size_of::<PktHeader>() + self.body.len()
+    }
+
+    /// Whether the packet body is empty.
+    pub fn is_empty(&self) -> bool {
+        self.body.is_empty()
+    }
+
+    /// Serialise to a byte vector (LE header followed by body).
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(self.len());
+        out.extend_from_slice(&self.header.w_len.to_le_bytes());
+        out.extend_from_slice(&self.body);
+        out
+    }
+
+    /// Deserialise from a byte slice, returning `None` on truncation.
+    pub fn from_bytes(data: &[u8]) -> Option<Self> {
+        if data.len() < std::mem::size_of::<PktHeader>() {
+            return None;
+        }
+        let w_len = u16::from_le_bytes([data[0], data[1]]) as usize;
+        if w_len < std::mem::size_of::<PktHeader>() || w_len > data.len() {
+            return None;
+        }
+        let body_len = w_len - std::mem::size_of::<PktHeader>();
+        Some(Self {
+            header: PktHeader {
+                w_len: w_len as u16,
+            },
+            body: data[std::mem::size_of::<PktHeader>()..std::mem::size_of::<PktHeader>() + body_len]
+                .to_vec(),
+        })
     }
 }
 
@@ -607,5 +879,155 @@ mod tests {
         assert_eq!(LeaveReason::from_u8(1), LeaveReason::Normal);
         assert_eq!(LeaveReason::from_u8(2), LeaveReason::ConnectionLost);
         assert_eq!(LeaveReason::from_u8(255), LeaveReason::Unknown);
+    }
+
+    #[test]
+    fn test_packet_roundtrip() {
+        let pkt = Packet::from_body(&[1, 2, 3, 4]);
+        assert_eq!(pkt.len(), std::mem::size_of::<PktHeader>() + 4);
+
+        let bytes = pkt.to_bytes();
+        let restored = Packet::from_bytes(&bytes).unwrap();
+        assert_eq!(restored.body, vec![1, 2, 3, 4]);
+        assert_eq!(restored.header.w_len, pkt.header.w_len);
+    }
+
+    #[test]
+    fn test_packet_from_bytes_truncated() {
+        assert!(Packet::from_bytes(&[0]).is_none());
+        // Declared length shorter than header.
+        assert!(Packet::from_bytes(&[0, 0]).is_none());
+    }
+
+    #[test]
+    fn test_net_init_single_player() {
+        let mut mgr = MultiplayerManager::new();
+        assert!(mgr.net_init(true));
+        assert!(mgr.net_initialized);
+        assert!(mgr.is_loopback);
+        assert_eq!(mgr.active_players, 1);
+        assert!(mgr.is_player_active(0));
+    }
+
+    #[test]
+    fn test_net_init_multi_loopback() {
+        let mut mgr = MultiplayerManager::new();
+        assert!(mgr.net_init(false));
+        assert!(mgr.net_initialized);
+        assert!(mgr.is_multiplayer);
+        // Host joins as player 0.
+        assert!(mgr.is_player_active(0));
+    }
+
+    #[test]
+    fn test_net_close_clears_state() {
+        let mut mgr = MultiplayerManager::new();
+        mgr.net_init(true);
+        assert!(mgr.net_initialized);
+        mgr.net_close();
+        assert!(!mgr.net_initialized);
+        assert_eq!(mgr.active_players, 0);
+    }
+
+    #[test]
+    fn test_net_close_idempotent() {
+        let mut mgr = MultiplayerManager::new();
+        // Closing before init is a no-op.
+        mgr.net_close();
+        assert!(!mgr.net_initialized);
+    }
+
+    #[test]
+    fn test_send_and_recv_packet() {
+        let mut mgr = MultiplayerManager::new();
+        mgr.net_init(true);
+
+        assert!(mgr.send_packet(0, &[0xAB, 0xCD]));
+        let pkt = mgr.recv_packet().unwrap();
+        assert_eq!(pkt.body, vec![0xAB, 0xCD]);
+
+        // Log drained.
+        assert!(mgr.recv_packet().is_none());
+    }
+
+    #[test]
+    fn test_send_packet_rejects_uninit() {
+        let mut mgr = MultiplayerManager::new();
+        assert!(!mgr.send_packet(0, &[1]));
+    }
+
+    #[test]
+    fn test_send_packet_rejects_bad_player() {
+        let mut mgr = MultiplayerManager::new();
+        mgr.net_init(true);
+        assert!(!mgr.send_packet(99, &[1]));
+    }
+
+    #[test]
+    fn test_multi_send_cmd() {
+        let mut mgr = MultiplayerManager::new();
+        mgr.net_init(true);
+
+        assert!(mgr.multi_send_cmd(0, NetCmd::Walk, &[10, 20]));
+        let pkt = mgr.recv_packet().unwrap();
+        assert_eq!(pkt.body[0], NetCmd::Walk as u8);
+        assert_eq!(&pkt.body[1..], &[10, 20]);
+    }
+
+    #[test]
+    fn test_net_send_lo_hi_pri() {
+        let mut mgr = MultiplayerManager::new();
+        mgr.net_init(true);
+
+        assert!(mgr.net_send_lo_pri(0, &[1, 2]));
+        assert!(mgr.net_send_hi_pri(0, &[3, 4]));
+        // Empty payloads are rejected.
+        assert!(!mgr.net_send_lo_pri(0, &[]));
+        assert!(!mgr.net_send_hi_pri(0, &[]));
+    }
+
+    #[test]
+    fn test_parse_packet() {
+        let (cmd, n) = MultiplayerManager::parse_packet(&[5, 0xAA]).unwrap();
+        assert_eq!(cmd, NetCmd::OperateObj);
+        assert_eq!(n, 1);
+        assert!(MultiplayerManager::parse_packet(&[]).is_none());
+        assert!(MultiplayerManager::parse_packet(&[255]).is_none());
+    }
+
+    #[test]
+    fn test_net_receive_player() {
+        let mut mgr = MultiplayerManager::new();
+        mgr.net_init(false);
+        // Player 1 not yet connected.
+        assert!(!mgr.is_player_active(1));
+        assert!(mgr.net_receive_player(1));
+        assert!(mgr.is_player_active(1));
+        // Out of range rejected.
+        assert!(!mgr.net_receive_player(99));
+    }
+
+    #[test]
+    fn test_sync_player() {
+        let mut mgr = MultiplayerManager::new();
+        mgr.net_init(true);
+        assert!(mgr.sync_player(0));
+        assert!(mgr.players[0].has_turn);
+        // Inactive player not synced.
+        assert!(!mgr.sync_player(2));
+        // Out of range rejected.
+        assert!(!mgr.sync_player(99));
+    }
+
+    #[test]
+    fn test_flush_buffers() {
+        let mut mgr = MultiplayerManager::new();
+        mgr.net_init(true);
+        mgr.net_send_hi_pri(0, &[1]);
+        mgr.net_send_lo_pri(0, &[2]);
+        let n = mgr.flush_buffers();
+        assert_eq!(n, 2);
+        assert!(mgr.high_priority_buffer.is_empty());
+        assert!(mgr.low_priority_buffer.is_empty());
     }
 }

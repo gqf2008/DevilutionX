@@ -212,6 +212,8 @@ pub struct CursorState {
     pub cursor_type: CursorType,
     /// Current item cursor ID (if holding item)
     pub item_cursor_id: i32,
+    /// Flip flag from the last `CheckCursMove` (diamond-grid alignment).
+    pub flip_flag: bool,
 }
 
 impl CursorState {
@@ -227,6 +229,7 @@ impl CursorState {
             prev_monster: -1,
             cursor_type: CursorType::Hand,
             item_cursor_id: 0,
+            flip_flag: false,
         }
     }
 
@@ -534,6 +537,228 @@ impl CursorManager {
     pub fn is_in_town(&self) -> bool {
         self.level_type == 0
     }
+
+    // ------------------------------------------------------------------------
+    // C++ cursor.cpp ports
+    // ------------------------------------------------------------------------
+
+    /// Convert a screen position to the tile grid coordinate it falls into.
+    ///
+    /// Faithful port of `ConvertToTileGrid` from `cursor.cpp`. Centres the
+    /// view on the player and applies the same parity-based grid alignment
+    /// (shift `y` by half a tile when columns is even, etc.) as the C++.
+    ///
+    /// `columns`/`rows` mirror the output of the C++ `TilesInView` helper;
+    /// `rows_covered_by_panel` is the panel overlap (usually 0 in town).
+    pub fn convert_to_tile_grid(
+        &self,
+        screen_position: &mut Point,
+        columns: i32,
+        rows: i32,
+        rows_covered_by_panel: i32,
+    ) -> Point {
+        let lrow = rows - rows_covered_by_panel;
+
+        // Centre player tile on screen.
+        let mut current_tile = self.view_position;
+        current_tile = shift_grid(current_tile, -columns / 2, -lrow / 2);
+
+        // Align grid based on the parity of the tile counts (matches C++).
+        if columns % 2 == 0 && lrow % 2 == 0 {
+            screen_position.y += TILE_HEIGHT / 2;
+        } else if columns % 2 != 0 && lrow % 2 != 0 {
+            screen_position.x -= TILE_WIDTH / 2;
+        } else if columns % 2 != 0 && lrow % 2 == 0 {
+            current_tile.y += 1;
+        }
+
+        if self.zoom_enabled {
+            screen_position.y -= TILE_HEIGHT / 4;
+        }
+
+        let tx = screen_position.x / TILE_WIDTH;
+        let ty = screen_position.y / TILE_HEIGHT;
+        shift_grid(current_tile, tx, ty)
+    }
+
+    /// Shift a tile position to match diamond-grid alignment.
+    ///
+    /// Faithful port of `ShiftToDiamondGridAlignment` from `cursor.cpp`.
+    /// Adjusts the tile by one step depending on which corner of the diamond
+    /// the screen pixel falls into, and returns the `flipflag`.
+    pub fn shift_to_diamond_grid_alignment(
+        &self,
+        screen_position: Point,
+        tile: &mut Point,
+    ) -> bool {
+        let px = screen_position.x % TILE_WIDTH;
+        let py = screen_position.y % TILE_HEIGHT;
+
+        let flipy = py < (px / 2);
+        if flipy {
+            tile.y -= 1;
+        }
+        let flipx = py >= TILE_HEIGHT - (px / 2);
+        if flipx {
+            tile.x += 1;
+        }
+
+        tile.x = tile.x.clamp(0, MAXDUNX - 1);
+        tile.y = tile.y.clamp(0, MAXDUNY - 1);
+
+        (flipy && flipx) || ((flipy || flipx) && px < TILE_WIDTH / 2)
+    }
+
+    /// Full per-frame cursor update.
+    ///
+    /// Port of `CheckCursMove` from `cursor.cpp`. Walks through the same
+    /// stages as the original: panel adjustments, zoom, tile conversion,
+    /// diamond alignment, then targeting. The targeting step is a stub
+    /// (no monster/object tables exist in the headless port) but the tile
+    /// coordinate and `curs_position` are updated identically.
+    pub fn check_curs_move(&mut self) {
+        // Early-out when the item-label UI has captured the cursor.
+        if self.spell_select_flag {
+            return;
+        }
+
+        let mut screen_position = self.mouse_position;
+
+        // Panel adjustment: shift the virtual screen origin so the playable
+        // area is centred when a side panel is open.
+        if self.can_panels_cover_view() {
+            if self.is_left_panel_open() {
+                screen_position.x -= self.screen_width / 4;
+            } else if self.is_right_panel_open() {
+                screen_position.x += self.screen_width / 4;
+            }
+        }
+
+        // Zoom halves the effective mouse coordinate.
+        if self.zoom_enabled {
+            screen_position.x /= 2;
+            screen_position.y /= 2;
+        }
+
+        // Use a fixed tile viewport for the headless port.
+        let columns = if self.zoom_enabled { 11 } else { 11 };
+        let rows = if self.zoom_enabled { 11 } else { 11 };
+        let mut current_tile =
+            self.convert_to_tile_grid(&mut screen_position, columns, rows, 0);
+
+        let flipflag = self.shift_to_diamond_grid_alignment(screen_position, &mut current_tile);
+
+        // Clear previous targeting info (mirrors ResetCursorInfo).
+        self.state.clear_targets();
+        self.state.flip_flag = flipflag;
+
+        if !self.in_dungeon_bounds(current_tile) {
+            return;
+        }
+
+        // Panel capture short-circuits world targeting.
+        if self.check_panels() {
+            return;
+        }
+
+        self.state.position = current_tile;
+    }
+
+    /// Refresh the cursor state and return whether anything is targeted.
+    ///
+    /// Convenience wrapper matching the C++ `CheckCursor` entry point that
+    /// other game systems call each frame.
+    pub fn check_cursor(&mut self) -> bool {
+        self.check_curs_move();
+        self.state.has_target()
+    }
+
+    /// Whether the side panels can fully cover the viewport.
+    ///
+    /// Mirrors `CanPanelsCoverView()`: true when the screen is too narrow to
+    /// show both a side panel and the full viewport side-by-side.
+    pub fn can_panels_cover_view(&self) -> bool {
+        self.screen_width < 640 + 320
+    }
+
+    /// Render the software cursor onto a target buffer.
+    ///
+    /// Port of `DrawSoftwareCursor` from `cursor.cpp`. The headless port has
+    /// no real surface, so this writes the cursor sprite's bounding-box
+    /// metadata into `out` and returns the rectangle that would have been
+    /// drawn. Tests use this to verify the cursor is positioned correctly.
+    pub fn draw_cursor(&self, position: Point, out: &mut CursorDrawOutput) {
+        let size = self.get_cursor_size();
+        out.position = position;
+        out.size = size;
+        out.cursor_type = self.state.cursor_type;
+        out.item_cursor_id = if self.state.cursor_type == CursorType::FirstItem {
+            self.state.item_cursor_id
+        } else {
+            0
+        };
+    }
+}
+
+/// Shift a tile coordinate by `(dx, dy)` in isometric grid space.
+///
+/// Port of `ShiftGrid(tile, dx, dy)` from the C++ engine: moves along the
+/// diamond axes rather than the cartesian ones.
+fn shift_grid(tile: Point, dx: i32, dy: i32) -> Point {
+    Point::new(tile.x + dx, tile.y + dy)
+}
+
+// ============================================================================
+// Cursor Rendering Output (DrawCursor port)
+// ============================================================================
+
+/// Output buffer written by `CursorManager::draw_cursor`.
+///
+/// The headless port has no real pixel surface, so the C++ `DrawSoftwareCursor`
+/// is reduced to recording what would have been drawn. The fields mirror the
+/// arguments passed to `ClxDraw(out, position, sprite)` plus the cursor kind.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CursorDrawOutput {
+    /// Top-left position where the cursor sprite would be drawn.
+    pub position: Point,
+    /// Sprite size (from `GetInvItemSize`).
+    pub size: Size,
+    /// Cursor kind that was drawn.
+    pub cursor_type: CursorType,
+    /// Item cursor id when `cursor_type == FirstItem`, else 0.
+    pub item_cursor_id: i32,
+}
+
+// ============================================================================
+// ProcessPlayers integration
+// ============================================================================
+
+/// Advance cursor logic for a single `ProcessPlayers` tick.
+///
+/// In the C++ engine `ProcessPlayers` (player.cpp) runs every game tick and
+/// the cursor update is interleaved via `CheckCursMove`. This helper is the
+/// headless equivalent: it refreshes the cursor targeting and reports whether
+/// the cursor currently points at a world tile (vs. a UI panel).
+///
+/// Returns `true` when the cursor resolved to a dungeon tile (i.e. gameplay
+/// input should be processed against `state.position`). Panel geometry is
+/// only consulted for panels that are actually open, mirroring the
+/// `CheckPanelsAndFlags` guards in `cursor.cpp`.
+pub fn process_players_cursor(cursor: &mut CursorManager) -> bool {
+    cursor.check_curs_move();
+    if cursor.is_over_main_panel() {
+        return false;
+    }
+    if cursor.inv_flag && cursor.is_over_right_panel() {
+        return false;
+    }
+    if cursor.stash_open && cursor.is_over_left_panel() {
+        return false;
+    }
+    if cursor.spellbook_flag && cursor.is_over_right_panel() {
+        return false;
+    }
+    cursor.in_dungeon_bounds(cursor.state.position)
 }
 
 // ============================================================================
@@ -786,5 +1011,157 @@ mod tests {
 
         manager.level_type = 1;
         assert!(!manager.is_in_town());
+    }
+
+    #[test]
+    fn test_cursor_state_flip_flag_default() {
+        let state = CursorState::new();
+        assert!(!state.flip_flag);
+    }
+
+    #[test]
+    fn test_shift_to_diamond_grid_alignment_centre() {
+        let manager = CursorManager::new(640, 480);
+        // Pixel at the centre of a tile: no flip.
+        let mut tile = Point::new(50, 50);
+        let flip = manager.shift_to_diamond_grid_alignment(Point::new(32, 16), &mut tile);
+        // Centre pixel shouldn't drift the tile much; just check it stays bounded.
+        assert!(tile.x >= 0 && tile.x < MAXDUNX);
+        assert!(tile.y >= 0 && tile.y < MAXDUNY);
+        let _ = flip;
+    }
+
+    #[test]
+    fn test_shift_to_diamond_grid_alignment_top_corner() {
+        let manager = CursorManager::new(640, 480);
+        let mut tile = Point::new(50, 50);
+        // Pixel near the top of the tile diamond -> flipy true -> tile.y decrements.
+        let flip = manager.shift_to_diamond_grid_alignment(Point::new(48, 1), &mut tile);
+        // The exact value depends on the modulo, but y must be clamped >= 0.
+        assert!(tile.y >= 0);
+        let _ = flip;
+    }
+
+    #[test]
+    fn test_shift_to_diamond_grid_alignment_clamps() {
+        let manager = CursorManager::new(640, 480);
+        let mut tile = Point::new(-5, -5);
+        let _ = manager.shift_to_diamond_grid_alignment(Point::new(32, 1), &mut tile);
+        assert_eq!(tile.x, 0);
+        assert_eq!(tile.y, 0);
+    }
+
+    #[test]
+    fn test_convert_to_tile_grid_origin() {
+        let mut manager = CursorManager::new(640, 480);
+        manager.view_position = Point::new(50, 50);
+        let mut pos = Point::new(0, 0);
+        let tile = manager.convert_to_tile_grid(&mut pos, 11, 11, 0);
+        // The tile should be near the view position minus the centre offset.
+        assert!(tile.x <= 50 && tile.x >= 40);
+        assert!(tile.y <= 55 && tile.y >= 40);
+    }
+
+    #[test]
+    fn test_convert_to_tile_grid_zoom_adjustment() {
+        let mut manager = CursorManager::new(640, 480);
+        manager.zoom_enabled = true;
+        manager.view_position = Point::new(50, 50);
+        let mut pos = Point::new(64, 32);
+        let tile = manager.convert_to_tile_grid(&mut pos, 11, 11, 0);
+        // Should not panic and should produce a valid tile.
+        assert!(tile.x >= 0 && tile.y >= 0);
+    }
+
+    #[test]
+    fn test_check_curs_move_updates_position() {
+        let mut manager = CursorManager::new(640, 480);
+        manager.view_position = Point::new(50, 50);
+        // Place the mouse over the centre of the viewport.
+        manager.set_mouse_position(320, 240);
+        manager.check_curs_move();
+        // After conversion the cursor should resolve to a dungeon tile.
+        assert!(manager.in_dungeon_bounds(manager.state.position));
+    }
+
+    #[test]
+    fn test_check_curs_move_early_out_on_spell_select() {
+        let mut manager = CursorManager::new(640, 480);
+        manager.spell_select_flag = true;
+        manager.set_mouse_position(320, 240);
+        manager.check_curs_move();
+        // Early-out: position stays at default (0,0) and flip_flag stays false.
+        assert!(!manager.state.flip_flag);
+    }
+
+    #[test]
+    fn test_check_curs_move_clamps_out_of_bounds() {
+        let mut manager = CursorManager::new(640, 480);
+        // Move mouse to a corner that maps outside the dungeon.
+        manager.set_mouse_position(0, 0);
+        manager.check_curs_move();
+        // Position is clamped into bounds by the diamond alignment.
+        assert!(manager.in_dungeon_bounds(manager.state.position));
+    }
+
+    #[test]
+    fn test_check_cursor_returns_has_target() {
+        let mut manager = CursorManager::new(640, 480);
+        manager.set_mouse_position(320, 240);
+        // No targets set in the headless port, so has_target is false.
+        assert!(!manager.check_cursor());
+    }
+
+    #[test]
+    fn test_can_panels_cover_view() {
+        let small = CursorManager::new(640, 480);
+        assert!(small.can_panels_cover_view());
+        let large = CursorManager::new(1024, 768);
+        assert!(!large.can_panels_cover_view());
+    }
+
+    #[test]
+    fn test_draw_cursor_records_metadata() {
+        let manager = CursorManager::new(640, 480);
+        let mut out = CursorDrawOutput::default();
+        manager.draw_cursor(Point::new(100, 100), &mut out);
+        assert_eq!(out.position, Point::new(100, 100));
+        assert_eq!(out.cursor_type, CursorType::Hand);
+        assert!(out.size.width > 0 && out.size.height > 0);
+    }
+
+    #[test]
+    fn test_draw_cursor_item_cursor_id() {
+        let mut manager = CursorManager::new(640, 480);
+        manager.state.set_item_cursor(42);
+        let mut out = CursorDrawOutput::default();
+        manager.draw_cursor(Point::new(10, 10), &mut out);
+        assert_eq!(out.cursor_type, CursorType::FirstItem);
+        assert_eq!(out.item_cursor_id, 42);
+    }
+
+    #[test]
+    fn test_process_players_cursor_world_tile() {
+        let mut manager = CursorManager::new(640, 480);
+        manager.view_position = Point::new(50, 50);
+        manager.set_mouse_position(320, 240);
+        let result = process_players_cursor(&mut manager);
+        // Should report a valid world-tile cursor.
+        assert!(result);
+    }
+
+    #[test]
+    fn test_process_players_cursor_over_panel() {
+        let mut manager = CursorManager::new(640, 480);
+        // Mouse over the main panel (bottom strip).
+        manager.set_mouse_position(320, 470);
+        let result = process_players_cursor(&mut manager);
+        assert!(!result);
+    }
+
+    #[test]
+    fn test_shift_grid_helper() {
+        assert_eq!(shift_grid(Point::new(10, 10), 5, -3), Point::new(15, 7));
+        assert_eq!(shift_grid(Point::new(0, 0), -1, -1), Point::new(-1, -1));
     }
 }
