@@ -1461,6 +1461,12 @@ pub struct SlotWorld {
 ///
 /// Serialized to disk as JSON (human-readable, matches the existing
 /// `SaveManager` format) via `SaveManager::save_slot`/`load_slot`.
+///
+/// Version 3 adds optional `level` / `game` blobs that carry the full per-level
+/// and global binary state (monsters, objects, floor items, quests, portals,
+/// missiles) produced by `loadsave::LevelSaveData` / `GameSaveDataEnvelope`.
+/// Older saves (version 2) load with these fields absent (regenerated from the
+/// level seed, the original behaviour).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SaveSlot {
     pub magic: u32,
@@ -1469,16 +1475,27 @@ pub struct SaveSlot {
     pub save_time: u64,
     pub player: SlotPlayer,
     pub world: SlotWorld,
+    /// Optional full-level binary blob (version >= 3). Absent on legacy saves.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub level: Option<crate::game::loadsave::LevelSaveData>,
+    /// Optional full-game binary blob (version >= 3). Absent on legacy saves.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub game: Option<crate::game::loadsave::GameSaveDataEnvelope>,
 }
 
 impl SaveSlot {
     /// Current on-disk save format version.
     pub const MAGIC: u32 = 0x53415645; // "SAVE"
-    pub const VERSION: u32 = 2;
+    /// Version 2: player + world snapshots only.
+    /// Version 3: + optional full level/game binary blobs.
+    pub const VERSION: u32 = 3;
+    /// Highest version that still uses the v2 (no level/game) layout.
+    pub const VERSION_V2: u32 = 2;
 
     /// Validate magic + version.
     pub fn is_valid(&self) -> bool {
-        self.magic == Self::MAGIC && self.version == Self::VERSION
+        self.magic == Self::MAGIC
+            && (self.version == Self::VERSION || self.version == Self::VERSION_V2)
     }
 }
 
@@ -1606,6 +1623,19 @@ pub trait PlayerSnapshotMut {
     fn apply_slot(&mut self, s: &SlotPlayer);
 }
 
+/// Apply a loaded `LevelSaveData` (monsters/objects/floor items) back onto the
+/// engine. `GameState` implements this in `game_state.rs` to restore the
+/// per-level state captured by the F5/F9 save path.
+pub trait LevelStateMut {
+    fn apply_level(&mut self, data: &crate::game::loadsave::LevelSaveData);
+}
+
+/// Apply a loaded `GameSaveDataEnvelope` (quests/portals/missiles) back onto
+/// the engine. `GameState` implements this in `game_state.rs`.
+pub trait GameStateMut {
+    fn apply_game(&mut self, data: &crate::game::loadsave::GameSaveDataEnvelope);
+}
+
 /// Build a fresh `SaveSlot` (header + player + world) from snapshots + tick.
 pub fn build_save_slot(
     player: &dyn PlayerSnapshot,
@@ -1628,6 +1658,10 @@ pub fn build_save_slot(
             cam_x: world.cam_x(),
             cam_y: world.cam_y(),
         },
+        // `build_save_slot` produces a v2-compatible body; callers wanting the
+        // full level/game blobs use `build_save_slot_full`.
+        level: None,
+        game: None,
     }
 }
 
@@ -1639,6 +1673,25 @@ pub trait WorldSnapshot {
     fn game_tick(&self) -> u32;
     fn cam_x(&self) -> i32;
     fn cam_y(&self) -> i32;
+}
+
+/// Build a full `SaveSlot` including the level + game binary blobs (version 3).
+/// Used by the F5/F9 path to capture the complete engine state. The `level`
+/// snapshot is built from `level_src`, the `game` snapshot from `game_src`
+/// (which itself embeds the level snapshot, so `level_src` is read twice —
+/// once for the top-level `level` field, once inside `game.level`).
+pub fn build_save_slot_full(
+    player: &dyn PlayerSnapshot,
+    world: &dyn WorldSnapshot,
+    level_src: &dyn crate::game::loadsave::LevelSnapshot,
+    game_src: &dyn crate::game::loadsave::GameSnapshot,
+) -> SaveSlot {
+    let mut slot = build_save_slot(player, world);
+    let level_snap = crate::game::loadsave::build_level_snapshot(level_src);
+    let game_snap = crate::game::loadsave::build_game_snapshot(game_src, level_src);
+    slot.level = Some(crate::game::loadsave::LevelSaveData::from_snapshot(&level_snap));
+    slot.game = Some(crate::game::loadsave::GameSaveDataEnvelope::from_snapshot(&game_snap));
+    slot
 }
 
 #[cfg(test)]
@@ -1688,6 +1741,8 @@ mod slot_tests {
                 cam_x: 56,
                 cam_y: 56,
             },
+            level: None,
+            game: None,
         };
 
         let json = serde_json::to_string(&slot).unwrap();
@@ -1752,6 +1807,8 @@ mod slot_tests {
                 cam_x: 75,
                 cam_y: 68,
             },
+            level: None,
+            game: None,
         };
 
         mgr.save_slot(0, &slot).unwrap();

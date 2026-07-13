@@ -18,6 +18,7 @@ pub mod pathfinding;
 pub mod animation;
 pub mod map_render;
 pub mod save;
+pub mod loadsave; // Full C++-aligned save/load: SaveLevel/LoadLevel/SaveGame/LoadGame binary I/O
 pub mod quest;
 pub mod quests;        // Quest system (M9 Day 88+)
 pub mod inventory;     // Inventory System (M10 Day 93+)
@@ -82,6 +83,7 @@ pub mod movie; // Video playback system (M42)
 pub mod spells_cast; // Spell casting system (M43)
 pub mod vision; // Vision/line-of-sight system (M43)
 pub mod crawl; // Crawl traversal algorithm (M44)
+pub mod inv; // Inventory system (player backpack/equipment/belt)
 pub mod inv_exact; // Exact inventory system (M44)
 pub mod sha; // X-SHA-1 hash algorithm (M45)
 pub mod minitext; // Scrolling dialog text system (M46)

@@ -42,7 +42,7 @@ pub const MAX_RESISTANCE: i32 = 75;
 pub const HP_PRECISION: i32 = 64;
 
 /// Hero class
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum HeroClass {
     #[default]
     Warrior,

@@ -868,7 +868,7 @@ impl FlaskDrawParams {
 // ============================================================================
 
 /// Equipment slot for durability icons
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum EquipSlot {
     Head,
     Chest,

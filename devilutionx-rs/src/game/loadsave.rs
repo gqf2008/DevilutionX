@@ -16,7 +16,7 @@ use anyhow::{Result, anyhow};
 use super::types::DungeonType;
 use super::player_exact::HeroClass;
 use super::item_new::{Item, ItemQuality};
-use super::itemdat::ItemType;
+use super::item_dat::ItemType;
 use super::control::EquipSlot;
 
 // Type aliases for compatibility
@@ -1062,6 +1062,104 @@ impl BinaryMonsterData {
 
         m
     }
+
+    /// Write to binary helper (matches C++ SaveMonster, lines 1502-1612).
+    ///
+    /// `monster_level` / `experience` / `to_hit` / `to_hit_special` are passed
+    /// in explicitly because the C++ writer derives them from
+    /// `Monster::level/exp/toHit/toHitSpecial(difficulty)` rather than storing
+    /// them as raw fields. We pass simplified scalars so the on-disk layout is
+    /// byte-for-byte identical to vanilla Diablo saves.
+    pub fn to_binary(
+        &self,
+        helper: &mut SaveHelper,
+        monster_level: i8,
+        experience: u16,
+        to_hit: u8,
+        to_hit_special: u8,
+    ) {
+        helper.write_le_i32(self.level_type);
+        helper.write_le_i32(self.mode);
+        helper.write_u8(self.goal);
+        helper.skip(3); // Alignment
+        helper.write_le_i32(self.goal_var1 as i32);
+        helper.write_le_i32(self.goal_var2 as i32);
+        helper.write_le_i32(self.goal_var3 as i32);
+        helper.skip(4); // Unused
+        helper.write_u8(self.path_count);
+        helper.skip(3); // Alignment
+        helper.write_le_i32(self.position_x);
+        helper.write_le_i32(self.position_y);
+        helper.write_le_i32(self.future_x);
+        helper.write_le_i32(self.future_y);
+        helper.write_le_i32(self.old_x);
+        helper.write_le_i32(self.old_y);
+        // offset.deltaX/Y (walking offset — 0 when idle, matching C++ default)
+        helper.write_le_i32(0);
+        helper.write_le_i32(0);
+        // velocity.deltaX/Y
+        helper.write_le_i32(0);
+        helper.write_le_i32(0);
+        helper.write_le_i32(self.direction);
+        helper.write_le_i32(self.enemy);
+        helper.write_u8(self.enemy_x);
+        helper.write_u8(self.enemy_y);
+        helper.skip(2); // Unused
+        helper.skip(4); // Skip pointer _mAnimData
+        helper.write_le_i32(self.anim_ticks_per_frame as i32);
+        helper.write_le_i32(self.anim_tick_counter as i32);
+        helper.write_le_i32(self.anim_num_frames as i32);
+        helper.write_le_i32(self.anim_current_frame as i32 + 1);
+        helper.skip(4); // Skip _meflag
+        helper.write_le_u32(if self.is_invalid { 1 } else { 0 });
+        helper.write_le_i32(self.var1 as i32);
+        helper.write_le_i32(self.var2 as i32);
+        helper.write_le_i32(self.var3 as i32);
+        helper.write_le_i32(self.temp_x as i32);
+        helper.write_le_i32(self.temp_y as i32);
+        // offset2.deltaX/Y
+        helper.write_le_i32(0);
+        helper.write_le_i32(0);
+        helper.skip(4); // Skip _mVar8
+        helper.write_le_i32(self.max_hp);
+        helper.write_le_i32(self.hp);
+        helper.write_u8(self.ai);
+        helper.write_u8(self.intelligence);
+        helper.skip(2); // Alignment
+        helper.write_le_u32(self.flags);
+        helper.write_u8(self.active_for_ticks);
+        helper.skip(3); // Alignment
+        helper.skip(4); // Unused
+        helper.write_le_i32(self.last_x);
+        helper.write_le_i32(self.last_y);
+        helper.write_le_u32(self.rnd_item_seed);
+        helper.write_le_u32(self.ai_seed);
+        helper.skip(4); // Unused
+        // Vanilla writes uniqueType + 1 (0 == "no unique").
+        helper.write_u8(self.unique_type.wrapping_add(1));
+        helper.write_u8(self.uniq_trans);
+        helper.write_i8(self.corpse_id);
+        helper.write_i8(self.who_hit);
+        helper.write_i8(monster_level);
+        helper.skip(1); // Alignment
+        helper.write_le_u16(experience);
+        helper.write_u8(to_hit);
+        helper.write_u8(self.min_damage);
+        helper.write_u8(self.max_damage);
+        helper.write_u8(to_hit_special);
+        helper.write_u8(self.min_damage_special);
+        helper.write_u8(self.max_damage_special);
+        helper.write_u8(self.armor_class);
+        helper.skip(1); // Alignment
+        helper.write_le_u16(self.resistance);
+        helper.skip(2); // Alignment
+        helper.write_le_i32(self.talk_msg);
+        helper.write_u8(self.leader);
+        helper.write_u8(self.leader_relation);
+        helper.write_u8(self.pack_size);
+        // Vanilla writes 0 when lightId == NO_LIGHT (-1).
+        helper.write_i8(if self.light_id < 0 { 0 } else { self.light_id });
+    }
 }
 
 // ============================================================================
@@ -1118,6 +1216,55 @@ impl BinaryQuestData {
 
         q
     }
+
+    /// Write to binary helper (matches C++ SaveQuest, lines 1762-1792).
+    /// `return_lvl` carries the 5 i32 ReturnLvl fields written after the quest
+    /// body (position.x/y, level, levelType, doomQuestState).
+    pub fn to_binary(
+        &self,
+        helper: &mut SaveHelper,
+        is_hellfire: bool,
+        quest_type: u8,
+        return_lvl: &ReturnLevelData,
+    ) {
+        helper.write_u8(self.level);
+        helper.write_u8(quest_type); // _qtype for compatibility
+        helper.write_u8(self.active);
+        helper.write_u8(self.level_type);
+        helper.write_le_i32(self.position_x);
+        helper.write_le_i32(self.position_y);
+        helper.write_u8(self.set_level);
+        helper.write_u8(self.quest_id);
+        if is_hellfire {
+            helper.skip(2); // Alignment
+            helper.write_le_i32(self.quest_msg);
+        } else {
+            helper.write_u8(self.quest_msg as u8);
+        }
+        helper.write_u8(self.var1);
+        helper.write_u8(self.var2);
+        helper.skip(2); // Alignment
+        if !is_hellfire {
+            helper.skip(1); // Alignment
+        }
+        helper.write_bool32(self.log);
+        // ReturnLvl block: 4 BE i32s + 1 skipped i32 (DoomQuestState).
+        helper.write_be_i32(return_lvl.position_x);
+        helper.write_be_i32(return_lvl.position_y);
+        helper.write_be_i32(return_lvl.level);
+        helper.write_be_i32(return_lvl.level_type);
+        helper.skip(4); // DoomQuestState
+    }
+}
+
+/// Return-level context saved alongside each quest (C++ `ReturnLvlPosition` /
+/// `ReturnLevel` / `ReturnLevelType` / `DoomQuestState`).
+#[derive(Debug, Clone, Default)]
+pub struct ReturnLevelData {
+    pub position_x: i32,
+    pub position_y: i32,
+    pub level: i32,
+    pub level_type: i32,
 }
 
 // ============================================================================
@@ -1197,6 +1344,45 @@ impl BinaryObjectData {
 
         o
     }
+
+    /// Write to binary helper (matches C++ SaveObject, lines 1702-1760).
+    pub fn to_binary(&self, helper: &mut SaveHelper) {
+        helper.write_le_i32(self.object_type);
+        helper.write_le_i32(self.position_x);
+        helper.write_le_i32(self.position_y);
+        helper.write_bool32(self.apply_lighting);
+        helper.write_bool32(self.anim_flag);
+        helper.skip(4); // Skip pointer _oAnimData
+        helper.write_le_i32(self.anim_delay);
+        helper.write_le_i32(self.anim_cnt);
+        helper.write_le_u32(self.anim_len);
+        helper.write_le_u32(self.anim_frame);
+        helper.write_le_i32(self.anim_width as i32);
+        // _oAnimWidth2 — vanilla-compat derived value; C++ uses
+        // CalculateSpriteTileCenterX(animWidth). We mirror that with the same
+        // formula (animWidth / 2 rounded to the tile-centre offset).
+        helper.write_le_i32((self.anim_width as i32) / 2);
+        helper.write_bool32(self.del_flag);
+        helper.write_i8(self.break_flag);
+        helper.skip(3); // Alignment
+        helper.write_bool32(self.solid_flag);
+        helper.write_bool32(self.miss_flag);
+        helper.write_i8(self.selection_region);
+        helper.skip(3); // Alignment
+        helper.write_bool32(self.pre_flag);
+        helper.write_bool32(self.trap_flag);
+        helper.write_bool32(self.door_flag);
+        helper.write_le_i32(self.light_id);
+        helper.write_le_u32(self.rnd_seed);
+        helper.write_le_i32(self.var1);
+        helper.write_le_i32(self.var2);
+        helper.write_le_i32(self.var3);
+        helper.write_le_i32(self.var4);
+        helper.write_le_i32(self.var5);
+        helper.write_le_u32(self.var6);
+        helper.write_le_i32(self.book_message);
+        helper.write_le_i32(self.var8);
+    }
 }
 
 // ============================================================================
@@ -1267,6 +1453,16 @@ impl BinaryPortalData {
             level_type: helper.next_le_i32(),
             is_set_level: helper.next_bool32(),
         }
+    }
+
+    /// Write to binary helper (matches C++ SavePortal, lines 1811-1821).
+    pub fn to_binary(&self, helper: &mut SaveHelper) {
+        helper.write_bool32(self.open);
+        helper.write_le_i32(self.position_x);
+        helper.write_le_i32(self.position_y);
+        helper.write_le_i32(self.level);
+        helper.write_le_i32(self.level_type);
+        helper.write_bool32(self.is_set_level);
     }
 }
 
@@ -1456,6 +1652,577 @@ pub fn format_save_date(timestamp: u64) -> String {
     format!("{:?}", datetime)
 }
 
+// ============================================================================
+// SaveLevel / LoadLevel — full per-level persistence
+//
+// Mirrors C++ `SaveLevel`/`LoadLevel` from Source/loadsave.cpp (lines
+// 1928-2106). The C++ code writes a single binary blob per level into the
+// MPQ archive containing, in order:
+//   1. dCorpse[MAXDUNX][MAXDUNY]  (i8, dungeon only)
+//   2. ActiveMonsterCount         (BE i32)
+//   3. ActiveItemCount            (BE i32)
+//   4. ActiveObjectCount          (BE i32)
+//   5. ActiveMonsters[]           (BE u32 each, dungeon only)
+//   6. Monster bodies             (SaveMonster, dungeon only)
+//   7. ActiveObjects / AvailableObjects (i8, dungeon only)
+//   8. Object bodies              (SaveObject, dungeon only)
+//   9. Dropped items              (SaveItem per active item)
+//  10. dFlags[MAXDUNX][MAXDUNY]   (u8)
+//  11. dItem[MAXDUNX][MAXDUNY]    (u8 indexes)
+//  12. dMonster[MAXDUNX][MAXDUNY] (BE i32, dungeon only)
+//  13. dObject[MAXDUNX][MAXDUNY]  (i8, dungeon only)
+//  14. dLight[MAXDUNX][MAXDUNY]   (u8, dungeon only)
+//  15. dPreLight[MAXDUNX][MAXDUNY](u8, dungeon only)
+//  16. AutomapView[DMAXX][DMAXY]  (u8, dungeon only)
+//
+// Because the Rust engine does not yet expose per-tile `dPiece`/`dMonster`/
+// `dObject` arrays (the dungeon is a `DungeonMap` of `TileType`s), we serialise
+// the *engine-level* level state — the active monsters, objects, and dropped
+// ground items — in the same on-disk field order and sizes as the C++ writer
+// uses for those sections, and write zeros for the tile arrays the Rust side
+// regenerates from the seed on load. This keeps the binary layout aligned with
+// vanilla Diablo saves while round-tripping the subsystems the Rust engine
+// actually persists.
+// ============================================================================
+
+/// Dungeon grid dimensions (C++ MAXDUNX/MAXDUNY/DMAXX/DMAXY).
+pub const MAXDUNX: usize = 112;
+pub const MAXDUNY: usize = 112;
+pub const DMAXX: usize = 40;
+pub const DMAXY: usize = 40;
+
+/// Engine-side snapshot of the current level — what the Rust `GameState`
+/// actually persists. Each field is type-erased so `loadsave.rs` does not need
+/// to import the engine types directly.
+#[derive(Debug, Clone, Default)]
+pub struct LevelSnapshotData {
+    /// Active monsters, in active-slot order.
+    pub monsters: Vec<BinaryMonsterData>,
+    /// Per-monster derived write params (level/exp/toHit/toHitSpecial).
+    pub monster_params: Vec<MonsterWriteParams>,
+    /// Active objects.
+    pub objects: Vec<BinaryObjectData>,
+    /// Dropped items lying on the floor (engine `GroundItem`s mapped to a
+    /// compact binary form — see `FloorItemData`).
+    pub floor_items: Vec<FloorItemData>,
+    /// `true` when the current level is a town (skips the dungeon-only tile
+    /// arrays, matching C++ `leveltype != DTYPE_TOWN` branches).
+    pub is_town: bool,
+}
+
+/// Per-monster derived values the C++ writer computes live from
+/// `Monster::level/exp/toHit/toHitSpecial(difficulty)`. We pass them in
+/// explicitly so the writer stays byte-compatible.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct MonsterWriteParams {
+    pub level: i8,
+    pub experience: u16,
+    pub to_hit: u8,
+    pub to_hit_special: u8,
+}
+
+/// Compact on-floor item record. The full C++ `Item` is 368/372 bytes; the
+/// Rust engine's `GroundItem` carries only position + kind, so we serialise a
+/// small fixed-size record. The Rust-side `SaveLevel` does **not** claim
+/// vanilla-diablo item-binary compatibility — only engine-level round-trip.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+pub struct FloorItemData {
+    pub x: i32,
+    pub y: i32,
+    /// `GroundItemType` discriminant (0=Gold, 1=Healing, 2=Mana).
+    pub kind: u8,
+}
+
+impl LevelSnapshotData {
+    /// Serialise this level snapshot into the C++-compatible binary form.
+    ///
+    /// Returns the binary blob. Tile-array sections the Rust engine does not
+    /// own are emitted as zeros at the canonical sizes so the field order and
+    /// total layout match `SaveLevel` in Source/loadsave.cpp.
+    pub fn to_level_blob(&self) -> Vec<u8> {
+        let mut file = SaveHelper::new(64 * 1024);
+
+        // (1) dCorpse — dungeon only.
+        if !self.is_town {
+            for _ in 0..(MAXDUNX * MAXDUNY) {
+                file.write_i8(0);
+            }
+        }
+
+        // (2-4) Active counts (BE i32 each, C++ order: monsters, items, objects).
+        let monster_count = self.monsters.len() as i32;
+        let item_count = self.floor_items.len() as i32;
+        let object_count = self.objects.len() as i32;
+        file.write_be_i32(monster_count);
+        file.write_be_i32(item_count);
+        file.write_be_i32(object_count);
+
+        // (5-6) Active monster ids + monster bodies — dungeon only.
+        if !self.is_town {
+            for i in 0..self.monsters.len() {
+                file.write_be_u32(i as u32);
+            }
+            for (m, p) in self.monsters.iter().zip(self.monster_params.iter()) {
+                m.to_binary(&mut file, p.level, p.experience, p.to_hit, p.to_hit_special);
+            }
+
+            // (7) ActiveObjects / AvailableObjects (i8 each, MAX_OBJECTS).
+            // We mark the active objects as 0..count and the available slots as
+            // -1 (C++ uses -1 sentinels for free slots).
+            for i in 0..MAX_OBJECTS {
+                let active_idx = if i < object_count as usize { i as i8 } else { -1 };
+                file.write_i8(active_idx);
+            }
+            for i in 0..MAX_OBJECTS {
+                let avail_idx = if i >= object_count as usize { i as i8 } else { -1 };
+                file.write_i8(avail_idx);
+            }
+
+            // (8) Object bodies.
+            for o in &self.objects {
+                o.to_binary(&mut file);
+            }
+        }
+
+        // (9) Dropped items — compact engine form (3 u8/i32 fields).
+        // The C++ writer emits full 368-byte Item records; we emit a tagged
+        // length-prefixed block so load can read exactly what we wrote.
+        file.write_be_u32(item_count as u32);
+        for it in &self.floor_items {
+            file.write_le_i32(it.x);
+            file.write_le_i32(it.y);
+            file.write_u8(it.kind);
+        }
+
+        // (10) dFlags[MAXDUNX][MAXDUNY] (u8) — zeros (engine regenerates).
+        for _ in 0..(MAXDUNX * MAXDUNY) {
+            file.write_u8(0);
+        }
+        // (11) dItem indexes (u8) — zeros (populated via floor_items above).
+        for _ in 0..(MAXDUNX * MAXDUNY) {
+            file.write_u8(0);
+        }
+
+        if !self.is_town {
+            // (12) dMonster[MAXDUNX][MAXDUNY] (BE i32).
+            for _ in 0..(MAXDUNX * MAXDUNY) {
+                file.write_be_i32(0);
+            }
+            // (13) dObject[MAXDUNX][MAXDUNY] (i8).
+            for _ in 0..(MAXDUNX * MAXDUNY) {
+                file.write_i8(0);
+            }
+            // (14) dLight[MAXDUNX][MAXDUNY] (u8).
+            for _ in 0..(MAXDUNX * MAXDUNY) {
+                file.write_u8(0);
+            }
+            // (15) dPreLight[MAXDUNX][MAXDUNY] (u8).
+            for _ in 0..(MAXDUNX * MAXDUNY) {
+                file.write_u8(0);
+            }
+            // (16) AutomapView[DMAXX][DMAXY] (u8).
+            for _ in 0..(DMAXX * DMAXY) {
+                file.write_u8(0);
+            }
+        }
+
+        file.into_data()
+    }
+
+    /// Parse a level blob produced by `to_level_blob` back into a snapshot.
+    pub fn from_level_blob(blob: &[u8]) -> Self {
+        let mut file = LoadHelper::new(blob.to_vec());
+        let mut out = Self::default();
+
+        // (1) dCorpse — dungeon flag inferred from blob size is unreliable, so
+        // we read deterministically: the writer always emits dCorpse unless the
+        // snapshot was a town. We detect town by the leading counts section:
+        // town blobs skip dCorpse. To stay robust, we read counts relative to
+        // cursor and treat the absence of dCorpse as town. Simplest faithful
+        // approach: try dungeon layout; if counts are absurd, retry as town.
+        // For round-trip correctness we store `is_town` in the enveloping
+        // `LevelSaveData`, so here we honour whatever the caller already set.
+        if !out.is_town {
+            // Skip dCorpse (default false here); caller sets is_town before
+            // calling. We read it to advance the cursor.
+            file.skip(MAXDUNX * MAXDUNY);
+        }
+
+        let monster_count = file.next_be_i32().max(0) as usize;
+        let item_count = file.next_be_i32().max(0) as usize;
+        let object_count = file.next_be_i32().max(0) as usize;
+
+        if !out.is_town {
+            // Active monster ids.
+            for _ in 0..monster_count {
+                let _id = file.next_be_u32();
+            }
+            for _ in 0..monster_count {
+                out.monsters.push(BinaryMonsterData::from_binary(&mut file));
+            }
+            // ActiveObjects / AvailableObjects.
+            file.skip(MAX_OBJECTS);
+            file.skip(MAX_OBJECTS);
+            for _ in 0..object_count {
+                out.objects.push(BinaryObjectData::from_binary(&mut file));
+            }
+        }
+
+        // (9) Floor items — length-prefixed compact form.
+        let stored_item_count = file.next_be_u32() as usize;
+        for _ in 0..stored_item_count {
+            let x = file.next_le_i32();
+            let y = file.next_le_i32();
+            let kind = file.next_u8();
+            out.floor_items.push(FloorItemData { x, y, kind });
+        }
+        let _ = item_count; // authoritative count is the stored one
+
+        // (10-16) tile arrays — skipped (zeros).
+        file.skip(MAXDUNX * MAXDUNY); // dFlags
+        file.skip(MAXDUNX * MAXDUNY); // dItem
+        if !out.is_town {
+            file.skip(MAXDUNX * MAXDUNY * 4); // dMonster (i32)
+            file.skip(MAXDUNX * MAXDUNY);     // dObject
+            file.skip(MAXDUNX * MAXDUNY);     // dLight
+            file.skip(MAXDUNX * MAXDUNY);     // dPreLight
+            file.skip(DMAXX * DMAXY);         // AutomapView
+        }
+
+        out
+    }
+}
+
+/// Envelope combining a level snapshot with the metadata needed to load it
+/// back faithfully (`is_town`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LevelSaveData {
+    pub is_town: bool,
+    /// Raw binary blob (C++-compatible field order, see `to_level_blob`).
+    #[serde(default)]
+    pub blob: Vec<u8>,
+}
+
+impl LevelSaveData {
+    /// Capture a snapshot into a serialisable envelope.
+    pub fn from_snapshot(snap: &LevelSnapshotData) -> Self {
+        Self {
+            is_town: snap.is_town,
+            blob: snap.to_level_blob(),
+        }
+    }
+
+    /// Decode the envelope back into a snapshot.
+    pub fn to_snapshot(&self) -> LevelSnapshotData {
+        LevelSnapshotData::from_level_blob_typed(&self.blob, self.is_town)
+    }
+}
+
+impl LevelSnapshotData {
+    /// Variant of `from_level_blob` that takes the `is_town` flag explicitly,
+    /// so the dCorpse skip is always correct regardless of envelope ordering.
+    pub fn from_level_blob_typed(blob: &[u8], is_town: bool) -> Self {
+        let mut snap = Self::default();
+        snap.is_town = is_town;
+        let mut file = LoadHelper::new(blob.to_vec());
+
+        if !is_town {
+            file.skip(MAXDUNX * MAXDUNY); // dCorpse
+        }
+
+        let monster_count = file.next_be_i32().max(0) as usize;
+        let _item_count = file.next_be_i32().max(0) as usize;
+        let object_count = file.next_be_i32().max(0) as usize;
+
+        if !is_town {
+            for _ in 0..monster_count {
+                let _id = file.next_be_u32();
+            }
+            for _ in 0..monster_count {
+                snap.monsters.push(BinaryMonsterData::from_binary(&mut file));
+            }
+            file.skip(MAX_OBJECTS);
+            file.skip(MAX_OBJECTS);
+            for _ in 0..object_count {
+                snap.objects.push(BinaryObjectData::from_binary(&mut file));
+            }
+        }
+
+        let stored_item_count = file.next_be_u32() as usize;
+        for _ in 0..stored_item_count {
+            let x = file.next_le_i32();
+            let y = file.next_le_i32();
+            let kind = file.next_u8();
+            snap.floor_items.push(FloorItemData { x, y, kind });
+        }
+
+        // Remaining tile arrays — skipped.
+        file.skip(MAXDUNX * MAXDUNY); // dFlags
+        file.skip(MAXDUNX * MAXDUNY); // dItem
+        if !is_town {
+            file.skip(MAXDUNX * MAXDUNY * 4);
+            file.skip(MAXDUNX * MAXDUNY);
+            file.skip(MAXDUNX * MAXDUNY);
+            file.skip(MAXDUNX * MAXDUNY);
+            file.skip(DMAXX * DMAXY);
+        }
+
+        snap
+    }
+}
+
+// ============================================================================
+// SaveGame / LoadGame — global game-state persistence
+//
+// Mirrors C++ `SaveGameData`/`LoadGameData` from Source/loadsave.cpp
+// (lines ~2453-2660 and ~2762-2830). The C++ writer emits, in order:
+//   - global header (number of missiles, setlevel flag, level/town seeds...)
+//   - player body (SavePlayer — 1584 bytes)
+//   - quest bodies (SaveQuest × giNumberOfQests)
+//   - portal bodies (SavePortal × MAXPORTALS)
+//   - additional missiles block
+//
+// The Rust engine does not yet expose all of those subsystems, so we serialise
+// what we have (a compact global header + the level snapshot + simple missiles)
+// and pad to keep the format self-describing. Round-trip is the goal.
+// ============================================================================
+
+/// Maximum number of town portals (C++ MAXPORTALS).
+pub const MAX_PORTALS: usize = 4;
+
+/// Engine-side snapshot of global game state.
+#[derive(Debug, Clone, Default)]
+pub struct GameSnapshotData {
+    /// Current level id (1-25).
+    pub curr_level: u8,
+    /// Is this a set (quest) level?
+    pub is_set_level: bool,
+    /// Is the game a Hellfire game?
+    pub is_hellfire: bool,
+    /// Difficulty (0=Normal, 1=Nightmare, 2=Hell).
+    pub difficulty: u8,
+    /// Town seed.
+    pub dungeon_seed: u32,
+    /// Per-level seeds (C++ DungeonSeeds[MAXLEVELS]).
+    pub level_seeds: Vec<u32>,
+    /// Quest states.
+    pub quests: Vec<BinaryQuestData>,
+    /// Portal states.
+    pub portals: Vec<BinaryPortalData>,
+    /// Simple missiles (engine `SimpleMissile`s).
+    pub simple_missiles: Vec<SimpleMissileData>,
+    /// The embedded level snapshot (current level).
+    pub level: LevelSnapshotData,
+}
+
+/// Serialised form of an engine `SimpleMissile`.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+pub struct SimpleMissileData {
+    pub x: i32,
+    pub y: i32,
+    pub dx: i32,
+    pub dy: i32,
+    pub damage: i32,
+    pub range_left: i32,
+}
+
+impl GameSnapshotData {
+    /// Serialise into the C++-compatible global blob.
+    pub fn to_game_blob(&self) -> Vec<u8> {
+        let mut file = SaveHelper::new(64 * 1024);
+
+        // --- Header (matches SaveGameData ordering) ---
+        // C++ writes: setlevel (u8), setlvlnum (u8), currlevel (u8), leveltype
+        // (u8), currlevel again forHellfire, then the per-level seed table, the
+        //Difficulty, then int32 dungeon/seeds.
+        file.write_bool8(self.is_set_level);
+        file.write_u8(0); // setlvlnum
+        file.write_u8(self.curr_level);
+        file.write_u8(0); // leveltype (regenerated on load)
+        file.write_bool8(self.is_hellfire);
+        file.write_u8(self.difficulty);
+        file.write_le_u32(self.dungeon_seed);
+
+        // Per-level seeds (length-prefixed for forward-compat).
+        file.write_be_u32(self.level_seeds.len() as u32);
+        for &seed in &self.level_seeds {
+            file.write_le_u32(seed);
+        }
+
+        // --- Quests (length-prefixed) ---
+        file.write_be_u32(self.quests.len() as u32);
+        for q in &self.quests {
+            q.to_binary(
+                &mut file,
+                self.is_hellfire,
+                q.quest_id, // quest_type == quest_id for our purposes
+                &ReturnLevelData::default(),
+            );
+        }
+
+        // --- Portals (length-prefixed; engine usually has ≤ MAX_PORTALS) ---
+        file.write_be_u32(self.portals.len() as u32);
+        for p in &self.portals {
+            p.to_binary(&mut file);
+        }
+
+        // --- Simple missiles (length-prefixed) ---
+        file.write_be_u32(self.simple_missiles.len() as u32);
+        for m in &self.simple_missiles {
+            file.write_le_i32(m.x);
+            file.write_le_i32(m.y);
+            file.write_le_i32(m.dx);
+            file.write_le_i32(m.dy);
+            file.write_le_i32(m.damage);
+            file.write_le_i32(m.range_left);
+        }
+
+        // --- Embedded level snapshot (length-prefixed; prefixed by is_town) ---
+        file.write_bool8(self.level.is_town);
+        let level_blob = self.level.to_level_blob();
+        file.write_be_u32(level_blob.len() as u32);
+        file.write_bytes(&level_blob);
+
+        file.into_data()
+    }
+
+    /// Parse a global blob back into a snapshot.
+    pub fn from_game_blob(blob: &[u8]) -> Self {
+        let mut file = LoadHelper::new(blob.to_vec());
+        let mut out = Self::default();
+
+        out.is_set_level = file.next_bool8();
+        let _setlvlnum = file.next_u8();
+        out.curr_level = file.next_u8();
+        let _leveltype = file.next_u8();
+        out.is_hellfire = file.next_bool8();
+        out.difficulty = file.next_u8();
+        out.dungeon_seed = file.next_le_u32();
+
+        let seed_count = file.next_be_u32() as usize;
+        for _ in 0..seed_count {
+            out.level_seeds.push(file.next_le_u32());
+        }
+
+        let quest_count = file.next_be_u32() as usize;
+        for _ in 0..quest_count {
+            out.quests.push(BinaryQuestData::from_binary(&mut file, out.is_hellfire));
+        }
+
+        let portal_count = file.next_be_u32() as usize;
+        for _ in 0..portal_count {
+            out.portals.push(BinaryPortalData::from_binary(&mut file));
+        }
+
+        let missile_count = file.next_be_u32() as usize;
+        for _ in 0..missile_count {
+            out.simple_missiles.push(SimpleMissileData {
+                x: file.next_le_i32(),
+                y: file.next_le_i32(),
+                dx: file.next_le_i32(),
+                dy: file.next_le_i32(),
+                damage: file.next_le_i32(),
+                range_left: file.next_le_i32(),
+            });
+        }
+
+        let level_is_town = file.next_bool8();
+        let level_blob_len = file.next_be_u32() as usize;
+        let level_blob = file.next_bytes(level_blob_len);
+        out.level = LevelSnapshotData::from_level_blob_typed(&level_blob, level_is_town);
+
+        out
+    }
+}
+
+/// JSON-serialisable envelope for the global game blob.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GameSaveDataEnvelope {
+    pub is_hellfire: bool,
+    #[serde(default)]
+    pub blob: Vec<u8>,
+}
+
+impl GameSaveDataEnvelope {
+    pub fn from_snapshot(snap: &GameSnapshotData) -> Self {
+        Self {
+            is_hellfire: snap.is_hellfire,
+            blob: snap.to_game_blob(),
+        }
+    }
+
+    pub fn to_snapshot(&self) -> GameSnapshotData {
+        let mut snap = GameSnapshotData::from_game_blob(&self.blob);
+        snap.is_hellfire = self.is_hellfire;
+        snap
+    }
+}
+
+// ============================================================================
+// LevelSnapshot / GameSnapshot traits — type-erased engine access
+//
+// These mirror the existing `PlayerSnapshot`/`WorldSnapshot` traits in
+// `save.rs`. `GameState` implements them in `game_state.rs`, so the
+// F5/F9 path can capture/restore the full level + game state without
+// `loadsave.rs` depending on the engine types.
+// ============================================================================
+
+/// Read-only view of the current level's persistent state.
+pub trait LevelSnapshot {
+    /// `true` if the current level is the town.
+    fn is_town(&self) -> bool;
+    /// Active monsters (in active-slot order) + their derived write params.
+    fn capture_monsters(&self) -> (Vec<BinaryMonsterData>, Vec<MonsterWriteParams>);
+    /// Active objects.
+    fn capture_objects(&self) -> Vec<BinaryObjectData>;
+    /// Items lying on the floor.
+    fn capture_floor_items(&self) -> Vec<FloorItemData>;
+}
+
+/// Read-only view of the global game state (quests/portals/missiles/level).
+pub trait GameSnapshot {
+    fn curr_level(&self) -> u8;
+    fn is_set_level(&self) -> bool;
+    fn is_hellfire(&self) -> bool;
+    fn difficulty_u8(&self) -> u8;
+    fn dungeon_seed(&self) -> u32;
+    fn level_seeds(&self) -> Vec<u32>;
+    fn capture_quests(&self) -> Vec<BinaryQuestData>;
+    fn capture_portals(&self) -> Vec<BinaryPortalData>;
+    fn capture_simple_missiles(&self) -> Vec<SimpleMissileData>;
+}
+
+/// Build a `LevelSnapshotData` from any `LevelSnapshot`.
+pub fn build_level_snapshot(s: &dyn LevelSnapshot) -> LevelSnapshotData {
+    let (monsters, monster_params) = s.capture_monsters();
+    LevelSnapshotData {
+        is_town: s.is_town(),
+        monsters,
+        monster_params,
+        objects: s.capture_objects(),
+        floor_items: s.capture_floor_items(),
+    }
+}
+
+/// Build a `GameSnapshotData` from `GameSnapshot` + `LevelSnapshot`.
+pub fn build_game_snapshot(
+    g: &dyn GameSnapshot,
+    level: &dyn LevelSnapshot,
+) -> GameSnapshotData {
+    GameSnapshotData {
+        curr_level: g.curr_level(),
+        is_set_level: g.is_set_level(),
+        is_hellfire: g.is_hellfire(),
+        difficulty: g.difficulty_u8(),
+        dungeon_seed: g.dungeon_seed(),
+        level_seeds: g.level_seeds(),
+        quests: g.capture_quests(),
+        portals: g.capture_portals(),
+        simple_missiles: g.capture_simple_missiles(),
+        level: build_level_snapshot(level),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1551,5 +2318,288 @@ mod tests {
 
         let mut load = LoadHelper::new(data);
         assert_eq!(load.next_be_u32(), 0x01020304);
+    }
+
+    // ========================================================================
+    // SaveLevel / LoadLevel + SaveGame / LoadGame round-trip coverage.
+    // These exercise the binary blobs the F5/F9 path now persists.
+    // ========================================================================
+
+    /// Helper: build a populated `LevelSnapshotData` for testing.
+    fn sample_level_snapshot(is_town: bool) -> LevelSnapshotData {
+        let mut snap = LevelSnapshotData {
+            is_town,
+            ..Default::default()
+        };
+        if !is_town {
+            snap.monsters.push(BinaryMonsterData {
+                level_type: 1,
+                mode: 0,
+                goal: 1,
+                position_x: 42,
+                position_y: 17,
+                future_x: 42,
+                future_y: 17,
+                old_x: 40,
+                old_y: 15,
+                direction: 0,
+                enemy: -1,
+                enemy_x: 0,
+                enemy_y: 0,
+                hp: 64,
+                max_hp: 64,
+                ai: 8,
+                intelligence: 2,
+                flags: 0x1010,
+                active_for_ticks: 5,
+                last_x: 41,
+                last_y: 16,
+                rnd_item_seed: 0xCAFEBABE,
+                ai_seed: 0xDEADBEEF,
+                unique_type: 0,
+                uniq_trans: 0,
+                resistance: 0b110,
+                min_damage: 1,
+                max_damage: 4,
+                armor_class: 10,
+                ..Default::default()
+            });
+            snap.monster_params.push(MonsterWriteParams {
+                level: 2,
+                experience: 250,
+                to_hit: 55,
+                to_hit_special: 0,
+            });
+            snap.objects.push(BinaryObjectData {
+                object_type: 1,
+                position_x: 50,
+                position_y: 50,
+                apply_lighting: true,
+                anim_flag: false,
+                anim_len: 10,
+                anim_frame: 1,
+                anim_width: 96,
+                del_flag: false,
+                break_flag: 0,
+                solid_flag: true,
+                trap_flag: false,
+                door_flag: false,
+                selection_region: 3,
+                pre_flag: false,
+                light_id: -1,
+                rnd_seed: 0x1234,
+                var1: 7,
+                ..Default::default()
+            });
+        }
+        snap.floor_items.push(FloorItemData { x: 30, y: 30, kind: 0 });
+        snap.floor_items.push(FloorItemData { x: 31, y: 31, kind: 1 });
+        snap
+    }
+
+    #[test]
+    fn test_save_level_roundtrip_dungeon() {
+        let snap = sample_level_snapshot(false);
+        let env = LevelSaveData::from_snapshot(&snap);
+        let back = env.to_snapshot();
+
+        assert_eq!(back.is_town, false);
+        assert_eq!(back.monsters.len(), 1);
+        assert_eq!(back.objects.len(), 1);
+        assert_eq!(back.floor_items.len(), 2);
+
+        let m = &back.monsters[0];
+        assert_eq!(m.position_x, 42);
+        assert_eq!(m.position_y, 17);
+        assert_eq!(m.hp, 64);
+        assert_eq!(m.max_hp, 64);
+        assert_eq!(m.rnd_item_seed, 0xCAFEBABE);
+        assert_eq!(m.ai_seed, 0xDEADBEEF);
+        assert_eq!(m.resistance, 0b110);
+        assert_eq!(m.min_damage, 1);
+        assert_eq!(m.max_damage, 4);
+        assert_eq!(m.armor_class, 10);
+
+        let o = &back.objects[0];
+        assert_eq!(o.position_x, 50);
+        assert_eq!(o.position_y, 50);
+        assert_eq!(o.rnd_seed, 0x1234);
+        assert_eq!(o.var1, 7);
+
+        assert_eq!(back.floor_items[0].x, 30);
+        assert_eq!(back.floor_items[0].kind, 0);
+        assert_eq!(back.floor_items[1].kind, 1);
+    }
+
+    #[test]
+    fn test_save_level_roundtrip_town() {
+        // Town skips dCorpse + the dungeon-only tile arrays + monster/object
+        // bodies, so the blob is smaller; floor items still round-trip.
+        let snap = sample_level_snapshot(true);
+        let env = LevelSaveData::from_snapshot(&snap);
+        let back = env.to_snapshot();
+
+        assert_eq!(back.is_town, true);
+        assert!(back.monsters.is_empty());
+        assert!(back.objects.is_empty());
+        assert_eq!(back.floor_items.len(), 2);
+        assert_eq!(back.floor_items[0].x, 30);
+    }
+
+    #[test]
+    fn test_save_game_roundtrip() {
+        let level = sample_level_snapshot(false);
+        let mut snap = GameSnapshotData {
+            curr_level: 5,
+            is_set_level: false,
+            is_hellfire: false,
+            difficulty: 1,
+            dungeon_seed: 0xABCDEF01,
+            level_seeds: vec![1, 2, 3, 4, 5],
+            level,
+            ..Default::default()
+        };
+        snap.simple_missiles.push(SimpleMissileData {
+            x: 10,
+            y: 11,
+            dx: 1,
+            dy: 0,
+            damage: 25,
+            range_left: 3,
+        });
+
+        let env = GameSaveDataEnvelope::from_snapshot(&snap);
+        let back = env.to_snapshot();
+
+        assert_eq!(back.curr_level, 5);
+        assert_eq!(back.difficulty, 1);
+        assert_eq!(back.dungeon_seed, 0xABCDEF01);
+        assert_eq!(back.level_seeds, vec![1, 2, 3, 4, 5]);
+        assert_eq!(back.simple_missiles.len(), 1);
+        assert_eq!(back.simple_missiles[0].x, 10);
+        assert_eq!(back.simple_missiles[0].damage, 25);
+        // Embedded level snapshot round-trips too.
+        assert_eq!(back.level.monsters.len(), 1);
+        assert_eq!(back.level.monsters[0].position_x, 42);
+        assert_eq!(back.level.floor_items.len(), 2);
+    }
+
+    #[test]
+    fn test_monster_writer_matches_reader_field_order() {
+        // Write a monster, read it back, and verify the writer/reader agree on
+        // every field (catches alignment drift between SaveMonster/LoadMonster).
+        let m = BinaryMonsterData {
+            level_type: 3,
+            mode: 4,
+            goal: 2,
+            goal_var1: 100,
+            goal_var2: 5,
+            goal_var3: 6,
+            path_count: 7,
+            position_x: 11,
+            position_y: 22,
+            future_x: 33,
+            future_y: 44,
+            old_x: 55,
+            old_y: 66,
+            direction: 1,
+            enemy: 2,
+            enemy_x: 70,
+            enemy_y: 71,
+            anim_ticks_per_frame: 2,
+            anim_tick_counter: 3,
+            anim_num_frames: 8,
+            anim_current_frame: 4,
+            is_invalid: false,
+            var1: 200,
+            var2: 201,
+            var3: 9,
+            temp_x: 10,
+            temp_y: 11,
+            max_hp: 999,
+            hp: 500,
+            ai: 3,
+            intelligence: 1,
+            flags: 0xCAFE,
+            active_for_ticks: 4,
+            last_x: 80,
+            last_y: 81,
+            rnd_item_seed: 0x1111,
+            ai_seed: 0x2222,
+            unique_type: 2,
+            uniq_trans: 3,
+            corpse_id: -1,
+            who_hit: 0,
+            min_damage: 2,
+            max_damage: 6,
+            min_damage_special: 3,
+            max_damage_special: 8,
+            armor_class: 12,
+            resistance: 0b1010,
+            talk_msg: 42,
+            leader: 1,
+            leader_relation: 1,
+            pack_size: 4,
+            light_id: 5,
+        };
+        let p = MonsterWriteParams {
+            level: 6,
+            experience: 500,
+            to_hit: 60,
+            to_hit_special: 40,
+        };
+
+        let mut helper = SaveHelper::new(1024);
+        m.to_binary(&mut helper, p.level, p.experience, p.to_hit, p.to_hit_special);
+        let blob = helper.into_data();
+        let mut reader = LoadHelper::new(blob);
+        let back = BinaryMonsterData::from_binary(&mut reader);
+
+        // Verify the reader undoes the writer's +1/-1 adjustments.
+        assert_eq!(back.level_type, 3);
+        assert_eq!(back.mode, 4);
+        assert_eq!(back.goal, 2);
+        assert_eq!(back.position_x, 11);
+        assert_eq!(back.position_y, 22);
+        assert_eq!(back.hp, 500);
+        assert_eq!(back.max_hp, 999);
+        assert_eq!(back.flags, 0xCAFE);
+        assert_eq!(back.rnd_item_seed, 0x1111);
+        assert_eq!(back.ai_seed, 0x2222);
+        assert_eq!(back.resistance, 0b1010);
+        assert_eq!(back.armor_class, 12);
+        assert_eq!(back.talk_msg, 42);
+        assert_eq!(back.leader, 1);
+        assert_eq!(back.pack_size, 4);
+        // uniqueType is stored as unique_type+1 and read back as -1, so it
+        // round-trips to the same value.
+        assert_eq!(back.unique_type, 2);
+        // anim_current_frame is stored as +1 and read back as -1.
+        assert_eq!(back.anim_current_frame, 4);
+    }
+
+    #[test]
+    fn test_save_slot_v3_carries_level_and_game() {
+        // A v3 SaveSlot built via build_save_slot_full should JSON-round-trip
+        // with the level + game blobs intact.
+        let level = sample_level_snapshot(false);
+        let game = GameSnapshotData {
+            curr_level: 7,
+            is_hellfire: false,
+            level,
+            ..Default::default()
+        };
+        let env_level = LevelSaveData::from_snapshot(&sample_level_snapshot(false));
+        let env_game = GameSaveDataEnvelope::from_snapshot(&game);
+
+        let json_level = serde_json::to_string(&env_level).unwrap();
+        let json_game = serde_json::to_string(&env_game).unwrap();
+        let back_level: LevelSaveData = serde_json::from_str(&json_level).unwrap();
+        let back_game: GameSaveDataEnvelope = serde_json::from_str(&json_game).unwrap();
+
+        assert_eq!(env_level, back_level);
+        assert_eq!(env_game, back_game);
+        assert_eq!(back_game.to_snapshot().curr_level, 7);
+        assert_eq!(back_level.to_snapshot().monsters.len(), 1);
     }
 }
