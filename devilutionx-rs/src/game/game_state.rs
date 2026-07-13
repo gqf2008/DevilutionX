@@ -1960,7 +1960,7 @@ impl crate::game::loadsave::LevelSnapshot for GameState {
                 anim_frame: o.anim_frame as u32,
                 anim_width: o.anim_width as u16,
                 del_flag: o.del_flag,
-                break_flag: if o.breakable { 1 } else { 0 },
+                break_flag: o.breakable as i8,
                 solid_flag: o.solid,
                 miss_flag: true,
                 selection_region: o.selection_region as i8,
@@ -2115,7 +2115,7 @@ impl crate::game::save::LevelStateMut for GameState {
             o.del_flag = od.del_flag;
             o.solid = od.solid_flag;
             o.is_trap = od.trap_flag;
-            o.breakable = od.break_flag != 0;
+            o.breakable = od.break_flag as i32;
             o.door_state = if od.door_flag { 1 } else { 0 };
             o.pre_flag = if od.pre_flag { 1 } else { 0 };
             o.rnd_seed = od.rnd_seed;
