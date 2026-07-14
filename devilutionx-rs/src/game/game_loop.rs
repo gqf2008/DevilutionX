@@ -2795,81 +2795,77 @@ fn draw_tristram(
     screen_center_y: i32,
 ) -> Result<()> {
     let mut drawn = 0u32;
-    let mut skipped = 0u32;
 
-    for wy_off in -VIEW_RADIUS_Y..=VIEW_RADIUS_Y {
-        for wx_off in -VIEW_RADIUS_X..=VIEW_RADIUS_X {
-            let wx = cam_tile_x + wx_off;
-            let wy = cam_tile_y + wy_off;
-            let dpiece = layout.get(wx, wy);
-            if dpiece == 0 {
-                skipped += 1;
-                continue;
-            }
+    // C++ scrollrt.cpp DrawFloor: zigzag row iteration.
+    // Each row alternates which world axis advances (x++ vs y++) and shifts
+    // the screen x by half a tile width. This creates the isometric diamond
+    // grid pattern with correct painter's order.
+    //
+    // We need enough rows/columns to cover the full viewport (640x336 above HUD).
+    // Each row is TILE_HEIGHT/2 = 16px tall, each column is TILE_WIDTH = 64px wide.
+    // 336/16 = 21 rows, 640/64 = 10 columns minimum. Use generous bounds.
+    let row_count = 26;
+    let init_columns = 14;
 
-            // dPiece is a 1-based index into the MIN mega-tile table (mirrors
-            // C++ pMegaTiles[dPiece - 1]). The MIN array is 0-based, so we
-            // subtract 1. Without this, every tile reads the wrong mega (off by
-            // one) and the town renders dark/garbled.
-            let mega_idx = dpiece.saturating_sub(1) as usize;
-            let mega = match level.min.mega_tiles.get(mega_idx) {
-                Some(m) => m,
-                None => {
-                    skipped += 1;
-                    continue;
+    // Starting tile: the back-top corner of the visible diamond.
+    // Going back from camera means decreasing both x and y.
+    let mut tile_x = cam_tile_x - 13;
+    let mut tile_y = cam_tile_y - 13;
+    // Starting screen position: top-left of the first tile.
+    // The camera tile's diamond top-left is at (screen_center_x - TILE_WIDTH/2,
+    // screen_center_y - TILE_HEIGHT). Going back 13 tiles shifts by
+    // 13 * TILE_WIDTH/2 = 416px left and 13 * TILE_HEIGHT/2 = 208px up.
+    let mut base_sx = screen_center_x - 13 * (TILE_WIDTH / 2) - (TILE_WIDTH / 2);
+    let mut base_sy = screen_center_y - 13 * (TILE_HEIGHT / 2) - TILE_HEIGHT;
+    let mut columns: i32 = init_columns;
+
+    for row in 0..row_count {
+        let mut cur_x = tile_x;
+        let mut cur_sx = base_sx;
+        for _col in 0..columns {
+            let dpiece = layout.get(cur_x, tile_y);
+            if dpiece != 0 {
+                let mega_idx = dpiece.saturating_sub(1) as usize;
+                if let Some(mega) = level.min.mega_tiles.get(mega_idx) {
+                    for (slot, block) in [(0usize, &mega.blocks[0]), (1, &mega.blocks[1])] {
+                        if !block.has_value() { continue; }
+                        let rgba = match TileDecoder::decode_tile(
+                            &level.level_cel, block.frame(), block.tile_type(), &level.palette,
+                        ) {
+                            Some(r) => r,
+                            None => continue,
+                        };
+                        let mut canvas = window.canvas_mut();
+                        let creator = canvas.texture_creator();
+                        let tex_result = rgba_to_texture(&creator, &rgba, 32, 32);
+                        if let Ok(tex) = tex_result {
+                            let tx = cur_sx + if slot == 1 { TILE_WIDTH / 2 } else { 0 };
+                            let _ = canvas.copy(&tex, None, Rect::new(
+                                tx, base_sy, (TILE_WIDTH / 2) as u32, TILE_HEIGHT as u32,
+                            ));
+                            drawn += 1;
+                        }
+                    }
                 }
-            };
-
-            // Pixel position of this tile relative to the viewport centre.
-            // C++ worldToScreen: screenX = (worldY - worldX) * 32,
-            //                    screenY = (worldY + worldX) * -16
-            // We apply the offset from the camera tile.
-            let rel_x = (wy_off - wx_off) * (TILE_WIDTH / 2);
-            let rel_y = (wx_off + wy_off) * -(TILE_HEIGHT / 2);
-            let dst_cx = screen_center_x + rel_x;
-            let dst_cy = screen_center_y + rel_y;
-
-            // Skip if entirely off-screen (simple bounding check).
-            if dst_cx < -(TILE_WIDTH) || dst_cx > (LOGICAL_WIDTH as i32 + TILE_WIDTH)
-                || dst_cy < -(TILE_HEIGHT * 2) || dst_cy > (LOGICAL_HEIGHT as i32 + TILE_HEIGHT)
-            {
-                continue;
             }
-
-            // C++ scrollrt.cpp (DrawTile): for each dPiece, draw mt[0] (left
-            // half) and mt[1] (right half). Each is a 32x32 CEL frame.
-            // The tile is anchored so its bottom-centre is at (dst_cx, dst_cy).
-            let canvas = window.canvas_mut();
-            for (slot, block) in [(0usize, &mega.blocks[0]), (1, &mega.blocks[1])] {
-                if !block.has_value() { continue; }
-                let rgba = match TileDecoder::decode_tile(
-                    &level.level_cel, block.frame(), block.tile_type(), &level.palette,
-                ) {
-                    Some(r) => r,
-                    None => continue,
-                };
-                let creator = canvas.texture_creator();
-                let tex = match rgba_to_texture(&creator, &rgba, 32, 32) {
-                    Ok(t) => t,
-                    Err(_) => continue,
-                };
-                // Left half occupies the left 16px of the 32px tile.
-                // Right half occupies the right 16px.
-                // Top-left corner is at (dst_cx - TILE_WIDTH/2, dst_cy - TILE_HEIGHT).
-                let tx = dst_cx - (TILE_WIDTH / 2) + if slot == 1 { (TILE_WIDTH / 2) } else { 0 };
-                let ty = dst_cy - TILE_HEIGHT;
-                let _ = canvas.copy(&tex, None, Rect::new(tx, ty, (TILE_WIDTH / 2) as u32, TILE_HEIGHT as u32));
-                drawn += 1;
-            }
+            cur_x += 1;
+            cur_sx += TILE_WIDTH;
+        }
+        // Advance to next zigzag row.
+        base_sy += TILE_HEIGHT / 2;
+        if (row & 1) != 0 {
+            tile_x += 1;
+            columns = columns.saturating_sub(1);
+            base_sx += TILE_WIDTH / 2;
+        } else {
+            tile_y += 1;
+            columns += 1;
+            base_sx -= TILE_WIDTH / 2;
         }
     }
 
     if drawn == 0 {
-        println!(
-            "[DrawTristram] WARNING: drew 0 tiles ({} skipped) cam=({},{}). \
-             Layout may be empty or dPiece indices out of MIN range.",
-            skipped, cam_tile_x, cam_tile_y
-        );
+        println!("[DrawTristram] WARNING: drew 0 tiles cam=({},{})", cam_tile_x, cam_tile_y);
     }
     Ok(())
 }
