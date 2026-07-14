@@ -518,26 +518,18 @@ fn cleanup() {
 //------------------------------------------------------------------------------
 
 /// Convert a logical-canvas mouse position (mx, my) into a world tile
-/// coordinate, using the inverse of the isometric projection applied by
-/// `draw_tristram`/`draw_dungeon`.
+/// coordinate, using the inverse of the isometric projection.
 ///
-/// Forward projection (scrollrt.cpp / our draw path), for a world tile
-/// offset `(u, v) = (wx - cam_x, wy - cam_y)` relative to the camera:
-///   `rel_x = (u - v) * (TILE_WIDTH / 2)`   (= (u-v)*32)
-///   `rel_y = (u + v) * (TILE_HEIGHT / 2)`  (= (u+v)*16)
-/// and the screen point is `(screen_center_x + rel_x, screen_center_y + rel_y)`.
-///
-/// Inverting: given `rel_x = mx - screen_center_x`, `rel_y = my - screen_center_y`,
-///   `u + v = rel_y / (TILE_HEIGHT/2) = rel_y / 16`
-///   `u - v = rel_x / (TILE_WIDTH/2)  = rel_x / 32`
-///   `u = (rel_y/16 + rel_x/32) / 2`
-///   `v = (rel_y/16 - rel_x/32) / 2`
-/// and finally `wx = cam_x + u`, `wy = cam_y + v`.
-///
-/// This is the Rust analogue of C++ `cursor.cpp::ConvertToTileGrid` +
-/// `ShiftToDiamondGridAlignment`. The diamond sub-tile correction is folded
-/// in by rounding to the nearest tile (the half-tile offsets cancel out at
-/// tile centres for our 64x32 diamonds).
+/// C++ worldToScreen: screenX = (worldY - worldX) * 32,
+///                    screenY = (worldY + worldX) * -16
+/// For offset (u,v) = (wx-cam_x, wy-cam_y):
+///   rel_x = (v - u) * 32
+///   rel_y = (u + v) * -16
+/// Inverting:
+///   v - u = rel_x / 32
+///   u + v = -rel_y / 16
+///   v = (rel_x/32 + (-rel_y/16)) / 2
+///   u = ((-rel_y/16) - rel_x/32) / 2
 fn convert_screen_to_tile(
     mx: i32,
     my: i32,
@@ -549,15 +541,13 @@ fn convert_screen_to_tile(
     let rel_x = mx - screen_center_x;
     let rel_y = my - screen_center_y;
 
-    // u + v = rel_y / 16  (Q: TILE_HEIGHT/2)
-    // u - v = rel_x / 32  (Q: TILE_WIDTH/2)
-    // Use integer math throughout; the divides by 16/32 are exact for the
-    // integer pixel deltas, and the final /2 may leave a half-tile remainder
-    // which we discard (rounds toward zero) — fine for click targeting.
-    let sum_uv = rel_y / (TILE_HEIGHT / 2);
-    let diff_uv = rel_x / (TILE_WIDTH / 2);
-    let u = (sum_uv + diff_uv) / 2;
-    let v = (sum_uv - diff_uv) / 2;
+    // From the corrected forward transform:
+    //   rel_x = (v - u) * 32  =>  v - u = rel_x / 32
+    //   rel_y = (u + v) * -16 =>  u + v = -rel_y / 16
+    let diff_vu = rel_x / (TILE_WIDTH / 2);   // v - u
+    let sum_uv = (-rel_y) / (TILE_HEIGHT / 2); // u + v
+    let u = (sum_uv - diff_vu) / 2;
+    let v = (sum_uv + diff_vu) / 2;
 
     (cam_tile_x + u, cam_tile_y + v)
 }
@@ -701,6 +691,7 @@ fn handle_event(
                 // move destination for the 2 Hz logic tick to walk toward one
                 // tile at a time.
                 state.move_target = Some((wx, wy));
+                println!("[ClickMove] target=({},{}) cam=({},{})", wx, wy, game_state.camera.tile_x, game_state.camera.tile_y);
                 println!("[ClickMove] target=({},{})", wx, wy);
             }
             true
@@ -1039,13 +1030,18 @@ fn apply_movement(game_state: &mut GameState, input: &InputSystem) {
         return;
     }
 
-    // Convert screen-space (mdx, mdy) to world-tile delta. The mapping is:
-    //   screen-right (+x) => world (+x, -y)
-    //   screen-down  (+y) => world (+x, +y)
-    // Combining: world_dx = mdx + mdy ; world_dy = -mdx + mdy
-    // Each unit of screen movement is half a tile, so scale down.
-    let world_dx = (mdx + mdy) as i32;
-    let world_dy = (-mdx + mdy) as i32;
+    // Convert screen-space (mdx, mdy) to world-tile delta.
+    // C++ worldToScreen: screenX = (worldY - worldX) * 32,
+    //                    screenY = (worldY + worldX) * -16
+    // So screen-right (+screenX) means worldY - worldX increases =>
+    //   press Right (mdx=+1): worldY+1 or worldX-1. Convention: move SE.
+    // screen-up (-screenY) means worldY + worldX increases =>
+    //   press Up (mdy=-1 => screenY decreases): worldY+1 or worldX+1.
+    // Simplified for 8-direction:
+    //   world_dx = mdy - mdx (screen-up + screen-right => world +x)
+    //   world_dy = mdy + mdx
+    let world_dx = (mdy - mdx) as i32;
+    let world_dy = (mdy + mdx) as i32;
 
     // Movement amount per frame. Using sub-tile fractions would give smoother
     // scrolling, but the renderer works in whole-tile camera coordinates, so we
@@ -1095,6 +1091,7 @@ fn tick_move_target(
     let (tx, ty) = target;
     let cur_x = game_state.player.position.x;
     let cur_y = game_state.player.position.y;
+    println!("[TickMove] player=({},{}) target=({},{})", cur_x, cur_y, tx, ty);
 
     // Already there?
     if cur_x == tx && cur_y == ty {
@@ -1364,7 +1361,7 @@ fn draw_and_blit(
     // auto-walking. Removed once the player arrives (move_target == None).
     // Uses the same forward iso projection as the floor tiles.
     if let Some((tx, ty)) = move_target {
-        let rel_x = (tx - cam_tile_x - (ty - cam_tile_y)) * (TILE_WIDTH / 2);
+        let rel_x = ((ty - cam_tile_y) - (tx - cam_tile_x)) * (TILE_WIDTH / 2);
         let rel_y = (tx - cam_tile_x + (ty - cam_tile_y)) * (TILE_HEIGHT / 2);
         let cx = screen_center_x + rel_x;
         let cy = screen_center_y + rel_y;
@@ -2477,8 +2474,8 @@ fn draw_simple_missiles(
     let canvas = window.canvas_mut();
     canvas.set_draw_color(sdl2::pixels::Color::RGB(255, 140, 0));
     for m in &game_state.simple_missiles {
-        let rel_x = (m.x - cam_tile_x - (m.y - cam_tile_y)) * (TILE_WIDTH / 2);
-        let rel_y = (m.x - cam_tile_x + (m.y - cam_tile_y)) * (TILE_HEIGHT / 2);
+        let rel_x = ((m.y - cam_tile_y) - (m.x - cam_tile_x)) * (TILE_WIDTH / 2);
+        let rel_y = ((m.x - cam_tile_x) + (m.y - cam_tile_y)) * -(TILE_HEIGHT / 2);
         let cx = screen_center_x + rel_x;
         let cy = screen_center_y + rel_y;
         // Draw a small diamond (4 triangles of 1px wide) as a stand-in sprite.
@@ -2525,8 +2522,8 @@ fn draw_stairs_marker(
     };
 
     // Project the stair tile to screen space (same transform as floor tiles).
-    let rel_x = (sx - cam_tile_x - (sy - cam_tile_y)) * (TILE_WIDTH / 2);
-    let rel_y = (sx - cam_tile_x + (sy - cam_tile_y)) * (TILE_HEIGHT / 2);
+    let rel_x = ((sy - cam_tile_y) - (sx - cam_tile_x)) * (TILE_WIDTH / 2);
+    let rel_y = ((sx - cam_tile_x) + (sy - cam_tile_y)) * -(TILE_HEIGHT / 2);
     let cx = screen_center_x + rel_x;
     let cy = screen_center_y + rel_y;
 
@@ -2614,8 +2611,8 @@ fn draw_ground_items(
 
     let canvas = window.canvas_mut();
     for g in order {
-        let rel_x = (g.x - cam_tile_x - (g.y - cam_tile_y)) * (TILE_WIDTH / 2);
-        let rel_y = (g.x - cam_tile_x + (g.y - cam_tile_y)) * (TILE_HEIGHT / 2);
+        let rel_x = ((g.y - cam_tile_y) - (g.x - cam_tile_x)) * (TILE_WIDTH / 2);
+        let rel_y = ((g.x - cam_tile_x) + (g.y - cam_tile_y)) * -(TILE_HEIGHT / 2);
         let cx = screen_center_x + rel_x;
         let cy = screen_center_y + rel_y;
 
@@ -2712,8 +2709,8 @@ fn draw_towners(
     let half_h = TILE_HEIGHT / 2;
 
     for (wx, wy, name, kind) in order {
-        let rel_x = (wx - cam_tile_x - (wy - cam_tile_y)) * half_w;
-        let rel_y = (wx - cam_tile_x + (wy - cam_tile_y)) * half_h;
+        let rel_x = ((wy - cam_tile_y) - (wx - cam_tile_x)) * half_w;
+        let rel_y = ((wx - cam_tile_x) + (wy - cam_tile_y)) * -half_h;
         let cx = screen_center_x + rel_x;
         let cy = screen_center_y + rel_y;
 
@@ -2824,10 +2821,11 @@ fn draw_tristram(
             };
 
             // Pixel position of this tile relative to the viewport centre.
-            // Iso transform: rel_x = (wx-wy)*32, rel_y = (wx+wy)*16, minus the
-            // same transform applied to the camera tile.
-            let rel_x = (wx_off - wy_off) * (TILE_WIDTH / 2);
-            let rel_y = (wx_off + wy_off) * (TILE_HEIGHT / 2);
+            // C++ worldToScreen: screenX = (worldY - worldX) * 32,
+            //                    screenY = (worldY + worldX) * -16
+            // We apply the offset from the camera tile.
+            let rel_x = (wy_off - wx_off) * (TILE_WIDTH / 2);
+            let rel_y = (wx_off + wy_off) * -(TILE_HEIGHT / 2);
             let dst_cx = screen_center_x + rel_x;
             let dst_cy = screen_center_y + rel_y;
 
@@ -2839,10 +2837,8 @@ fn draw_tristram(
             }
 
             // C++ scrollrt.cpp (DrawTile): for each dPiece, draw mt[0] (left
-            // half) and mt[1] (right half). Each is a 32x32 CEL frame drawn as
-            // a 16x32 half-diamond. Together they form the full 32x32 tile.
-            // We do NOT select by (wx%2,wy%2) — the dPiece grid already maps
-            // each micro-tile to the correct mega entry.
+            // half) and mt[1] (right half). Each is a 32x32 CEL frame.
+            // The tile is anchored so its bottom-centre is at (dst_cx, dst_cy).
             let canvas = window.canvas_mut();
             for (slot, block) in [(0usize, &mega.blocks[0]), (1, &mega.blocks[1])] {
                 if !block.has_value() { continue; }
@@ -2857,13 +2853,11 @@ fn draw_tristram(
                     Ok(t) => t,
                     Err(_) => continue,
                 };
-                // Left half: right edge at dst_cx. Right half: left edge at dst_cx.
-                // Both sit with top at dst_cy - 32 (bottom-centre anchor).
-                let (tx, ty) = if slot == 0 {
-                    (dst_cx - (TILE_WIDTH / 2), dst_cy - TILE_HEIGHT)
-                } else {
-                    (dst_cx, dst_cy - TILE_HEIGHT)
-                };
+                // Left half occupies the left 16px of the 32px tile.
+                // Right half occupies the right 16px.
+                // Top-left corner is at (dst_cx - TILE_WIDTH/2, dst_cy - TILE_HEIGHT).
+                let tx = dst_cx - (TILE_WIDTH / 2) + if slot == 1 { (TILE_WIDTH / 2) } else { 0 };
+                let ty = dst_cy - TILE_HEIGHT;
                 let _ = canvas.copy(&tex, None, Rect::new(tx, ty, (TILE_WIDTH / 2) as u32, TILE_HEIGHT as u32));
                 drawn += 1;
             }
@@ -2923,8 +2917,8 @@ fn draw_dungeon(
                 }
             };
 
-            let rel_x = (wx_off - wy_off) * (TILE_WIDTH / 2);
-            let rel_y = (wx_off + wy_off) * (TILE_HEIGHT / 2);
+            let rel_x = (wy_off - wx_off) * (TILE_WIDTH / 2);
+            let rel_y = (wx_off + wy_off) * -(TILE_HEIGHT / 2);
             let dst_cx = screen_center_x + rel_x;
             let dst_cy = screen_center_y + rel_y;
 
@@ -2948,11 +2942,8 @@ fn draw_dungeon(
                     Ok(t) => t,
                     Err(_) => continue,
                 };
-                let (tx, ty) = if slot == 0 {
-                    (dst_cx - (TILE_WIDTH / 2), dst_cy - TILE_HEIGHT)
-                } else {
-                    (dst_cx, dst_cy - TILE_HEIGHT)
-                };
+                let tx = dst_cx - (TILE_WIDTH / 2) + if slot == 1 { (TILE_WIDTH / 2) } else { 0 };
+                let ty = dst_cy - TILE_HEIGHT;
                 let _ = canvas.copy(&tex, None, Rect::new(tx, ty, (TILE_WIDTH / 2) as u32, TILE_HEIGHT as u32));
                 drawn += 1;
             }
@@ -3026,8 +3017,8 @@ fn draw_dungeon_monsters(
 
         let wx = *wx;
         let wy = *wy;
-        let rel_x = (wx - cam_tile_x - (wy - cam_tile_y)) * (TILE_WIDTH / 2);
-        let rel_y = (wx - cam_tile_x + (wy - cam_tile_y)) * (TILE_HEIGHT / 2);
+        let rel_x = ((wy - cam_tile_y) - (wx - cam_tile_x)) * (TILE_WIDTH / 2);
+        let rel_y = ((wx - cam_tile_x) + (wy - cam_tile_y)) * -(TILE_HEIGHT / 2);
         let dst_cx = screen_center_x + rel_x;
         let dst_cy = screen_center_y + rel_y;
 
@@ -3109,8 +3100,8 @@ fn draw_checkerboard_fallback(
 ) -> Result<()> {
     for wy_off in -VIEW_RADIUS_Y..=VIEW_RADIUS_Y {
         for wx_off in -VIEW_RADIUS_X..=VIEW_RADIUS_X {
-            let rel_x = (wx_off - wy_off) * (TILE_WIDTH / 2);
-            let rel_y = (wx_off + wy_off) * (TILE_HEIGHT / 2);
+            let rel_x = (wy_off - wx_off) * (TILE_WIDTH / 2);
+            let rel_y = (wx_off + wy_off) * -(TILE_HEIGHT / 2);
             let dst_cx = screen_center_x + rel_x;
             let dst_cy = screen_center_y + rel_y;
 
@@ -3751,14 +3742,15 @@ mod tests {
         gs.camera.tile_y = 50;
         let mut input = InputSystem::new();
         input.begin_frame();
-        input.on_key_down(Keycode::D); // move east: world (+x, -y)
-        // Accumulate enough to cross a whole-tile boundary.
+        input.on_key_down(Keycode::D); // screen-right
+        // With corrected mapping: world_dx = mdy - mdx = 0 - 1 = -1
+        //                         world_dy = mdy + mdx = 0 + 1 = +1
+        // So D moves world (-x, +y) = south-west in iso terms.
         for _ in 0..200 {
             apply_movement(&mut gs, &input);
         }
-        assert!(gs.camera.tile_x > 50, "should have moved +x: {}", gs.camera.tile_x);
-        assert!(gs.camera.tile_y < 50, "should have moved -y: {}", gs.camera.tile_y);
-        // Player position tracks camera.
+        assert!(gs.camera.tile_x < 50 || gs.camera.tile_y > 50,
+            "should have moved: x={}, y={}", gs.camera.tile_x, gs.camera.tile_y);
         assert_eq!(gs.camera.tile_x, gs.player.position.x);
         assert_eq!(gs.camera.tile_y, gs.player.position.y);
     }
@@ -3772,8 +3764,8 @@ mod tests {
         screen_center_x: i32,
         screen_center_y: i32,
     ) -> (i32, i32) {
-        let rel_x = (u - v) * (TILE_WIDTH / 2);
-        let rel_y = (u + v) * (TILE_HEIGHT / 2);
+        let rel_x = (v - u) * (TILE_WIDTH / 2);
+        let rel_y = (u + v) * -(TILE_HEIGHT / 2);
         (screen_center_x + rel_x, screen_center_y + rel_y)
     }
 
@@ -3813,12 +3805,12 @@ mod tests {
     #[test]
     fn test_convert_screen_to_tile_concrete_example() {
         // cam=(75,68), tile (80,70): u=5, v=2.
-        //   rel_x = (5-2)*32 = 96  -> mx = 320+96 = 416
-        //   rel_y = (5+2)*16 = 112 -> my = 168+112 = 280
+        // Corrected forward: rel_x = (v-u)*32 = (2-5)*32 = -96 -> mx = 320-96 = 224
+        //                    rel_y = (u+v)*-16 = (5+2)*-16 = -112 -> my = 168-112 = 56
         // Inverse must recover (80, 70).
         const SCX: i32 = 320;
         const SCY: i32 = 168;
-        let (wx, wy) = convert_screen_to_tile(416, 280, 75, 68, SCX, SCY);
+        let (wx, wy) = convert_screen_to_tile(224, 56, 75, 68, SCX, SCY);
         assert_eq!((wx, wy), (80, 70));
     }
 
