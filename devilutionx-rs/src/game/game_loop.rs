@@ -1227,6 +1227,25 @@ fn render_world_pipeline(
 ) {
     let palette = crate::engine::palette::Palette::from_rgb_bytes(&level.palette.colors)
         .unwrap_or_else(crate::engine::palette::Palette::new);
+
+    // 光照（C++ MakeLightTable + dLight）。城镇全亮；地牢环境全暗 + 玩家光晕。
+    // 注：光照表逐帧重建（4096 op，开销可忽略），后续可缓存。墙遮挡光传播
+    // （C++ MakeLight 的 flood-fill）尚未移植，当前玩家光为径向衰减（不挡墙）。
+    let mut lm = crate::engine::lighting::LightManager::new();
+    lm.make_light_table();
+    let mut dlight = vec![0u8; 112 * 112];
+    if level.dungeon_type != crate::engine::dungeon::DungeonType::Town {
+        dlight.fill(crate::engine::lighting::LIGHTS_MAX as u8);
+        const PLAYER_LIGHT_RADIUS: u8 = 9;
+        lm.do_lighting(
+            &mut dlight,
+            112,
+            crate::engine::lighting::Point::new(view_pos.x, view_pos.y),
+            PLAYER_LIGHT_RADIUS,
+        );
+    }
+    let lighting = crate::engine::scrollrt::Lighting::new(&dlight, &lm.tables);
+
     window.clear_backbuffer();
     {
         let (w, h, buf) = window.backbuffer_mut();
@@ -1239,6 +1258,7 @@ fn render_world_pipeline(
             LOGICAL_WIDTH as i32,
             LOGICAL_HEIGHT as i32,
             viewport_h,
+            &lighting,
         );
     }
     let _ = window.present_backbuffer(&palette);
@@ -4115,8 +4135,13 @@ mod tests {
 
         let mut buf = vec![0u8; 640 * 480];
         let mut surface = Surface::new(&mut buf, 640, 640, 480);
+        // 城镇全亮：恒等光照表 + 全 0 dLight。
+        let mut lm = crate::engine::lighting::LightManager::new();
+        lm.make_light_table();
+        let dlight = vec![0u8; 112 * 112];
+        let lighting = crate::engine::scrollrt::Lighting::new(&dlight, &lm.tables);
         crate::engine::scrollrt::draw_view(
-            &mut surface, &level, &layout, TilePoint::new(75, 68), 640, 480, 336,
+            &mut surface, &level, &layout, TilePoint::new(75, 68), 640, 480, 336, &lighting,
         );
 
         let nonzero = buf.iter().filter(|&&p| p != 0).count();
@@ -4130,5 +4155,68 @@ mod tests {
             "real town render should have color variety, got {} distinct indices",
             distinct.len()
         );
+    }
+
+    /// 地牢光照渲染冒烟：从 spawn.mpq 加载真实 L1 Cathedral 关卡，用地牢光照
+    /// （环境全暗 + 玩家光晕）渲染一帧，断言既有被照亮的像素（玩家附近）也有
+    /// 黑暗像素（光晕之外）——证明 dLight 玩家光晕端到端工作且 L1 艺术能渲染。
+    /// spawn.mpq 缺失时优雅跳过。
+    #[test]
+    fn test_real_dungeon_render_with_player_light() {
+        use crate::engine::dungeon::{DungeonLevelData, DungeonType};
+        use crate::engine::mpq::MpqArchive;
+        use crate::engine::surface::Surface;
+
+        let mut mpq_path = None;
+        if let Ok(cwd) = std::env::current_dir() {
+            let p = cwd.join("spawn.mpq");
+            if p.exists() { mpq_path = Some(p); }
+        }
+        if mpq_path.is_none() {
+            let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("spawn.mpq");
+            if p.exists() { mpq_path = Some(p); }
+        }
+        let Some(mpq_path) = mpq_path else {
+            eprintln!("[render-smoke] spawn.mpq not found; skipping");
+            return;
+        };
+        let mut archive = match MpqArchive::open(&mpq_path) {
+            Ok(a) => a,
+            Err(e) => { eprintln!("[render-smoke] open failed: {e}"); return; }
+        };
+        let level = match DungeonLevelData::load_from_mpq(&mut archive, DungeonType::Cathedral) {
+            Ok(l) => l,
+            Err(e) => { eprintln!("[render-smoke] L1 load failed (assets?): {e:?}"); return; }
+        };
+        if level.min.mega_tiles.is_empty() {
+            eprintln!("[render-smoke] L1 has no mega-tiles; skipping");
+            return;
+        }
+
+        // 用 piece=1 铺满网格；相机/玩家在网格中心 (56,56)。
+        let layout = crate::game::game_state::DungeonLayout {
+            d_piece: vec![1u16; 112 * 112],
+            width: 112,
+            height: 112,
+            floor_tiles: Vec::new(),
+        };
+
+        // 地牢光照：环境全暗(15) + 玩家光晕（小半径，确保视口有明显暗区）。
+        let mut lm = crate::engine::lighting::LightManager::new();
+        lm.make_light_table();
+        let mut dlight = vec![crate::engine::lighting::LIGHTS_MAX as u8; 112 * 112];
+        lm.do_lighting(&mut dlight, 112, crate::engine::lighting::Point::new(56, 56), 4);
+        let lighting = crate::engine::scrollrt::Lighting::new(&dlight, &lm.tables);
+
+        let mut buf = vec![0u8; 640 * 480];
+        let mut surface = Surface::new(&mut buf, 640, 640, 480);
+        crate::engine::scrollrt::draw_view(
+            &mut surface, &level, &layout, TilePoint::new(56, 56), 640, 480, 336, &lighting,
+        );
+
+        let nonzero = buf.iter().filter(|&&p| p != 0).count();
+        let zero = buf.iter().filter(|&&p| p == 0).count();
+        assert!(nonzero > 100, "player-light area should render lit pixels, got {nonzero}");
+        assert!(zero > 10_000, "dungeon beyond the light radius should be dark, got {zero} dark px");
     }
 }

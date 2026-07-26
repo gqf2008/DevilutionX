@@ -680,6 +680,29 @@ mod tests {
     }
 
     #[test]
+    fn test_make_light_table() {
+        let mut manager = LightManager::new();
+        manager.make_light_table();
+        // 表 0（全亮）：索引 1..255 为恒等；黑(0) 与白(255) 都映射到黑（C++ White→Black）。
+        assert_eq!(manager.tables[0][0], 0);
+        for i in 1..255usize {
+            assert_eq!(manager.tables[0][i], i as u8, "table 0 identity at {i}");
+        }
+        assert_eq!(manager.tables[0][255], 0, "white folds to black");
+        // 表 15（LightsMax）全黑。
+        for i in 0..256usize {
+            assert_eq!(manager.tables[15][i], 0, "table 15 black at {i}");
+        }
+        // 每张表索引 0 恒映射到 0。
+        for level in 0..16usize {
+            assert_eq!(manager.tables[level][0], 0);
+        }
+        // 中间表会变暗（对某些索引偏离恒等）。
+        let differs = (1..256usize).any(|i| manager.tables[8][i] != i as u8);
+        assert!(differs, "intermediate table should darken some colors");
+    }
+
+    #[test]
     fn test_do_lighting_centres_brightness() {
         let manager = LightManager::new();
         let w = 32usize;

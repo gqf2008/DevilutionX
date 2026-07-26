@@ -330,9 +330,42 @@ use super::dun_render::{
     self, DUN_FRAME_WIDTH as HALF_TILE_WIDTH, TileType, MaskType,
 };
 use super::dungeon::{DungeonLevelData, MegaTile};
+use super::lighting::{LIGHT_TABLE_SIZE, NUM_LIGHTING_LEVELS, LIGHTS_MAX};
 
 /// 地下城网格尺寸（C++ MAXDUNX/MAXDUNY）。
 const MAXDUN: i32 = 112;
+
+/// 渲染光照上下文：逐 tile 光照级别网格（C++ `dLight`）+ 光照表（C++
+/// `LightTables`）。`table_for` 由 tile 的光照级别选出对应的颜色重映射表。
+/// 城镇传入全 0 网格 → 恒等表（全亮）；地牢传入含玩家光晕的网格。
+pub struct Lighting<'a> {
+    /// dLight 网格（MAXDUN×MAXDUN 扁平），值 0(全亮)..15(全黑)。
+    dlight: &'a [u8],
+    /// 光照表（C++ LightTables，由 LightManager::make_light_table 生成）。
+    tables: &'a [[u8; LIGHT_TABLE_SIZE]; NUM_LIGHTING_LEVELS],
+}
+
+impl<'a> Lighting<'a> {
+    pub fn new(
+        dlight: &'a [u8],
+        tables: &'a [[u8; LIGHT_TABLE_SIZE]; NUM_LIGHTING_LEVELS],
+    ) -> Self {
+        Self { dlight, tables }
+    }
+
+    /// 查 tile 的光照表（越界按全亮处理）。
+    fn table_for(&self, x: i32, y: i32) -> &'a [u8; LIGHT_TABLE_SIZE] {
+        let level = if x >= 0 && y >= 0 && x < MAXDUN && y < MAXDUN {
+            self.dlight
+                .get(y as usize * MAXDUN as usize + x as usize)
+                .copied()
+                .unwrap_or(0) as usize
+        } else {
+            0
+        };
+        &self.tables[level.min(LIGHTS_MAX as usize)]
+    }
+}
 
 /// C++ `RightFrameDisplacement` = { DunFrameWidth, 0 }（半个瓦片宽，32px）。
 const RIGHT_FRAME_DISPLACEMENT: Displacement = Displacement { delta_x: HALF_TILE_WIDTH, delta_y: 0 };
@@ -411,11 +444,14 @@ fn draw_floor_tile(
     out: &mut super::surface::Surface,
     level: &DungeonLevelData,
     piece_id: u16,
+    tile_position: Point,
     target_buffer_position: Point,
+    lighting: &Lighting,
 ) {
     let Some(mega) = mega_for_piece(level, piece_id) else {
         return;
     };
+    let tbl = lighting.table_for(tile_position.x, tile_position.y);
 
     let block = mega.blocks[0];
     if block.has_value() {
@@ -425,7 +461,7 @@ fn draw_floor_tile(
                 target_buffer_position,
                 TileType::LeftTriangle,
                 src,
-                None,
+                Some(tbl),
                 MaskType::Solid,
             );
         }
@@ -439,7 +475,7 @@ fn draw_floor_tile(
                 pos,
                 TileType::RightTriangle,
                 src,
-                None,
+                Some(tbl),
                 MaskType::Solid,
             );
         }
@@ -455,6 +491,7 @@ fn draw_floor(
     mut target_buffer_position: Point,
     rows: i32,
     mut columns: i32,
+    lighting: &Lighting,
 ) {
     for i in 0..rows {
         for _ in 0..columns {
@@ -463,7 +500,7 @@ fn draw_floor(
             } else {
                 let piece_id = grid.d_piece(tile_position.x, tile_position.y);
                 if level.sol.is_floor(piece_id) {
-                    draw_floor_tile(out, level, piece_id, target_buffer_position);
+                    draw_floor_tile(out, level, piece_id, tile_position, target_buffer_position, lighting);
                 }
             }
             tile_position += Direction::East;
@@ -497,13 +534,16 @@ fn draw_cell(
     out: &mut super::surface::Surface,
     level: &DungeonLevelData,
     piece_id: u16,
+    tile_position: Point,
     target_buffer_position: Point,
+    lighting: &Lighting,
 ) {
     let Some(mega) = mega_for_piece(level, piece_id) else {
         return;
     };
     let micro_tile_len = level.dungeon_type.blocks_per_tile();
     let is_floor = level.sol.is_floor(piece_id);
+    let tbl = lighting.table_for(tile_position.x, tile_position.y);
     let mut tbp = target_buffer_position;
 
     // mt[0] — 左地板/叶半（C++:588-599）。
@@ -512,7 +552,7 @@ fn draw_cell(
         let tile_type = block.tile_type();
         if !is_floor || tile_type == TileType::TransparentSquare {
             if !(is_floor && tile_type == TileType::TransparentSquare) {
-                dun_render::render_tile(out, tbp, &level.level_cel, block, MaskType::Solid, None);
+                dun_render::render_tile(out, tbp, &level.level_cel, block, MaskType::Solid, Some(tbl));
             }
             // foliage 分支跳过（活 dun_render 无 render_tile_foliage）。
         }
@@ -529,7 +569,7 @@ fn draw_cell(
                     &level.level_cel,
                     block,
                     MaskType::Solid,
-                    None,
+                    Some(tbl),
                 );
             }
         }
@@ -541,7 +581,7 @@ fn draw_cell(
     while i < micro_tile_len {
         let block = mega.blocks[i];
         if block.has_value() {
-            dun_render::render_tile(out, tbp, &level.level_cel, block, MaskType::Solid, None);
+            dun_render::render_tile(out, tbp, &level.level_cel, block, MaskType::Solid, Some(tbl));
         }
         let block = mega.blocks[i + 1];
         if block.has_value() {
@@ -551,7 +591,7 @@ fn draw_cell(
                 &level.level_cel,
                 block,
                 MaskType::Solid,
-                None,
+                Some(tbl),
             );
         }
         tbp.y -= TILE_HEIGHT;
@@ -569,6 +609,7 @@ fn draw_tile_content(
     mut target_buffer_position: Point,
     rows: i32,
     mut columns: i32,
+    lighting: &Lighting,
 ) {
     let micro_tile_len = level.dungeon_type.blocks_per_tile() as i32;
     let mut rows = rows + micro_tile_len;
@@ -608,7 +649,14 @@ fn draw_tile_content(
                                     target_buffer_position.y,
                                 );
                                 let east_piece = grid.d_piece(tile_position.x + 1, tile_position.y);
-                                draw_cell(out, level, east_piece, east_pos);
+                                draw_cell(
+                                    out,
+                                    level,
+                                    east_piece,
+                                    Point::new(tile_position.x + 1, tile_position.y),
+                                    east_pos,
+                                    lighting,
+                                );
                                 skip_next = true;
                             }
                         }
@@ -616,7 +664,7 @@ fn draw_tile_content(
                 }
                 if !skip {
                     let piece = grid.d_piece(tile_position.x, tile_position.y);
-                    draw_cell(out, level, piece, target_buffer_position);
+                    draw_cell(out, level, piece, tile_position, target_buffer_position, lighting);
                 }
                 skip = skip_next;
             }
@@ -648,7 +696,7 @@ fn calc_first_tile_position(position: &mut Point, offset: &mut Displacement, geo
     *position = *position + geom.tile_shift;
 }
 
-/// C++ `DrawGame`（scrollrt.cpp:1132）。全亮，先 DrawFloor 再 DrawTileContent。
+/// C++ `DrawGame`（scrollrt.cpp:1132）。先 DrawFloor 再 DrawTileContent。
 /// 渲染到整个后备缓冲（HUD 由调用方叠加，故不做 viewport subregionY）。
 fn draw_game(
     out: &mut super::surface::Surface,
@@ -656,12 +704,13 @@ fn draw_game(
     grid: &dyn DPieceGrid,
     mut position: Point,
     geom: TileViewport,
+    lighting: &Lighting,
 ) {
     let mut offset = Displacement::new(0, 0);
     calc_first_tile_position(&mut position, &mut offset, geom);
     let target_start = Point::new(0, 0) + offset;
-    draw_floor(out, level, grid, position, target_start, geom.tile_rows, geom.tile_columns);
-    draw_tile_content(out, level, grid, position, target_start, geom.tile_rows, geom.tile_columns);
+    draw_floor(out, level, grid, position, target_start, geom.tile_rows, geom.tile_columns, lighting);
+    draw_tile_content(out, level, grid, position, target_start, geom.tile_rows, geom.tile_columns, lighting);
 }
 
 /// C++ `DrawView`（scrollrt.cpp:1215）。忠实管线入口：由屏幕尺寸算视口几何，
@@ -675,9 +724,10 @@ pub fn draw_view(
     screen_w: i32,
     screen_h: i32,
     viewport_h: i32,
+    lighting: &Lighting,
 ) {
     let geom = viewport_geometry(screen_w, screen_h, viewport_h);
-    draw_game(out, level, grid, start_position, geom);
+    draw_game(out, level, grid, start_position, geom, lighting);
 }
 
 /// C++ `GetScreenPosition`（scrollrt.cpp:1620）。返回 tile 在后备缓冲中的屏幕
@@ -705,6 +755,18 @@ pub fn tile_screen_position(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 全亮光照测试夹具：恒等光照表 + 全 0 dLight 网格。
+    fn test_lighting() -> ([[u8; LIGHT_TABLE_SIZE]; NUM_LIGHTING_LEVELS], Vec<u8>) {
+        let mut tables = [[0u8; LIGHT_TABLE_SIZE]; NUM_LIGHTING_LEVELS];
+        for tbl in tables.iter_mut() {
+            for i in 0..LIGHT_TABLE_SIZE {
+                tbl[i] = i as u8;
+            }
+        }
+        let dlight = vec![0u8; MAXDUN as usize * MAXDUN as usize];
+        (tables, dlight)
+    }
 
     #[test]
     fn test_calc_tile_offset() {
@@ -815,7 +877,9 @@ mod tests {
         let mut buf = vec![0u8; 640 * 480];
         let mut surface = Surface::new(&mut buf, 640, 640, 480);
         // 在 target (100, 200) 渲染单个地板 tile（仅 mt[0] 左三角，mt[1] 空）。
-        draw_floor_tile(&mut surface, &level, 1, Point::new(100, 200));
+        let (tables, dlight) = test_lighting();
+        let lighting = Lighting::new(&dlight, &tables);
+        draw_floor_tile(&mut surface, &level, 1, Point::new(0, 0), Point::new(100, 200), &lighting);
 
         // 左三角 row 0（底边 y=200）：2px 右对齐于 x=130,131。
         assert_eq!(surface.at(130, 200).copied(), Some(150), "bottom-right pixel");
@@ -858,7 +922,9 @@ mod tests {
         let mut buf = vec![0u8; 640 * 480];
         let mut surface = Surface::new(&mut buf, 640, 640, 480);
         // draw_cell 在 target (100,200)：blocks[2] 墙渲染在 y=200-32=168。
-        draw_cell(&mut surface, &level, 1, Point::new(100, 200));
+        let (tables, dlight) = test_lighting();
+        let lighting = Lighting::new(&dlight, &tables);
+        draw_cell(&mut surface, &level, 1, Point::new(0, 0), Point::new(100, 200), &lighting);
 
         // 方块底行（frame row 0）在 y=168，色 100。
         assert_eq!(surface.at(100, 168).copied(), Some(100), "square bottom-left");
@@ -867,6 +933,46 @@ mod tests {
         assert_eq!(surface.at(100, 167).copied(), Some(50), "square row 1");
         // 地板行（y=200 附近）无 mt[0]/mt[1]（空 block）→ 应为 0。
         assert_eq!(surface.at(100, 200).copied(), Some(0), "floor row empty");
+    }
+
+    /// 光照生效：同一 tile 在全暗 dLight（表 15=全黑）下渲染为黑，在全亮
+    /// dLight（表 0=恒等）下渲染出原色——证明 dLight→查表→render_tile_frame
+    /// 的光照路径端到端工作。
+    #[test]
+    fn test_render_applies_light_table() {
+        use crate::engine::dungeon::{DungeonLevelData, DungeonType, MegaTile, LevelCelBlock};
+        use crate::engine::surface::Surface;
+        use crate::engine::lighting::LightManager;
+
+        // 左三角帧全填色 150。
+        let mut level_cel = Vec::new();
+        level_cel.extend_from_slice(&1u32.to_le_bytes());
+        level_cel.extend_from_slice(&8u32.to_le_bytes());
+        level_cel.extend_from_slice(&[150u8; 512]);
+        let mut level = DungeonLevelData::new(DungeonType::Cathedral);
+        level.level_cel = level_cel;
+        let mut blocks = [LevelCelBlock::default(); 16];
+        blocks[0] = LevelCelBlock::new(0x0001);
+        level.min.mega_tiles = vec![MegaTile { blocks }];
+
+        let mut lm = LightManager::new();
+        lm.make_light_table();
+
+        // 全暗（level 15 → 黑表）：渲染全黑。
+        let dlight_dark = vec![15u8; MAXDUN as usize * MAXDUN as usize];
+        let lighting_dark = Lighting::new(&dlight_dark, &lm.tables);
+        let mut buf = vec![0u8; 640 * 480];
+        let mut surface = Surface::new(&mut buf, 640, 640, 480);
+        draw_floor_tile(&mut surface, &level, 1, Point::new(50, 50), Point::new(100, 200), &lighting_dark);
+        assert_eq!(surface.at(130, 200).copied(), Some(0), "dark light → black pixel");
+
+        // 全亮（level 0 → 恒等表）：渲染出色 150。
+        let dlight_lit = vec![0u8; MAXDUN as usize * MAXDUN as usize];
+        let lighting_lit = Lighting::new(&dlight_lit, &lm.tables);
+        let mut buf2 = vec![0u8; 640 * 480];
+        let mut surface2 = Surface::new(&mut buf2, 640, 640, 480);
+        draw_floor_tile(&mut surface2, &level, 1, Point::new(50, 50), Point::new(100, 200), &lighting_lit);
+        assert_eq!(surface2.at(130, 200).copied(), Some(150), "lit → color 150");
     }
 
     /// `DPieceGrid` 记录每次查询的 `(x,y)`，返回 piece 0，使渲染器的
@@ -891,6 +997,8 @@ mod tests {
         let level = DungeonLevelData::new(DungeonType::Town);
         let mut buf = vec![0u8; 640 * 480];
         let mut surface = Surface::new(&mut buf, 640, 640, 480);
+        let (tables, dlight) = test_lighting();
+        let lighting = Lighting::new(&dlight, &tables);
         draw_floor(
             &mut surface,
             &level,
@@ -899,6 +1007,7 @@ mod tests {
             Point::new(0, 0),
             3,
             4,
+            &lighting,
         );
         let visits = grid.visits.borrow();
         // Row 0 (columns=4). 内层每访问后 += East，故行末 tile 已前移一格。
@@ -923,7 +1032,9 @@ mod tests {
         let level = DungeonLevelData::new(DungeonType::Town);
         let mut buf = vec![0u8; 640 * 480];
         let mut surface = Surface::new(&mut buf, 640, 640, 480);
-        draw_view(&mut surface, &level, &grid, Point::new(75, 68), 640, 480, 352);
+        let (tables, dlight) = test_lighting();
+        let lighting = Lighting::new(&dlight, &tables);
+        draw_view(&mut surface, &level, &grid, Point::new(75, 68), 640, 480, 352, &lighting);
         let n = grid.visits.borrow().len();
         assert!(n > 100, "draw_view should visit a full viewport, got {n} queries");
     }
