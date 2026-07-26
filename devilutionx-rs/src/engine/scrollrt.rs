@@ -316,6 +316,392 @@ impl RenderOrderCalculator {
     }
 }
 
+// =============================================================================
+// C++ 忠实绘制管线 — Source/engine/render/scrollrt.cpp
+// -----------------------------------------------------------------------------
+// 以下函数严格移植 C++ 的 DrawView → CalcFirstTilePosition + DrawGame →
+// DrawFloor / DrawTileContent → DrawCell 链路，使用 dun_render 的逐瓦片渲染。
+// 渲染目标是 8-bit 调色板索引 Surface（与 C++ PalSurface 一致）；本增量
+// 光照为全亮（light_table = None → render_line_opaque 直拷），实体/光照/
+// 透明/HUD 仍由调用方在 SDL canvas 上叠加（下一增量入面）。
+// =============================================================================
+
+use super::dun_render::{
+    self, DUN_FRAME_WIDTH as HALF_TILE_WIDTH, TileType, MaskType,
+};
+use super::dungeon::{DungeonLevelData, MegaTile};
+
+/// 地下城网格尺寸（C++ MAXDUNX/MAXDUNY）。
+const MAXDUN: i32 = 112;
+
+/// C++ `RightFrameDisplacement` = { DunFrameWidth, 0 }（半个瓦片宽，32px）。
+const RIGHT_FRAME_DISPLACEMENT: Displacement = Displacement { delta_x: HALF_TILE_WIDTH, delta_y: 0 };
+
+/// `dPiece` 网格视图（C++ `dPiece[x][y]`）。城镇与地牢布局都暴露
+/// `get(x, y) -> u16`，本 trait 让 draw_view 统一接收两者。
+pub trait DPieceGrid {
+    fn d_piece(&self, x: i32, y: i32) -> u16;
+}
+
+#[inline]
+fn in_dungeon_bounds(p: Point) -> bool {
+    p.x >= 0 && p.x < MAXDUN && p.y >= 0 && p.y < MAXDUN
+}
+
+/// 由 level-piece id（`dPiece` 值，1 基）解析其 mega-tile（C++
+/// `DPieceMicros[levelPieceId]`）。按 `mega_tiles[piece - 1]` 索引，与活渲染器
+/// 既有的映射一致。
+fn mega_for_piece<'a>(level: &'a DungeonLevelData, piece_id: u16) -> Option<&'a MegaTile> {
+    level.min.mega_tiles.get(piece_id.saturating_sub(1) as usize)
+}
+
+/// C++ `CalcViewportGeometry`（scrollrt.cpp:1573）的纯函数移植（zoom=false）。
+/// 返回起始 tile/offset 与行列数。
+#[derive(Clone, Copy, Debug)]
+pub struct TileViewport {
+    /// 屏幕偏移（C++ `tileOffset`）。
+    pub tile_offset: Displacement,
+    /// 起始 tile 相对玩家 tile 的位移（C++ `tileShift`）。
+    pub tile_shift: Displacement,
+    pub tile_rows: i32,
+    pub tile_columns: i32,
+}
+
+pub fn viewport_geometry(screen_w: i32, screen_h: i32, viewport_h: i32) -> TileViewport {
+    // viewport_h = screen_h - panel_height（C++ gnViewportHeight）；同时它也就是
+    // 玩家所在可视区的高度（pixelsToPanel），用于把玩家定位到可视区垂直中心。
+    let pixels_to_panel = viewport_h;
+    let player_position = Point::new(screen_w / 2, pixels_to_panel / 2);
+
+    let tiles_to_top = (player_position.y + TILE_HEIGHT - 1) / TILE_HEIGHT;
+    let tiles_to_left = (player_position.x + TILE_WIDTH - 1) / TILE_WIDTH;
+
+    // 渲染起始 tile 中心相对视口原点的屏幕位置。
+    let mut start_position = player_position
+        - Displacement::new(tiles_to_left * TILE_WIDTH, tiles_to_top * TILE_HEIGHT);
+
+    // 起始 tile 在 tile 空间相对玩家 tile 的位移。
+    let mut tile_shift = Displacement::new(0, 0);
+    tile_shift = tile_shift + Direction::North.to_displacement() * tiles_to_top;
+    tile_shift = tile_shift + Direction::West.to_displacement() * tiles_to_left;
+
+    // 渲染循环期望从"列数较少"的行开始。
+    if tiles_to_left * TILE_WIDTH >= player_position.x {
+        start_position = start_position + Displacement::new(TILE_WIDTH / 2, -TILE_HEIGHT / 2);
+        tile_shift = tile_shift + Direction::NorthEast.to_displacement();
+    } else if tiles_to_top * TILE_HEIGHT < player_position.y {
+        start_position = start_position + Displacement::new(0, -TILE_HEIGHT);
+        tile_shift = tile_shift + Direction::North.to_displacement();
+    }
+
+    let tile_offset = Displacement::new(
+        start_position.x - TILE_WIDTH / 2,
+        start_position.y + TILE_HEIGHT / 2 - 1,
+    );
+
+    let render_start = start_position - Displacement::new(TILE_WIDTH / 2, TILE_HEIGHT / 2);
+    let tile_rows = (viewport_h - render_start.y + TILE_HEIGHT / 2 - 1) / (TILE_HEIGHT / 2);
+    let tile_columns = (screen_w - render_start.x + TILE_WIDTH - 1) / TILE_WIDTH;
+
+    TileViewport { tile_offset, tile_shift, tile_rows, tile_columns }
+}
+
+/// C++ `DrawFloorTile`（scrollrt.cpp:652）。mt[0] 左三角 + mt[1] 右三角。
+fn draw_floor_tile(
+    out: &mut super::surface::Surface,
+    level: &DungeonLevelData,
+    piece_id: u16,
+    target_buffer_position: Point,
+) {
+    let Some(mega) = mega_for_piece(level, piece_id) else {
+        return;
+    };
+
+    let block = mega.blocks[0];
+    if block.has_value() {
+        if let Some(src) = dun_render::get_dun_frame(&level.level_cel, block.frame() as u32) {
+            dun_render::render_tile_frame(
+                out,
+                target_buffer_position,
+                TileType::LeftTriangle,
+                src,
+                None,
+                MaskType::Solid,
+            );
+        }
+    }
+    let block = mega.blocks[1];
+    if block.has_value() {
+        let pos = target_buffer_position + RIGHT_FRAME_DISPLACEMENT;
+        if let Some(src) = dun_render::get_dun_frame(&level.level_cel, block.frame() as u32) {
+            dun_render::render_tile_frame(
+                out,
+                pos,
+                TileType::RightTriangle,
+                src,
+                None,
+                MaskType::Solid,
+            );
+        }
+    }
+}
+
+/// C++ `DrawFloor`（scrollrt.cpp:927）。菱形网格 zigzag 迭代。
+fn draw_floor(
+    out: &mut super::surface::Surface,
+    level: &DungeonLevelData,
+    grid: &dyn DPieceGrid,
+    mut tile_position: Point,
+    mut target_buffer_position: Point,
+    rows: i32,
+    mut columns: i32,
+) {
+    for i in 0..rows {
+        for _ in 0..columns {
+            if !in_dungeon_bounds(tile_position) {
+                dun_render::draw_black_tile(out, target_buffer_position.x, target_buffer_position.y);
+            } else {
+                let piece_id = grid.d_piece(tile_position.x, tile_position.y);
+                if level.sol.is_floor(piece_id) {
+                    draw_floor_tile(out, level, piece_id, target_buffer_position);
+                }
+            }
+            tile_position += Direction::East;
+            target_buffer_position.x += TILE_WIDTH;
+        }
+        // 回到行首。
+        tile_position = tile_position + Direction::West.to_displacement() * columns;
+        target_buffer_position.x -= columns * TILE_WIDTH;
+
+        // 跳到下一行（zigzag）。
+        target_buffer_position.y += TILE_HEIGHT / 2;
+        if (i & 1) != 0 {
+            tile_position.x += 1;
+            columns -= 1;
+            target_buffer_position.x += TILE_WIDTH / 2;
+        } else {
+            tile_position.y += 1;
+            columns += 1;
+            target_buffer_position.x -= TILE_WIDTH / 2;
+        }
+    }
+}
+
+/// C++ `DrawCell`（scrollrt.cpp:521）。渲染单个 mega-tile 的全部 micro：mt[0]/mt[1]
+/// 地板对（仅对非地板 piece 或 foliage），再 mt[2..MicroTileLen] 墙壁逐行上移。
+///
+/// 本增量 `transparency` 强制为 false（全 `MaskType::Solid`，C++:540 需要
+/// `dTransVal`/`TransList` 未移植）；光照全亮（`light_table = None`）。foliage
+/// 渲染（C++ `RenderTileFoliage`）在活 dun_render 中未移植，地板透明顶暂不绘制。
+fn draw_cell(
+    out: &mut super::surface::Surface,
+    level: &DungeonLevelData,
+    piece_id: u16,
+    target_buffer_position: Point,
+) {
+    let Some(mega) = mega_for_piece(level, piece_id) else {
+        return;
+    };
+    let micro_tile_len = level.dungeon_type.blocks_per_tile();
+    let is_floor = level.sol.is_floor(piece_id);
+    let mut tbp = target_buffer_position;
+
+    // mt[0] — 左地板/叶半（C++:588-599）。
+    let block = mega.blocks[0];
+    if block.has_value() {
+        let tile_type = block.tile_type();
+        if !is_floor || tile_type == TileType::TransparentSquare {
+            if !(is_floor && tile_type == TileType::TransparentSquare) {
+                dun_render::render_tile(out, tbp, &level.level_cel, block, MaskType::Solid, None);
+            }
+            // foliage 分支跳过（活 dun_render 无 render_tile_foliage）。
+        }
+    }
+    // mt[1] — 右地板/叶半（C++:600-611）。
+    let block = mega.blocks[1];
+    if block.has_value() {
+        let tile_type = block.tile_type();
+        if !is_floor || tile_type == TileType::TransparentSquare {
+            if !(is_floor && tile_type == TileType::TransparentSquare) {
+                dun_render::render_tile(
+                    out,
+                    tbp + RIGHT_FRAME_DISPLACEMENT,
+                    &level.level_cel,
+                    block,
+                    MaskType::Solid,
+                    None,
+                );
+            }
+        }
+    }
+    tbp.y -= TILE_HEIGHT;
+
+    // 墙壁：mt[2..MicroTileLen] 成对，每行上移 TILE_HEIGHT。
+    let mut i = 2;
+    while i < micro_tile_len {
+        let block = mega.blocks[i];
+        if block.has_value() {
+            dun_render::render_tile(out, tbp, &level.level_cel, block, MaskType::Solid, None);
+        }
+        let block = mega.blocks[i + 1];
+        if block.has_value() {
+            dun_render::render_tile(
+                out,
+                tbp + RIGHT_FRAME_DISPLACEMENT,
+                &level.level_cel,
+                block,
+                MaskType::Solid,
+                None,
+            );
+        }
+        tbp.y -= TILE_HEIGHT;
+        i += 2;
+    }
+}
+
+/// C++ `DrawTileContent`（scrollrt.cpp:966）。zigzag 迭代，每 tile 调
+/// `draw_cell`，含 wall-behind 前置绘制（C++:983-998），防止精灵穿墙。
+fn draw_tile_content(
+    out: &mut super::surface::Surface,
+    level: &DungeonLevelData,
+    grid: &dyn DPieceGrid,
+    mut tile_position: Point,
+    mut target_buffer_position: Point,
+    rows: i32,
+    mut columns: i32,
+) {
+    let micro_tile_len = level.dungeon_type.blocks_per_tile() as i32;
+    let mut rows = rows + micro_tile_len;
+    let screen_width = out.w();
+    let mut skip = false;
+
+    let mut i = 0;
+    while i < rows {
+        let mut skip_next = false;
+        for _ in 0..columns {
+            if in_dungeon_bounds(tile_position) {
+                // wall-behind 前置绘制（C++:983-994）。
+                if tile_position.x + 1 < MAXDUN
+                    && tile_position.y - 1 >= 0
+                    && target_buffer_position.x + TILE_WIDTH <= screen_width
+                {
+                    let piece = grid.d_piece(tile_position.x, tile_position.y);
+                    if level.sol.is_wall(piece) {
+                        let east_is_wall =
+                            level.sol.is_wall(grid.d_piece(tile_position.x + 1, tile_position.y));
+                        let west_is_wall = if tile_position.x > 0 {
+                            level.sol.is_wall(grid.d_piece(tile_position.x - 1, tile_position.y))
+                        } else {
+                            false
+                        };
+                        if east_is_wall || west_is_wall {
+                            let ne_not_solid = level
+                                .sol
+                                .is_tile_not_solid(grid.d_piece(tile_position.x + 1, tile_position.y - 1));
+                            let n_not_solid = level
+                                .sol
+                                .is_tile_not_solid(grid.d_piece(tile_position.x, tile_position.y - 1));
+                            if ne_not_solid && n_not_solid {
+                                // 先绘制东侧 tile（C++:990）。
+                                let east_pos = Point::new(
+                                    target_buffer_position.x + TILE_WIDTH,
+                                    target_buffer_position.y,
+                                );
+                                let east_piece = grid.d_piece(tile_position.x + 1, tile_position.y);
+                                draw_cell(out, level, east_piece, east_pos);
+                                skip_next = true;
+                            }
+                        }
+                    }
+                }
+                if !skip {
+                    let piece = grid.d_piece(tile_position.x, tile_position.y);
+                    draw_cell(out, level, piece, target_buffer_position);
+                }
+                skip = skip_next;
+            }
+            tile_position += Direction::East;
+            target_buffer_position.x += TILE_WIDTH;
+        }
+        // 回到行首 + 跳到下一行（与 draw_floor 相同的 zigzag）。
+        tile_position = tile_position + Direction::West.to_displacement() * columns;
+        target_buffer_position.x -= columns * TILE_WIDTH;
+
+        target_buffer_position.y += TILE_HEIGHT / 2;
+        if (i & 1) != 0 {
+            tile_position.x += 1;
+            columns -= 1;
+            target_buffer_position.x += TILE_WIDTH / 2;
+        } else {
+            tile_position.y += 1;
+            columns += 1;
+            target_buffer_position.x -= TILE_WIDTH / 2;
+        }
+        i += 1;
+    }
+}
+
+/// C++ `CalcFirstTilePosition`（scrollrt.cpp:1081）。本增量非行走、无面板覆盖：
+/// offset = tileOffset，position += tileShift。
+fn calc_first_tile_position(position: &mut Point, offset: &mut Displacement, geom: TileViewport) {
+    *offset = geom.tile_offset;
+    *position = *position + geom.tile_shift;
+}
+
+/// C++ `DrawGame`（scrollrt.cpp:1132）。全亮，先 DrawFloor 再 DrawTileContent。
+/// 渲染到整个后备缓冲（HUD 由调用方叠加，故不做 viewport subregionY）。
+fn draw_game(
+    out: &mut super::surface::Surface,
+    level: &DungeonLevelData,
+    grid: &dyn DPieceGrid,
+    mut position: Point,
+    geom: TileViewport,
+) {
+    let mut offset = Displacement::new(0, 0);
+    calc_first_tile_position(&mut position, &mut offset, geom);
+    let target_start = Point::new(0, 0) + offset;
+    draw_floor(out, level, grid, position, target_start, geom.tile_rows, geom.tile_columns);
+    draw_tile_content(out, level, grid, position, target_start, geom.tile_rows, geom.tile_columns);
+}
+
+/// C++ `DrawView`（scrollrt.cpp:1215）。忠实管线入口：由屏幕尺寸算视口几何，
+/// 再 DrawGame。实体/automap/标签/血条（C++:1223-1296）本增量仍由调用方在
+/// SDL canvas 上叠加。
+pub fn draw_view(
+    out: &mut super::surface::Surface,
+    level: &DungeonLevelData,
+    grid: &dyn DPieceGrid,
+    start_position: Point,
+    screen_w: i32,
+    screen_h: i32,
+    viewport_h: i32,
+) {
+    let geom = viewport_geometry(screen_w, screen_h, viewport_h);
+    draw_game(out, level, grid, start_position, geom);
+}
+
+/// C++ `GetScreenPosition`（scrollrt.cpp:1620）。返回 tile 在后备缓冲中的屏幕
+/// 锚点位置（tile 底部）。实体 overlay 用本函数与地板管线共享同一套投影，
+/// 保证地板/实体天然对齐（不再各自手算 rel_x/rel_y）。
+pub fn tile_screen_position(
+    tile: Point,
+    camera: Point,
+    screen_w: i32,
+    screen_h: i32,
+    viewport_h: i32,
+) -> Point {
+    let geom = viewport_geometry(screen_w, screen_h, viewport_h);
+    let mut first_tile = camera;
+    let mut offset = Displacement::new(0, 0);
+    calc_first_tile_position(&mut first_tile, &mut offset, geom);
+    // delta = firstTile - tile（C++ 用反序 delta 喂给 worldToScreen）。
+    let delta = first_tile - tile;
+    let mut position = Point::new(0, 0);
+    position += delta.world_to_screen();
+    position += offset;
+    position
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -373,5 +759,92 @@ mod tests {
 
         assert_eq!(offset.x, TILE_WIDTH);
         assert_eq!(offset.y, TILE_HEIGHT);
+    }
+
+    /// 640×480 / 面板 128 / 无 zoom 的忠实视口几何（手算自 C++ CalcViewportGeometry）。
+    #[test]
+    fn test_viewport_geometry_golden() {
+        let g = viewport_geometry(640, 480, 352);
+        assert_eq!(g.tile_rows, 25);
+        assert_eq!(g.tile_columns, 10);
+        // tileShift = North*6 + West*5 + NorthEast = (-6,-6)+(-5,5)+(0,-1) = (-11,-2)
+        assert_eq!(g.tile_shift, Displacement::new(-11, -2));
+        // tileOffset = (startPos.x-32, startPos.y+15) where startPos=(32,-32) → (0,-17)
+        assert_eq!(g.tile_offset, Displacement::new(0, -17));
+    }
+
+    /// tile_screen_position 与地板管线共享投影：相机 tile 锚点位置确定，
+    /// 且 East 相邻 tile 在屏幕上 +64x（与 zigzag 列步进一致，无镜像）。
+    #[test]
+    fn test_tile_screen_position() {
+        let cam = Point::new(75, 68);
+        // viewport_h=336 (480-144 Rust 面板)：相机锚点 = (288,183)。
+        let cam_pos = tile_screen_position(cam, cam, 640, 480, 336);
+        assert_eq!(cam_pos, Point::new(288, 183));
+        // East 相邻 tile (dx=1,dy=-1) → 屏幕 +64x、同 y。
+        let east = tile_screen_position(Point::new(76, 67), cam, 640, 480, 336);
+        assert_eq!(east, Point::new(cam_pos.x + 64, cam_pos.y));
+        // SouthEast 相邻 tile (dx=1,dy=0) → 屏幕 +32x、+16y（iso 向下，SDL y 向下增）。
+        let se = tile_screen_position(Point::new(76, 68), cam, 640, 480, 336);
+        assert_eq!(se, Point::new(cam_pos.x + 32, cam_pos.y + 16));
+    }
+
+    /// `DPieceGrid` 记录每次查询的 `(x,y)`，返回 piece 0，使渲染器的
+    /// `is_floor`/`mega_for_piece` 路径空转，从而观察迭代序列本身。
+    struct RecordingGrid {
+        visits: std::cell::RefCell<Vec<(i32, i32)>>,
+    }
+    impl DPieceGrid for RecordingGrid {
+        fn d_piece(&self, x: i32, y: i32) -> u16 {
+            self.visits.borrow_mut().push((x, y));
+            0
+        }
+    }
+
+    /// draw_floor 的 zigzag 访问序列黄金值（起始 tile (50,50)，3 行 4 列）。
+    #[test]
+    fn test_draw_floor_zigzag_sequence() {
+        use crate::engine::dungeon::{DungeonLevelData, DungeonType};
+        use crate::engine::surface::Surface;
+
+        let grid = RecordingGrid { visits: std::cell::RefCell::new(Vec::new()) };
+        let level = DungeonLevelData::new(DungeonType::Town);
+        let mut buf = vec![0u8; 640 * 480];
+        let mut surface = Surface::new(&mut buf, 640, 640, 480);
+        draw_floor(
+            &mut surface,
+            &level,
+            &grid,
+            Point::new(50, 50),
+            Point::new(0, 0),
+            3,
+            4,
+        );
+        let visits = grid.visits.borrow();
+        // Row 0 (columns=4). 内层每访问后 += East，故行末 tile 已前移一格。
+        assert_eq!(&visits[..4], &[(50, 50), (51, 49), (52, 48), (53, 47)]);
+        // Row 1 (columns grew to 5): 回行首 + West*4 后 (50,50)，偶行 y+=1 → (50,51)。
+        assert_eq!(
+            &visits[4..9],
+            &[(50, 51), (51, 50), (52, 49), (53, 48), (54, 47)]
+        );
+        // Row 2 (columns shrank to 4): 行首 (51,51)。
+        assert_eq!(&visits[9..13], &[(51, 51), (52, 50), (53, 49), (54, 48)]);
+    }
+
+    /// draw_view 管线 smoke：空 level + 记录 grid 不 panic，且访问真实视口量级
+    /// 的 tile（640×480 ≈ 10 列 × 25 行）。
+    #[test]
+    fn test_draw_view_pipeline_smoke() {
+        use crate::engine::dungeon::{DungeonLevelData, DungeonType};
+        use crate::engine::surface::Surface;
+
+        let grid = RecordingGrid { visits: std::cell::RefCell::new(Vec::new()) };
+        let level = DungeonLevelData::new(DungeonType::Town);
+        let mut buf = vec![0u8; 640 * 480];
+        let mut surface = Surface::new(&mut buf, 640, 640, 480);
+        draw_view(&mut surface, &level, &grid, Point::new(75, 68), 640, 480, 352);
+        let n = grid.visits.borrow().len();
+        assert!(n > 100, "draw_view should visit a full viewport, got {n} queries");
     }
 }

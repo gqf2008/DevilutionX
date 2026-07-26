@@ -14,6 +14,7 @@ use crate::engine::window::{GameWindow, Color};
 use crate::engine::isometric::{IsoPoint, TILE_WIDTH, TILE_HEIGHT};
 use crate::engine::dungeon::{TileDecoder, DunTemplate};
 use crate::engine::sprite_render::rgba_to_texture;
+use crate::engine::types::Point as TilePoint;
 use crate::game::input::InputSystem;
 use crate::game::network;
 use crate::game::game_state::{GameState, TownLayout, TOWN_MAX_X, TOWN_MAX_Y, GroundItemType};
@@ -1212,6 +1213,48 @@ fn redraw_viewport(_window: &mut GameWindow, _game_state: &GameState) {
     // frame. Kept as a hook for future partial-redraw optimisation.
 }
 
+/// `dPiece` grid adapters so the faithful pipeline can read either layout type.
+/// Both `TownLayout` and `DungeonLayout` expose `get(x, y) -> u16`.
+impl crate::engine::scrollrt::DPieceGrid for crate::game::game_state::TownLayout {
+    fn d_piece(&self, x: i32, y: i32) -> u16 {
+        crate::game::game_state::TownLayout::get(self, x, y)
+    }
+}
+impl crate::engine::scrollrt::DPieceGrid for crate::game::game_state::DungeonLayout {
+    fn d_piece(&self, x: i32, y: i32) -> u16 {
+        crate::game::game_state::DungeonLayout::get(self, x, y)
+    }
+}
+
+/// Render floor + walls to the 8-bit palette backbuffer via the faithful C++
+/// pipeline, then palette-convert + upload in one blit. Replaces the per-tile
+/// RGBA-texture path.
+fn render_world_pipeline(
+    window: &mut GameWindow,
+    level: &crate::engine::dungeon::DungeonLevelData,
+    grid: &impl crate::engine::scrollrt::DPieceGrid,
+    view_pos: TilePoint,
+    viewport_h: i32,
+) {
+    let palette = crate::engine::palette::Palette::from_rgb_bytes(&level.palette.colors)
+        .unwrap_or_else(crate::engine::palette::Palette::new);
+    window.clear_backbuffer();
+    {
+        let (w, h, buf) = window.backbuffer_mut();
+        let mut surface = crate::engine::surface::Surface::new(buf, w as u32, w as i32, h as i32);
+        crate::engine::scrollrt::draw_view(
+            &mut surface,
+            level,
+            grid,
+            view_pos,
+            LOGICAL_WIDTH as i32,
+            LOGICAL_HEIGHT as i32,
+            viewport_h,
+        );
+    }
+    let _ = window.present_backbuffer(&palette);
+}
+
 fn draw_and_blit(
     window: &mut GameWindow,
     game_state: &GameState,
@@ -1249,43 +1292,36 @@ fn draw_and_blit(
     let cam_tile_x = game_state.camera.tile_x;
     let cam_tile_y = game_state.camera.tile_y;
 
-    // Render the world. Each draw function now creates its own short-lived
-    // `TextureCreator` per texture it needs and blits immediately — no
-    // cross-frame texture cache and no `TextureCreator` borrow held across
-    // other `canvas_mut()` calls. This is Plan A from the bug report: every
-    // texture is rebuilt each frame, which is slower but provably safe (no
-    // dangling textures, no aliasing violations).
+    // --- Render the world via the faithful C++ pipeline (scrollrt.cpp DrawView
+    //     → DrawGame → DrawFloor/DrawTileContent). Floor + walls render into the
+    //     8-bit palette backbuffer, then upload in one palette-converted blit
+    //     (replacing the per-tile RGBA-texture path). Entities/HUD still overlay
+    //     on the SDL canvas below — to be moved onto the palette surface in the
+    //     next increment (C++ scrollrt.cpp:326-505, 705-927).
+    let viewport_h = LOGICAL_HEIGHT as i32 - PANEL_HEIGHT; // 336
+    let view_pos = TilePoint::new(cam_tile_x, cam_tile_y);
+    let mut drew_pipeline = false;
+
     if game_state.in_dungeon {
-        // DUNGEON MODE (L1 Cathedral). Requires the L1 level data + a
-        // generated dungeon_layout. Falls back gracefully if either is
-        // missing (e.g. shareware build without L1 art).
         if let (Some(level), Some(layout)) = (&game_state.dungeon_level_data, &game_state.dungeon_layout) {
-            // Collect the living dungeon monsters (id + position + type)
-            // for the renderer. Borrowing through a small Vec avoids
-            // holding a borrow on monster_manager across the draw call.
-            let monsters: Vec<(usize, i32, i32, crate::game::monster::MonsterType, crate::game::monster::MonsterAIState)> =
-                game_state.monster_manager.iter().map(|(id, m)| {
-                    (id, m.x, m.y, m.monster_type, m.ai_state)
-                }).collect();
-            let sprites = game_state.monster_sprites.as_ref();
-            let _ = draw_dungeon(window, level, layout, cam_tile_x, cam_tile_y, screen_center_x, screen_center_y, &monsters, sprites);
-        } else if let Some(level) = &game_state.level_data {
+            render_world_pipeline(window, level, layout, view_pos, viewport_h);
+            drew_pipeline = true;
+        }
+    } else if let (Some(level), Some(layout)) = (&game_state.level_data, &game_state.town_layout) {
+        render_world_pipeline(window, level, layout, view_pos, viewport_h);
+        drew_pipeline = true;
+    }
+
+    if !drew_pipeline {
+        // No faithful level/layout data: keep the canvas-drawn checkerboard
+        // fallbacks so the art chain is still visible (e.g. shareware without
+        // L1 art, or before the town layout is built).
+        if let Some(level) = &game_state.level_data {
             let _ = draw_checkerboard_fallback(window, level, cam_tile_x, cam_tile_y, screen_center_x, screen_center_y);
         } else {
             let canvas = window.canvas_mut();
             draw_plain_checkerboard(canvas, screen_center_x, screen_center_y);
         }
-    } else if let (Some(level), Some(layout)) = (&game_state.level_data, &game_state.town_layout) {
-        // Real Tristram art path: render the visible micro-tiles from dPiece.
-        let _ = draw_tristram(window, level, layout, cam_tile_x, cam_tile_y, screen_center_x, screen_center_y);
-    } else if let Some(level) = &game_state.level_data {
-        // Fallback: town data loaded but layout not built yet — draw a small
-        // checkerboard of real tile frames so the art chain is still visible.
-        let _ = draw_checkerboard_fallback(window, level, cam_tile_x, cam_tile_y, screen_center_x, screen_center_y);
-    } else {
-        // No art at all — draw a plain iso checkerboard.
-        let canvas = window.canvas_mut();
-        draw_plain_checkerboard(canvas, screen_center_x, screen_center_y);
     }
 
     // Draw Tristram NPCs (Griswold, Pepin, Ogden, Cain, ...) as coloured
@@ -1295,6 +1331,19 @@ fn draw_and_blit(
     // top). Uses the same isometric projection as monsters/player.
     if !game_state.in_dungeon {
         draw_towners(window, game_state, cam_tile_x, cam_tile_y, screen_center_x, screen_center_y);
+    }
+
+    // Dungeon monsters (real CL2 sprites where loaded, else per-type coloured
+    // markers). Previously drawn inside `draw_dungeon`; now that the floor/walls
+    // come from the faithful palette pipeline, render them here as a canvas
+    // overlay (to move onto the palette surface with the entity-draw increment).
+    if game_state.in_dungeon {
+        let monsters: Vec<(usize, i32, i32, crate::game::monster::MonsterType, crate::game::monster::MonsterAIState)> =
+            game_state.monster_manager.iter().map(|(id, m)| {
+                (id, m.x, m.y, m.monster_type, m.ai_state)
+            }).collect();
+        let sprites = game_state.monster_sprites.as_ref();
+        draw_dungeon_monsters(window, &monsters, sprites, cam_tile_x, cam_tile_y, screen_center_x, screen_center_y);
     }
 
     // Draw ground loot (dropped by slain monsters) before the player sprite so
@@ -2761,208 +2810,11 @@ fn draw_towners(
 const LOGICAL_WIDTH: u32 = 640;
 const LOGICAL_HEIGHT: u32 = 480;
 
-/// Half the visible tile radius around the camera. The isometric viewport of
-/// 640x480 with 64x32 diamonds needs roughly ±9 tiles in X and ±8 in Y to cover
-/// the screen; we add a margin so edges don't show gaps.
+/// Half the visible tile radius around the camera — used by the checkerboard
+/// fallbacks (the faithful pipeline computes its own viewport coverage).
 const VIEW_RADIUS_X: i32 = 12;
 const VIEW_RADIUS_Y: i32 = 11;
 
-/// Render the visible Tristram micro-tiles from the dPiece grid.
-///
-/// For each world tile `(wx, wy)` within the camera's view radius we:
-/// 1. Look up `dPiece = layout.get(wx, wy)`.
-/// 2. Index into `level.min.mega_tiles[dPiece]` to get the two floor sub-tiles
-///    (`blocks[0]` = left-bottom triangle, `blocks[1]` = right-top triangle).
-///    Each block carries a CEL frame index + tile type.
-/// 3. Decode the frame to RGBA and upload it into a fresh SDL `Texture` via a
-///    short-lived `TextureCreator` borrowed from the canvas.
-/// 4. Blit the two 32x32 textures at the tile's screen position, offset so the
-///    pair forms the 64x32 diamond.
-///
-/// **Safety note (Plan A rewrite):** textures are rebuilt every frame. The old
-/// code cached `Texture<'static>` in a thread-local via `transmute`, which was
-/// unsound (the `TextureCreator` it borrowed was dropped at the end of the
-/// block, leaving dangling SDL handles). Each draw now scopes its
-/// `TextureCreator` + `Texture` to a single `copy()` so the lifetimes are
-/// provably valid and there is no aliasing violation.
-fn draw_tristram(
-    window: &mut GameWindow,
-    level: &crate::engine::dungeon::DungeonLevelData,
-    layout: &TownLayout,
-    cam_tile_x: i32,
-    cam_tile_y: i32,
-    screen_center_x: i32,
-    screen_center_y: i32,
-) -> Result<()> {
-    let mut drawn = 0u32;
-
-    // C++ scrollrt.cpp DrawFloor: zigzag row iteration.
-    // Each row alternates which world axis advances (x++ vs y++) and shifts
-    // the screen x by half a tile width. This creates the isometric diamond
-    // grid pattern with correct painter's order.
-    //
-    // We need enough rows/columns to cover the full viewport (640x336 above HUD).
-    // Each row is TILE_HEIGHT/2 = 16px tall, each column is TILE_WIDTH = 64px wide.
-    // 336/16 = 21 rows, 640/64 = 10 columns minimum. Use generous bounds.
-    let row_count = 26;
-    let init_columns = 14;
-
-    // Starting tile: the back-top corner of the visible diamond.
-    // Going back from camera means decreasing both x and y.
-    let mut tile_x = cam_tile_x - 13;
-    let mut tile_y = cam_tile_y - 13;
-    // Starting screen position: top-left of the first tile.
-    // The camera tile's diamond top-left is at (screen_center_x - TILE_WIDTH/2,
-    // screen_center_y - TILE_HEIGHT). Going back 13 tiles shifts by
-    // 13 * TILE_WIDTH/2 = 416px left and 13 * TILE_HEIGHT/2 = 208px up.
-    let mut base_sx = screen_center_x - 13 * (TILE_WIDTH / 2) - (TILE_WIDTH / 2);
-    let mut base_sy = screen_center_y - 13 * (TILE_HEIGHT / 2) - TILE_HEIGHT;
-    let mut columns: i32 = init_columns;
-
-    for row in 0..row_count {
-        let mut cur_x = tile_x;
-        let mut cur_sx = base_sx;
-        for _col in 0..columns {
-            let dpiece = layout.get(cur_x, tile_y);
-            if dpiece != 0 {
-                let mega_idx = dpiece.saturating_sub(1) as usize;
-                if let Some(mega) = level.min.mega_tiles.get(mega_idx) {
-                    for (slot, block) in [(0usize, &mega.blocks[0]), (1, &mega.blocks[1])] {
-                        if !block.has_value() { continue; }
-                        let rgba = match TileDecoder::decode_tile(
-                            &level.level_cel, block.frame(), block.tile_type(), &level.palette,
-                        ) {
-                            Some(r) => r,
-                            None => continue,
-                        };
-                        let mut canvas = window.canvas_mut();
-                        let creator = canvas.texture_creator();
-                        let tex_result = rgba_to_texture(&creator, &rgba, 32, 32);
-                        if let Ok(tex) = tex_result {
-                            let tx = cur_sx + if slot == 1 { TILE_WIDTH / 2 } else { 0 };
-                            let _ = canvas.copy(&tex, None, Rect::new(
-                                tx, base_sy, (TILE_WIDTH / 2) as u32, TILE_HEIGHT as u32,
-                            ));
-                            drawn += 1;
-                        }
-                    }
-                }
-            }
-            cur_x += 1;
-            cur_sx += TILE_WIDTH;
-        }
-        // Advance to next zigzag row.
-        base_sy += TILE_HEIGHT / 2;
-        if (row & 1) != 0 {
-            tile_x += 1;
-            columns = columns.saturating_sub(1);
-            base_sx += TILE_WIDTH / 2;
-        } else {
-            tile_y += 1;
-            columns += 1;
-            base_sx -= TILE_WIDTH / 2;
-        }
-    }
-
-    if drawn == 0 {
-        println!("[DrawTristram] WARNING: drew 0 tiles cam=({},{})", cam_tile_x, cam_tile_y);
-    }
-    Ok(())
-}
-
-/// Render the visible L1 Cathedral micro-tiles from the dungeon dPiece grid.
-///
-/// Structurally identical to `draw_tristram`, but reads
-/// `game_state.dungeon_layout` (the L1 grid built by `dungeon_level`).
-///
-/// For each world tile `(wx, wy)` within the camera's view radius we look up
-/// `dPiece = layout.get(wx, wy)`, index into `level.min.mega_tiles[dPiece]` to
-/// get the two floor sub-tiles, and blit their decoded CEL frames at the tile's
-/// screen position. Textures are rebuilt every frame (Plan A — see
-/// `draw_tristram` for the safety rationale).
-fn draw_dungeon(
-    window: &mut GameWindow,
-    level: &crate::engine::dungeon::DungeonLevelData,
-    layout: &crate::game::game_state::DungeonLayout,
-    cam_tile_x: i32,
-    cam_tile_y: i32,
-    screen_center_x: i32,
-    screen_center_y: i32,
-    monsters: &[(usize, i32, i32, crate::game::monster::MonsterType, crate::game::monster::MonsterAIState)],
-    sprites: Option<&crate::game::monster_sprites::MonsterSpriteSet>,
-) -> Result<()> {
-    let mut drawn = 0u32;
-    let mut skipped = 0u32;
-
-    for wy_off in -VIEW_RADIUS_Y..=VIEW_RADIUS_Y {
-        for wx_off in -VIEW_RADIUS_X..=VIEW_RADIUS_X {
-            let wx = cam_tile_x + wx_off;
-            let wy = cam_tile_y + wy_off;
-            let dpiece = layout.get(wx, wy);
-            if dpiece == 0 {
-                skipped += 1;
-                continue;
-            }
-
-            let mega_idx = dpiece.saturating_sub(1) as usize;
-            let mega = match level.min.mega_tiles.get(mega_idx) {
-                Some(m) => m,
-                None => {
-                    skipped += 1;
-                    continue;
-                }
-            };
-
-            let rel_x = (wy_off - wx_off) * (TILE_WIDTH / 2);
-            let rel_y = (wx_off + wy_off) * -(TILE_HEIGHT / 2);
-            let dst_cx = screen_center_x + rel_x;
-            let dst_cy = screen_center_y + rel_y;
-
-            if dst_cx < -(TILE_WIDTH) || dst_cx > (LOGICAL_WIDTH as i32 + TILE_WIDTH)
-                || dst_cy < -(TILE_HEIGHT * 2) || dst_cy > (LOGICAL_HEIGHT as i32 + TILE_HEIGHT)
-            {
-                continue;
-            }
-
-            let canvas = window.canvas_mut();
-            for (slot, block) in [(0usize, &mega.blocks[0]), (1, &mega.blocks[1])] {
-                if !block.has_value() { continue; }
-                let rgba = match TileDecoder::decode_tile(
-                    &level.level_cel, block.frame(), block.tile_type(), &level.palette,
-                ) {
-                    Some(r) => r,
-                    None => continue,
-                };
-                let creator = canvas.texture_creator();
-                let tex = match rgba_to_texture(&creator, &rgba, 32, 32) {
-                    Ok(t) => t,
-                    Err(_) => continue,
-                };
-                let tx = dst_cx - (TILE_WIDTH / 2) + if slot == 1 { (TILE_WIDTH / 2) } else { 0 };
-                let ty = dst_cy - TILE_HEIGHT;
-                let _ = canvas.copy(&tex, None, Rect::new(tx, ty, (TILE_WIDTH / 2) as u32, TILE_HEIGHT as u32));
-                drawn += 1;
-            }
-        }
-    }
-
-    if drawn == 0 {
-        println!(
-            "[DrawDungeon] WARNING: drew 0 tiles ({} skipped) cam=({},{}). \
-             L1 layout may be empty or dPiece indices out of MIN range.",
-            skipped, cam_tile_x, cam_tile_y
-        );
-    }
-
-    // Step 2: draw the living dungeon monsters on top of the floor. Each
-    // monster is placed at its world tile's screen position, with its sprite
-    // anchored foot-first (like the player sprite). Monsters with a loaded CL2
-    // sprite use it; the rest fall back to a per-type coloured block so every
-    // monster still has a visible presence.
-    draw_dungeon_monsters(window, monsters, sprites, cam_tile_x, cam_tile_y, screen_center_x, screen_center_y);
-
-    Ok(())
-}
 
 //------------------------------------------------------------------------------
 // Monster Sprite Rendering (Step 2)

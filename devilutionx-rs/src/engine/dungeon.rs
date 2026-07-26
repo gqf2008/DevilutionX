@@ -251,6 +251,40 @@ impl SolData {
     pub fn blocks_missile(&self, index: usize) -> bool {
         self.get(index).contains(TileProperties::BLOCK_MISSILE)
     }
+
+    /// C++ `TileHasAny(Point, TileProperties)` (Source/levels/gendung.h:296):
+    /// `HasAnyOf(SOLData[dPiece[coords.x][coords.y]], property)`.
+    ///
+    /// SOL data is indexed by level-piece id (the `dPiece` grid value).
+    #[inline]
+    pub fn tile_has_any(&self, level_piece_id: u16, property: TileProperties) -> bool {
+        self.get(level_piece_id as usize).intersects(property)
+    }
+
+    /// C++ `IsFloor(Point)` (Source/engine/render/scrollrt.cpp:101):
+    /// `!TileHasAny(tilePosition, TileProperties::Solid | TileProperties::BlockMissile)`
+    #[inline]
+    pub fn is_floor(&self, level_piece_id: u16) -> bool {
+        !self.tile_has_any(level_piece_id, TileProperties::SOLID | TileProperties::BLOCK_MISSILE)
+    }
+
+    /// C++ `IsWall(Point)` (Source/engine/render/scrollrt.cpp:106):
+    /// `!IsFloor(tilePosition) || dSpecial[tilePosition.x][tilePosition.y] != 0`
+    ///
+    /// `dSpecial` is not ported yet (town sector decorations); treated as 0,
+    /// so this reduces to `!IsFloor`.
+    #[inline]
+    pub fn is_wall(&self, level_piece_id: u16) -> bool {
+        !self.is_floor(level_piece_id)
+    }
+
+    /// C++ `IsTileNotSolid(Point)` (Source/levels/tile_properties.cpp:11):
+    /// `!TileHasAny(position, TileProperties::Solid)` (out-of-bounds → false,
+    /// bounds are checked by the caller).
+    #[inline]
+    pub fn is_tile_not_solid(&self, level_piece_id: u16) -> bool {
+        !self.tile_has_any(level_piece_id, TileProperties::SOLID)
+    }
 }
 
 /// MIN data (mega-tile definitions)
@@ -925,5 +959,31 @@ mod tests {
         assert!(sol.is_solid(0));
         assert!(!sol.is_solid(1));
         assert!(sol.blocks_light(1));
+    }
+
+    /// C++ semantics (scrollrt.cpp:101/106, tile_properties.cpp:11):
+    /// piece 0 = no props (floor), 1 = SOLID (wall), 2 = BLOCK_LIGHT (floor),
+    /// 3 = SOLID|BLOCK_LIGHT (wall), 4 = BLOCK_MISSILE (not floor), out-of-range = NONE (floor).
+    #[test]
+    fn test_tile_property_queries() {
+        let data = [0x00, 0x01, 0x02, 0x03, 0x04];
+        let sol = SolData::from_bytes(&data);
+        // IsFloor = !TileHasAny(Solid | BlockMissile)
+        assert!(sol.is_floor(0));
+        assert!(!sol.is_floor(1));
+        assert!(sol.is_floor(2));
+        assert!(!sol.is_floor(3));
+        assert!(!sol.is_floor(4)); // block-missile tile is not floor
+        // IsWall = !IsFloor (dSpecial unported, treated 0)
+        assert!(!sol.is_wall(0));
+        assert!(sol.is_wall(1));
+        assert!(sol.is_wall(4));
+        // IsTileNotSolid = !TileHasAny(Solid)
+        assert!(sol.is_tile_not_solid(0));
+        assert!(!sol.is_tile_not_solid(1));
+        assert!(sol.is_tile_not_solid(2));
+        // Missing SOL entry → NONE → floor/not-solid (mirrors get() default)
+        assert!(sol.is_floor(99));
+        assert!(sol.is_tile_not_solid(99));
     }
 }

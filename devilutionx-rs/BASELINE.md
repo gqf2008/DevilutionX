@@ -140,3 +140,26 @@ cargo test --bins                    # ✅ 1479 passed / 0 failed
 cargo test --test archive_manager    # ✅ 8 passed（真实 MPQ 端到端）
 cargo test --lib game::monster       # 分模块跑
 ```
+
+## 2026-07-26 增量：接通 C++ 忠实渲染管线（地板 + 墙壁）
+
+**目标**：渲染逐像素对齐 C++（用户选定轴线），延续最近两个 scrollrt 对齐提交。
+
+**根因**：活渲染绕过所有忠实移植模块，直接 RGBA→SDL canvas，每帧每 tile 上传纹理；只画地板 2 block（**墙壁缺失**）、无光照、无 per-tile 实体交错。
+
+**改动**：
+- `engine/dungeon.rs`：加 `SolData::is_floor/is_wall/is_tile_not_solid/tile_has_any`（镜像 C++ scrollrt.cpp:101/106、tile_properties.cpp:11、gendung.h:296）+ 测试。
+- `engine/window.rs`：`GameWindow` 加 640×480 8-bit 调色板后备缓冲 + `present_backbuffer(palette)` 一次性查表上传（替代每帧数百次纹理上传）+ 测试。
+- `engine/scrollrt.rs`：移植 C++ scrollrt.cpp 绘制管线 —— `viewport_geometry`(CalcViewportGeometry:1573)、`draw_view`(DrawView:1215)、`draw_game`(DrawGame:1132)、`draw_floor`/`draw_floor_tile`(927/652)、`draw_cell`(DrawCell:521)、`draw_tile_content`(DrawTileContent:966，含 wall-behind 前置:983)。`DPieceGrid` trait 统一 TownLayout/DungeonLayout。配 zigzag 黄金序列 + 视口几何黄金值 + 管线 smoke 测试。
+- `game/game_loop.rs`：`draw_and_blit` 改走 `render_world_pipeline`（draw_view→present_backbuffer）；加 `DPieceGrid` impl + 地牢怪物 overlay；删 `draw_tristram`/`draw_dungeon`（RGBA 旧路径）。
+
+**验收**：`cargo check` 0 error；`cargo test --lib --bins -- --test-threads=1` **2310 passed / 0 failed**（+5 新测试）。
+
+**已知未验证风险（下一步首选）—— 实体/地板投影对齐**：
+活路径实体 overlay（玩家/怪物/NPC/地面物品/标记，`draw_dungeon_monsters`/`draw_player_sprite`/`draw_towners`/`draw_ground_items`/`draw_stairs_marker`/`draw_simple_missiles`）用 `rel_x = ((wy-cam_y)-(wx-cam_x))*32, rel_y = ((wx-cam_x)+(wy-cam_y))*-16` + screen_center(320,168)。
+而 C++ 管线：`GetScreenPosition(camera)` = **(288,183)**（tile 锚点在底部，精灵相对偏移），且 zigzag 列步进 East→**+64x**、行步进→**+16y**，即 tile 偏移 (dx,dy)→`(dx-dy)*32, (dx+dy)*16`。
+两者**X 镜像、Y 反向、且相机锚点偏 (−32,+15)**。后果：管线地板（C++ 忠实）与现有实体 overlay 不一致，实体将相对地板镜像/偏移。
+**修法（待视觉实证后定）**：`scrollrt::tile_screen_position(tile, camera, w, h, viewport_h)` **已加好并经测试**（移植 C++ GetScreenPosition:1620，cam→(288,183)、East→+64x、SouthEast→+32x/+16y）。下一步把 6+ 处实体 overlay 的手算 `rel_x/rel_y`（`draw_dungeon_monsters`/`draw_player_sprite`/`draw_towners`/`draw_ground_items`/`draw_stairs_marker`/`draw_simple_missiles`/move_target 标记）统一改为调用它即可——这些点目前彼此也不一致（如 `game_loop.rs:1414` 用正 y、其余用负 y），统一后地板/实体天然对齐。或下一增量把实体整体绘入调色板面（C++ scrollrt.cpp:326-505/705-927），天然一致。
+**验证命令**：`cargo run --release`（spawn.mpq 在仓库根），进 Tristram/L1 目视实体是否贴在地板 tile 上；`RS_SHOT=1` dump `game_shot.rgba`。
+
+**本增量其余显式延后**（代码中留 C++ 行号注释，非 TODO）：实体入调色板面、真实光照（dLight/LightTables）、透明度（dTransVal/TransList）、foliage、HUD/DrawMain 入面。

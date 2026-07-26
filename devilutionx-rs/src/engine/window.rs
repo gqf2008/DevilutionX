@@ -22,6 +22,15 @@ pub const DEFAULT_WIDTH: u32 = 640;
 /// Default window height
 pub const DEFAULT_HEIGHT: u32 = 480;
 
+/// Logical (palette-space) resolution the C++-faithful renderer targets.
+///
+/// Matches C++'s PalSurface dimensions and the canvas logical size set in
+/// `main.rs` (`set_logical_size(640, 480)`). The faithful `render::scrollrt`
+/// pipeline draws 8-bit palette indices into a `BACKBUFFER_WIDTH ×
+/// BACKBUFFER_HEIGHT` buffer that is then palette-converted and uploaded.
+pub const BACKBUFFER_WIDTH: usize = 640;
+pub const BACKBUFFER_HEIGHT: usize = 480;
+
 /// Target frames per second
 pub const TARGET_FPS: u32 = 60;
 
@@ -74,6 +83,12 @@ pub struct GameWindow {
     frame_start: Instant,
     frame_count: u64,
     fps: f64,
+    /// 8-bit palette-index backbuffer (C++ `PalSurface` equivalent). The
+    /// faithful `render::scrollrt` pipeline writes palette indices here; the
+    /// whole frame is then palette-converted and uploaded once per frame.
+    backbuffer: Vec<u8>,
+    /// RGBA scratch buffer reused across frames for palette conversion/upload.
+    backbuffer_rgba: Vec<u8>,
 }
 
 impl GameWindow {
@@ -135,6 +150,8 @@ impl GameWindow {
             frame_start: Instant::now(),
             frame_count: 0,
             fps: 0.0,
+            backbuffer: vec![0u8; BACKBUFFER_WIDTH * BACKBUFFER_HEIGHT],
+            backbuffer_rgba: vec![0u8; BACKBUFFER_WIDTH * BACKBUFFER_HEIGHT * 4],
         })
     }
 
@@ -162,6 +179,45 @@ impl GameWindow {
     /// Get mutable reference to canvas
     pub fn canvas_mut(&mut self) -> &mut Canvas<Window> {
         &mut self.canvas
+    }
+
+    /// Borrow the 8-bit palette-index backbuffer as a `(width, height, &mut [u8])`.
+    ///
+    /// The faithful `render::scrollrt` pipeline writes into this buffer at
+    /// `BACKBUFFER_WIDTH × BACKBUFFER_HEIGHT` resolution; call
+    /// [`present_backbuffer`](Self::present_backbuffer) to upload it.
+    pub fn backbuffer_mut(&mut self) -> (usize, usize, &mut [u8]) {
+        (BACKBUFFER_WIDTH, BACKBUFFER_HEIGHT, &mut self.backbuffer)
+    }
+
+    /// Fill the palette-index backbuffer with a single index (0 = black in
+    /// Diablo's palette). C++ `ClearScreenBuffer()` equivalent.
+    pub fn clear_backbuffer(&mut self) {
+        self.backbuffer.fill(0);
+    }
+
+    /// Palette-convert the backbuffer and upload it to the canvas in a single
+    /// blit, then draw it full-canvas.
+    ///
+    /// Replaces the per-tile RGBA-texture path: the whole frame is one texture
+    /// upload. The palette is supplied per-frame (the current level's palette).
+    pub fn present_backbuffer(&mut self, palette: &crate::engine::palette::Palette) -> Result<()> {
+        palette_indices_to_rgba(&self.backbuffer, palette, &mut self.backbuffer_rgba);
+
+        let creator = self.canvas.texture_creator();
+        let mut tex = creator
+            .create_texture_streaming(
+                PixelFormatEnum::RGBA8888,
+                BACKBUFFER_WIDTH as u32,
+                BACKBUFFER_HEIGHT as u32,
+            )
+            .context("Failed to create backbuffer texture")?;
+        tex.update(None, &self.backbuffer_rgba, BACKBUFFER_WIDTH * 4)
+            .context("Failed to update backbuffer texture")?;
+        self.canvas
+            .copy(&tex, None, None)
+            .map_err(|e| anyhow::anyhow!("Backbuffer copy failed: {}", e))?;
+        Ok(())
     }
 
     /// Create event pump for input handling
@@ -231,6 +287,25 @@ impl GameWindow {
     }
 }
 
+/// Expand `BACKBUFFER_WIDTH × BACKBUFFER_HEIGHT` palette indices into an RGBA
+/// (RGBA8888 layout) byte buffer, using `palette` for colour lookup. Factored
+/// out so it can be unit-tested without an SDL context.
+fn palette_indices_to_rgba(
+    indices: &[u8],
+    palette: &crate::engine::palette::Palette,
+    out: &mut [u8],
+) {
+    debug_assert_eq!(indices.len() * 4, out.len());
+    for (i, &idx) in indices.iter().enumerate() {
+        let c = palette.get(idx);
+        let o = i * 4;
+        out[o] = c.r;
+        out[o + 1] = c.g;
+        out[o + 2] = c.b;
+        out[o + 3] = 255;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -249,5 +324,20 @@ mod tests {
         assert_eq!(Color::BLACK.r, 0);
         assert_eq!(Color::WHITE.r, 255);
         assert_eq!(Color::RED, Color::rgb(255, 0, 0));
+    }
+
+    #[test]
+    fn test_palette_indices_to_rgba() {
+        use crate::engine::palette::Palette;
+        // Palette with three distinguishable entries.
+        let mut pal = Palette::new();
+        pal.set(0, crate::engine::palette::Color::new(10, 20, 30));
+        pal.set(1, crate::engine::palette::Color::new(40, 50, 60));
+        pal.set(2, crate::engine::palette::Color::new(70, 80, 90));
+
+        let indices = [0u8, 1, 2, 1];
+        let mut out = vec![0u8; indices.len() * 4];
+        palette_indices_to_rgba(&indices, &pal, &mut out);
+        assert_eq!(out, [10, 20, 30, 255, 40, 50, 60, 255, 70, 80, 90, 255, 40, 50, 60, 255]);
     }
 }
