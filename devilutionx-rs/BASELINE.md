@@ -163,3 +163,15 @@ cargo test --lib game::monster       # 分模块跑
 **验证命令**：`cargo run --release`（spawn.mpq 在仓库根），进 Tristram/L1 目视实体是否贴在地板 tile 上；`RS_SHOT=1` dump `game_shot.rgba`。
 
 **本增量其余显式延后**（代码中留 C++ 行号注释，非 TODO）：实体入调色板面、真实光照（dLight/LightTables）、透明度（dTransVal/TransList）、foliage、HUD/DrawMain 入面。
+
+## 2026-07-27 增量：地牢光照接入管线（dLight + 玩家光晕）
+
+活 `engine/lighting.rs` 已移植 C++ `MakeLightTable`/`DoLighting`/light falloff（本会话验证 `make_light_table` 符合 C++ 语义：表 0 恒等但白 255→黑、表 15 全黑），本次把它接入渲染管线：
+- `scrollrt`：加 `Lighting` 上下文（dLight 网格 + 光照表），穿透 `draw_view/draw_game/draw_floor/draw_floor_tile/draw_tile_content/draw_cell`，每 tile 按 `LightTables[dLight[tile]]` 查颜色重映射表传给 `render_tile_frame`。
+- `render_world_pipeline`：逐帧建光照表 + dLight 网格（城镇全亮；地牢环境全暗 + `do_lighting` 玩家径向光晕），传给 `draw_view`。
+- 测试：`test_render_applies_light_table`（暗表→黑、亮表→原色）、`test_make_light_table`、`test_real_dungeon_render_with_player_light`（真实 L1 + 玩家光晕 → 亮中心 + 暗四周）、`test_real_town_render_smoke`（真实 town 全亮）。
+- **验收**：`cargo test --lib --bins -- --test-threads=1` **2317 passed**。
+
+**显式延后**：墙遮挡光传播（C++ `MakeLight` flood-fill，当前玩家光不挡墙）、实体绘入调色板面、透明度（dTransVal/TransList）、foliage、HUD/DrawMain 入面。
+
+**⚠️ 孤儿死代码**：`src/engine/render/` 目录 + `src/engine/lighting_defs.rs` 均未编译（`engine/mod.rs` 只声明扁平模块）；光照常量在活的 `engine/lighting.rs`。勿编辑孤儿文件。
