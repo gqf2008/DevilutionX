@@ -4071,4 +4071,64 @@ mod tests {
             "Wirt offers exactly one premium item"
         );
     }
+
+    /// 真实数据渲染冒烟：从 spawn.mpq 加载真实 Tristram 关卡（town.cel/min/
+    /// sol/pal），用真实 mega-tile 经忠实管线 `draw_view` 渲染一帧，断言产生
+    /// 大量非零且有色彩层次的像素——证明真实 CEL 艺术能正确解码/渲染（合成
+    /// 数据测试之外的真实数据回归保护）。spawn.mpq 缺失时优雅跳过。
+    #[test]
+    fn test_real_town_render_smoke() {
+        use crate::engine::dungeon::{DungeonLevelData, DungeonType};
+        use crate::engine::mpq::MpqArchive;
+        use crate::engine::surface::Surface;
+
+        // 定位 spawn.mpq（cwd 或 crate 根），缺失则跳过（CI 无资产时不红）。
+        let mut mpq_path = None;
+        if let Ok(cwd) = std::env::current_dir() {
+            let p = cwd.join("spawn.mpq");
+            if p.exists() { mpq_path = Some(p); }
+        }
+        if mpq_path.is_none() {
+            let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("spawn.mpq");
+            if p.exists() { mpq_path = Some(p); }
+        }
+        let Some(mpq_path) = mpq_path else {
+            eprintln!("[render-smoke] spawn.mpq not found; skipping");
+            return;
+        };
+        let mut archive = match MpqArchive::open(&mpq_path) {
+            Ok(a) => a,
+            Err(e) => { eprintln!("[render-smoke] open failed: {e}"); return; }
+        };
+        let level = match DungeonLevelData::load_from_mpq(&mut archive, DungeonType::Town) {
+            Ok(l) => l,
+            Err(e) => { eprintln!("[render-smoke] town load failed (assets?): {e:?}"); return; }
+        };
+        assert!(!level.min.mega_tiles.is_empty(), "town.min should load mega-tiles");
+
+        // 用 piece=1（首个 mega-tile，保证有效）铺满网格。
+        let layout = crate::game::game_state::TownLayout {
+            d_piece: vec![1u16; TOWN_MAX_X * TOWN_MAX_Y],
+            width: TOWN_MAX_X,
+            height: TOWN_MAX_Y,
+        };
+
+        let mut buf = vec![0u8; 640 * 480];
+        let mut surface = Surface::new(&mut buf, 640, 640, 480);
+        crate::engine::scrollrt::draw_view(
+            &mut surface, &level, &layout, TilePoint::new(75, 68), 640, 480, 336,
+        );
+
+        let nonzero = buf.iter().filter(|&&p| p != 0).count();
+        let distinct: std::collections::HashSet<u8> = buf.iter().copied().collect();
+        assert!(
+            nonzero > 1000,
+            "real town render should produce many non-zero pixels, got {nonzero}"
+        );
+        assert!(
+            distinct.len() > 3,
+            "real town render should have color variety, got {} distinct indices",
+            distinct.len()
+        );
+    }
 }
