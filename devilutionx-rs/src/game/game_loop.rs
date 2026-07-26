@@ -519,36 +519,30 @@ fn cleanup() {
 //------------------------------------------------------------------------------
 
 /// Convert a logical-canvas mouse position (mx, my) into a world tile
-/// coordinate, using the inverse of the isometric projection.
+/// coordinate, using the inverse of the faithful pipeline projection
+/// (`tile_screen_position` / C++ GetScreenPosition).
 ///
-/// C++ worldToScreen: screenX = (worldY - worldX) * 32,
-///                    screenY = (worldY + worldX) * -16
-/// For offset (u,v) = (wx-cam_x, wy-cam_y):
-///   rel_x = (v - u) * 32
-///   rel_y = (u + v) * -16
+/// The camera tile anchors at `tile_to_screen(cam, cam)`; a tile offset
+/// (u, v) = (wx - cam_x, wy - cam_y) projects to anchor + ((u-v)*32, (u+v)*16).
 /// Inverting:
-///   v - u = rel_x / 32
-///   u + v = -rel_y / 16
-///   v = (rel_x/32 + (-rel_y/16)) / 2
-///   u = ((-rel_y/16) - rel_x/32) / 2
+///   u - v = rel_x / 32
+///   u + v = rel_y / 16
+///   u = ((u+v) + (u-v)) / 2
+///   v = ((u+v) - (u-v)) / 2
 fn convert_screen_to_tile(
     mx: i32,
     my: i32,
     cam_tile_x: i32,
     cam_tile_y: i32,
-    screen_center_x: i32,
-    screen_center_y: i32,
 ) -> (i32, i32) {
-    let rel_x = mx - screen_center_x;
-    let rel_y = my - screen_center_y;
+    let (ax, ay) = tile_to_screen(cam_tile_x, cam_tile_y, cam_tile_x, cam_tile_y);
+    let rel_x = mx - ax; // (u - v) * 32
+    let rel_y = my - ay; // (u + v) * 16
 
-    // From the corrected forward transform:
-    //   rel_x = (v - u) * 32  =>  v - u = rel_x / 32
-    //   rel_y = (u + v) * -16 =>  u + v = -rel_y / 16
-    let diff_vu = rel_x / (TILE_WIDTH / 2);   // v - u
-    let sum_uv = (-rel_y) / (TILE_HEIGHT / 2); // u + v
-    let u = (sum_uv - diff_vu) / 2;
-    let v = (sum_uv + diff_vu) / 2;
+    let diff_uv = rel_x / (TILE_WIDTH / 2); // u - v
+    let sum_uv = rel_y / (TILE_HEIGHT / 2); // u + v
+    let u = (sum_uv + diff_uv) / 2;
+    let v = (sum_uv - diff_uv) / 2;
 
     (cam_tile_x + u, cam_tile_y + v)
 }
@@ -655,16 +649,11 @@ fn handle_event(
                 // Convert the click's logical-canvas coords to a world tile via
                 // the inverse isometric projection (same transform C++
                 // `ConvertToTileGrid` uses).
-                const PANEL_HEIGHT: i32 = 144;
-                let screen_center_x = LOGICAL_WIDTH as i32 / 2; // 320
-                let screen_center_y = (LOGICAL_HEIGHT as i32 - PANEL_HEIGHT) / 2; // 168
                 let (wx, wy) = convert_screen_to_tile(
                     *x,
                     *y,
                     game_state.camera.tile_x,
                     game_state.camera.tile_y,
-                    screen_center_x,
-                    screen_center_y,
                 );
 
                 // First, if the click lands on (or very near) a shop-capable
@@ -1255,6 +1244,20 @@ fn render_world_pipeline(
     let _ = window.present_backbuffer(&palette);
 }
 
+/// 把世界 tile 坐标投影到后备缓冲屏幕坐标，与忠实地板管线共享同一套投影
+/// （C++ GetScreenPosition）。统一所有实体 overlay 的屏幕定位，保证实体
+/// 贴在管线的地板 tile 上（此前各 overlay 手算 rel_x/rel_y，彼此不一致）。
+fn tile_to_screen(wx: i32, wy: i32, cam_tile_x: i32, cam_tile_y: i32) -> (i32, i32) {
+    let pos = crate::engine::scrollrt::tile_screen_position(
+        TilePoint::new(wx, wy),
+        TilePoint::new(cam_tile_x, cam_tile_y),
+        LOGICAL_WIDTH as i32,
+        LOGICAL_HEIGHT as i32,
+        LOGICAL_HEIGHT as i32 - 144,
+    );
+    (pos.x, pos.y)
+}
+
 fn draw_and_blit(
     window: &mut GameWindow,
     game_state: &GameState,
@@ -1351,11 +1354,13 @@ fn draw_and_blit(
     // same isometric projection as the monsters/player (coloured icons, no art).
     draw_ground_items(window, game_state, cam_tile_x, cam_tile_y, screen_center_x, screen_center_y);
 
-    // Draw the player at the viewport centre (camera == player position).
+    // Draw the player at its tile (camera == player position). Anchored via
+    // tile_to_screen so it lands on the pipeline's floor tile for the camera.
     // Prefer the real Warrior town-walk sprite; fall back to the yellow
     // marker if no sprite was loaded. The sprite texture is rebuilt every
     // frame (Plan A): safe, no dangling handles.
-    draw_player_sprite(window, game_state, screen_center_x, screen_center_y);
+    let (player_sx, player_sy) = tile_to_screen(cam_tile_x, cam_tile_y, cam_tile_x, cam_tile_y);
+    draw_player_sprite(window, game_state, player_sx, player_sy);
 
     // Stair markers: draw a pulsing arrow/diamond over the relevant stair tile
     // so the player can see where to walk to change levels. Town shows the
@@ -1410,10 +1415,7 @@ fn draw_and_blit(
     // auto-walking. Removed once the player arrives (move_target == None).
     // Uses the same forward iso projection as the floor tiles.
     if let Some((tx, ty)) = move_target {
-        let rel_x = ((ty - cam_tile_y) - (tx - cam_tile_x)) * (TILE_WIDTH / 2);
-        let rel_y = (tx - cam_tile_x + (ty - cam_tile_y)) * (TILE_HEIGHT / 2);
-        let cx = screen_center_x + rel_x;
-        let cy = screen_center_y + rel_y;
+        let (cx, cy) = tile_to_screen(tx, ty, cam_tile_x, cam_tile_y);
         let canvas = window.canvas_mut();
         canvas.set_draw_color(sdl2::pixels::Color::RGB(80, 255, 120));
         let half_w = TILE_WIDTH / 2;
@@ -2523,10 +2525,7 @@ fn draw_simple_missiles(
     let canvas = window.canvas_mut();
     canvas.set_draw_color(sdl2::pixels::Color::RGB(255, 140, 0));
     for m in &game_state.simple_missiles {
-        let rel_x = ((m.y - cam_tile_y) - (m.x - cam_tile_x)) * (TILE_WIDTH / 2);
-        let rel_y = ((m.x - cam_tile_x) + (m.y - cam_tile_y)) * -(TILE_HEIGHT / 2);
-        let cx = screen_center_x + rel_x;
-        let cy = screen_center_y + rel_y;
+        let (cx, cy) = tile_to_screen(m.x, m.y, cam_tile_x, cam_tile_y);
         // Draw a small diamond (4 triangles of 1px wide) as a stand-in sprite.
         for (dx, dy) in [(-3, 0), (3, 0), (0, -3), (0, 3), (-2, -1), (2, -1), (-2, 1), (2, 1), (0, 0)] {
             let _ = canvas.draw_point(sdl2::rect::Point::new(cx + dx, cy + dy));
@@ -2571,10 +2570,7 @@ fn draw_stairs_marker(
     };
 
     // Project the stair tile to screen space (same transform as floor tiles).
-    let rel_x = ((sy - cam_tile_y) - (sx - cam_tile_x)) * (TILE_WIDTH / 2);
-    let rel_y = ((sx - cam_tile_x) + (sy - cam_tile_y)) * -(TILE_HEIGHT / 2);
-    let cx = screen_center_x + rel_x;
-    let cy = screen_center_y + rel_y;
+    let (cx, cy) = tile_to_screen(sx, sy, cam_tile_x, cam_tile_y);
 
     // Cull if the projected centre is well off the visible viewport.
     const MARGIN: i32 = 64;
@@ -2660,10 +2656,7 @@ fn draw_ground_items(
 
     let canvas = window.canvas_mut();
     for g in order {
-        let rel_x = ((g.y - cam_tile_y) - (g.x - cam_tile_x)) * (TILE_WIDTH / 2);
-        let rel_y = ((g.x - cam_tile_x) + (g.y - cam_tile_y)) * -(TILE_HEIGHT / 2);
-        let cx = screen_center_x + rel_x;
-        let cy = screen_center_y + rel_y;
+        let (cx, cy) = tile_to_screen(g.x, g.y, cam_tile_x, cam_tile_y);
 
         // Cull off-screen items.
         if cx < -(TILE_WIDTH * 2) || cx > (LOGICAL_WIDTH as i32 + TILE_WIDTH * 2)
@@ -2758,10 +2751,7 @@ fn draw_towners(
     let half_h = TILE_HEIGHT / 2;
 
     for (wx, wy, name, kind) in order {
-        let rel_x = ((wy - cam_tile_y) - (wx - cam_tile_x)) * half_w;
-        let rel_y = ((wx - cam_tile_x) + (wy - cam_tile_y)) * -half_h;
-        let cx = screen_center_x + rel_x;
-        let cy = screen_center_y + rel_y;
+        let (cx, cy) = tile_to_screen(wx, wy, cam_tile_x, cam_tile_y);
 
         // Cull off-screen NPCs (with a margin for the marker + outline).
         if cx < -(TILE_WIDTH * 2) || cx > (LOGICAL_WIDTH as i32 + TILE_WIDTH * 2)
@@ -2865,10 +2855,7 @@ fn draw_dungeon_monsters(
 
         let wx = *wx;
         let wy = *wy;
-        let rel_x = ((wy - cam_tile_y) - (wx - cam_tile_x)) * (TILE_WIDTH / 2);
-        let rel_y = ((wx - cam_tile_x) + (wy - cam_tile_y)) * -(TILE_HEIGHT / 2);
-        let dst_cx = screen_center_x + rel_x;
-        let dst_cy = screen_center_y + rel_y;
+        let (dst_cx, dst_cy) = tile_to_screen(wx, wy, cam_tile_x, cam_tile_y);
 
         // Cull off-screen monsters.
         if dst_cx < -(TILE_WIDTH * 2) || dst_cx > (LOGICAL_WIDTH as i32 + TILE_WIDTH * 2)
@@ -3603,28 +3590,20 @@ mod tests {
         assert_eq!(gs.camera.tile_y, gs.player.position.y);
     }
 
-    /// Forward iso projection (matches draw_tristram/draw_dungeon): given a
-    /// world tile offset (u, v) from the camera, returns the logical-canvas
-    /// screen point. Used by the click-move tests to round-trip the inverse.
-    fn project_tile_to_screen(
-        u: i32,
-        v: i32,
-        screen_center_x: i32,
-        screen_center_y: i32,
-    ) -> (i32, i32) {
-        let rel_x = (v - u) * (TILE_WIDTH / 2);
-        let rel_y = (u + v) * -(TILE_HEIGHT / 2);
-        (screen_center_x + rel_x, screen_center_y + rel_y)
+    /// Forward projection for tests: mirrors the live pipeline. Given a world
+    /// tile offset (u, v) from the camera, returns the logical-canvas screen
+    /// point via `tile_to_screen` (C++ GetScreenPosition).
+    fn project_tile_to_screen(u: i32, v: i32, cam_x: i32, cam_y: i32) -> (i32, i32) {
+        tile_to_screen(cam_x + u, cam_y + v, cam_x, cam_y)
     }
 
     #[test]
-    fn test_convert_screen_to_tile_at_centre_is_camera() {
-        // Clicking the viewport centre should map back to the camera tile.
-        const SCX: i32 = 320;
-        const SCY: i32 = 168;
+    fn test_convert_screen_to_tile_at_anchor_is_camera() {
+        // Clicking the camera tile's own screen anchor maps back to the camera.
         let cam_x = 75;
         let cam_y = 68;
-        let (wx, wy) = convert_screen_to_tile(SCX, SCY, cam_x, cam_y, SCX, SCY);
+        let (ax, ay) = tile_to_screen(cam_x, cam_y, cam_x, cam_y);
+        let (wx, wy) = convert_screen_to_tile(ax, ay, cam_x, cam_y);
         assert_eq!((wx, wy), (cam_x, cam_y));
     }
 
@@ -3632,14 +3611,12 @@ mod tests {
     fn test_convert_screen_to_tile_round_trips_forward_projection() {
         // For every tile offset within the visible radius, forward-project to
         // a screen point, then convert back — the round-trip must be exact.
-        const SCX: i32 = 320;
-        const SCY: i32 = 168;
         let cam_x = 75;
         let cam_y = 68;
         for u in -9..=9 {
             for v in -9..=9 {
-                let (mx, my) = project_tile_to_screen(u, v, SCX, SCY);
-                let (wx, wy) = convert_screen_to_tile(mx, my, cam_x, cam_y, SCX, SCY);
+                let (mx, my) = project_tile_to_screen(u, v, cam_x, cam_y);
+                let (wx, wy) = convert_screen_to_tile(mx, my, cam_x, cam_y);
                 assert_eq!(
                     (wx, wy),
                     (cam_x + u, cam_y + v),
@@ -3652,13 +3629,11 @@ mod tests {
 
     #[test]
     fn test_convert_screen_to_tile_concrete_example() {
-        // cam=(75,68), tile (80,70): u=5, v=2.
-        // Corrected forward: rel_x = (v-u)*32 = (2-5)*32 = -96 -> mx = 320-96 = 224
-        //                    rel_y = (u+v)*-16 = (5+2)*-16 = -112 -> my = 168-112 = 56
+        // cam=(75,68) anchors at (288,183). Tile (80,70): u=5, v=2.
+        // Forward: mx = 288 + (u-v)*32 = 288 + 96 = 384
+        //          my = 183 + (u+v)*16 = 183 + 112 = 295
         // Inverse must recover (80, 70).
-        const SCX: i32 = 320;
-        const SCY: i32 = 168;
-        let (wx, wy) = convert_screen_to_tile(224, 56, 75, 68, SCX, SCY);
+        let (wx, wy) = convert_screen_to_tile(384, 295, 75, 68);
         assert_eq!((wx, wy), (80, 70));
     }
 
