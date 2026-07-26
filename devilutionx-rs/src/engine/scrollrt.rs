@@ -789,6 +789,86 @@ mod tests {
         assert_eq!(se, Point::new(cam_pos.x + 32, cam_pos.y + 16));
     }
 
+    /// 端到端渲染正确性：合成一个 packed 左三角帧（全填色 150），经
+    /// `draw_floor_tile` 渲染到 Surface，断言三角形像素落在 C++ 预期位置
+    /// （底边在 position.y、向右对齐、向上增长到满宽）。验证 dun_render 的
+    /// 帧解码与屏幕朝向正确——这是光照/实体入面之前的地基层验证。
+    #[test]
+    fn test_render_floor_triangle_pixels() {
+        use crate::engine::dungeon::{DungeonLevelData, DungeonType, MegaTile, LevelCelBlock};
+        use crate::engine::surface::Surface;
+
+        // level_cel: [num_frames=1][frame1_offset=8] + 512 字节三角帧（全色 150）。
+        // 重编码左三角帧 = 512 字节（下三角 2+4+...+32=272 + 上三角 30+...+2=240）。
+        let mut level_cel = Vec::new();
+        level_cel.extend_from_slice(&1u32.to_le_bytes());
+        level_cel.extend_from_slice(&8u32.to_le_bytes());
+        level_cel.extend_from_slice(&[150u8; 512]);
+
+        let mut level = DungeonLevelData::new(DungeonType::Cathedral);
+        level.level_cel = level_cel;
+        // mega-tile：blocks[0] = frame 1（draw_floor_tile 强制按左三角渲染）。
+        let mut blocks = [LevelCelBlock::default(); 16];
+        blocks[0] = LevelCelBlock::new(0x0001); // frame 1
+        level.min.mega_tiles = vec![MegaTile { blocks }];
+
+        let mut buf = vec![0u8; 640 * 480];
+        let mut surface = Surface::new(&mut buf, 640, 640, 480);
+        // 在 target (100, 200) 渲染单个地板 tile（仅 mt[0] 左三角，mt[1] 空）。
+        draw_floor_tile(&mut surface, &level, 1, Point::new(100, 200));
+
+        // 左三角 row 0（底边 y=200）：2px 右对齐于 x=130,131。
+        assert_eq!(surface.at(130, 200).copied(), Some(150), "bottom-right pixel");
+        assert_eq!(surface.at(100, 200).copied(), Some(0), "bottom-left outside triangle");
+        // 左三角 row 15（顶部 y=185）：满宽 32px，含最左 x=100。
+        assert_eq!(surface.at(100, 185).copied(), Some(150), "top-row leftmost pixel");
+        // 三角形外（顶部行的左侧之外）应为 0。
+        assert_eq!(surface.at(99, 185).copied(), Some(0), "just left of triangle");
+    }
+
+    /// 墙壁渲染正确性：合成方块帧放入 mega-tile 的 blocks[2]（第一层墙），
+    /// 经 `draw_cell` 渲染到 Surface，断言方块像素落在地板上方一行
+    /// （target.y - TILE_HEIGHT），且方块行 0 在底部（C++ 朝向）。
+    #[test]
+    fn test_render_wall_square_pixels() {
+        use crate::engine::dungeon::{DungeonLevelData, DungeonType, MegaTile, LevelCelBlock};
+        use crate::engine::surface::Surface;
+
+        // 方块帧 = 1024 字节（32x32）。底行（前 32 字节）= 色 100，其余 = 色 50。
+        let mut frame = vec![50u8; 1024];
+        for b in frame.iter_mut().take(32) {
+            *b = 100;
+        }
+        let mut level_cel = Vec::new();
+        level_cel.extend_from_slice(&1u32.to_le_bytes());
+        level_cel.extend_from_slice(&8u32.to_le_bytes());
+        level_cel.extend_from_slice(&frame);
+
+        let mut level = DungeonLevelData::new(DungeonType::Cathedral);
+        level.level_cel = level_cel;
+        // blocks[2] = 方块 frame 1（tile_type Square=0 → data = frame 1 = 0x0001）。
+        let mut blocks = [LevelCelBlock::default(); 16];
+        blocks[2] = LevelCelBlock::new(0x0001);
+        level.min.mega_tiles = vec![MegaTile { blocks }];
+
+        struct G;
+        impl DPieceGrid for G {
+            fn d_piece(&self, _x: i32, _y: i32) -> u16 { 1 }
+        }
+        let mut buf = vec![0u8; 640 * 480];
+        let mut surface = Surface::new(&mut buf, 640, 640, 480);
+        // draw_cell 在 target (100,200)：blocks[2] 墙渲染在 y=200-32=168。
+        draw_cell(&mut surface, &level, 1, Point::new(100, 200));
+
+        // 方块底行（frame row 0）在 y=168，色 100。
+        assert_eq!(surface.at(100, 168).copied(), Some(100), "square bottom-left");
+        assert_eq!(surface.at(131, 168).copied(), Some(100), "square bottom-right");
+        // 上一行（frame row 1）色 50。
+        assert_eq!(surface.at(100, 167).copied(), Some(50), "square row 1");
+        // 地板行（y=200 附近）无 mt[0]/mt[1]（空 block）→ 应为 0。
+        assert_eq!(surface.at(100, 200).copied(), Some(0), "floor row empty");
+    }
+
     /// `DPieceGrid` 记录每次查询的 `(x,y)`，返回 piece 0，使渲染器的
     /// `is_floor`/`mega_for_piece` 路径空转，从而观察迭代序列本身。
     struct RecordingGrid {
