@@ -1213,6 +1213,13 @@ impl crate::engine::scrollrt::DPieceGrid for crate::game::game_state::DungeonLay
     fn d_piece(&self, x: i32, y: i32) -> u16 {
         crate::game::game_state::DungeonLayout::get(self, x, y)
     }
+
+    fn trans_val(&self, x: i32, y: i32) -> Option<i8> {
+        if x < 0 || y < 0 || x >= 112 || y >= 112 {
+            return None;
+        }
+        Some(self.trans_val[(y as usize) * 112 + x as usize])
+    }
 }
 
 /// Render floor + walls to the 8-bit palette backbuffer via the faithful C++
@@ -1244,7 +1251,41 @@ fn render_world_pipeline(
             PLAYER_LIGHT_RADIUS,
         );
     }
-    let lighting = crate::engine::scrollrt::Lighting::new(&dlight, &lm.tables);
+    // Transparency (C++ scrollrt.cpp:540 `TransList[dTransVal[tile]]`).
+    // TransList is populated the way C++ DoVision's markTransparentFn does:
+    // every tile the player's vision rays reach whose dTransVal is non-zero
+    // enables that region for see-through rendering.
+    let mut trans_val_grid = vec![0i8; 112 * 112];
+    let mut trans_list = [false; 16];
+    {
+        for y in 0..112 {
+            for x in 0..112 {
+                if let Some(v) = grid.trans_val(x, y) {
+                    trans_val_grid[(y * 112 + x) as usize] = v;
+                }
+            }
+        }
+        const PLAYER_VISION_RADIUS: u8 = 9;
+        let origin = crate::game::types::Point::new(view_pos.x, view_pos.y);
+        let visible_tiles = crate::game::lighting::LightManager::cast_vision_rays(
+            origin,
+            PLAYER_VISION_RADIUS,
+            |p| p.x >= 0 && p.x < 112 && p.y >= 0 && p.y < 112,
+            |_| true,
+        );
+        for tile in visible_tiles {
+            let v = trans_val_grid[(tile.y * 112 + tile.x) as usize];
+            if v > 0 && (v as usize) < trans_list.len() {
+                trans_list[v as usize] = true;
+            }
+        }
+    }
+    let lighting = crate::engine::scrollrt::Lighting::with_transparency(
+        &dlight,
+        &lm.tables,
+        &trans_val_grid,
+        &trans_list,
+    );
 
     window.clear_backbuffer();
     {

@@ -329,7 +329,7 @@ impl RenderOrderCalculator {
 use super::dun_render::{
     self, DUN_FRAME_WIDTH as HALF_TILE_WIDTH, TileType, MaskType,
 };
-use super::dungeon::{DungeonLevelData, MegaTile};
+use super::dungeon::{DungeonLevelData, MegaTile, TileProperties};
 use super::lighting::{LIGHT_TABLE_SIZE, NUM_LIGHTING_LEVELS, LIGHTS_MAX};
 
 /// 地下城网格尺寸（C++ MAXDUNX/MAXDUNY）。
@@ -343,6 +343,12 @@ pub struct Lighting<'a> {
     dlight: &'a [u8],
     /// 光照表（C++ LightTables，由 LightManager::make_light_table 生成）。
     tables: &'a [[u8; LIGHT_TABLE_SIZE]; NUM_LIGHTING_LEVELS],
+    /// Per-tile transparency value (C++ `dTransVal`), flat MAXDUN×MAXDUN.
+    /// Empty = no transparency data (all opaque).
+    trans_val: &'a [i8],
+    /// C++ `TransList` — which TransVal regions are currently see-through.
+    /// Filled per frame by `DoVision`; empty = nothing transparent.
+    trans_list: &'a [bool],
 }
 
 impl<'a> Lighting<'a> {
@@ -350,7 +356,46 @@ impl<'a> Lighting<'a> {
         dlight: &'a [u8],
         tables: &'a [[u8; LIGHT_TABLE_SIZE]; NUM_LIGHTING_LEVELS],
     ) -> Self {
-        Self { dlight, tables }
+        Self {
+            dlight,
+            tables,
+            trans_val: &[],
+            trans_list: &[],
+        }
+    }
+
+    /// Construct a lighting context that also carries C++ `dTransVal` /
+    /// `TransList` for per-tile transparency rendering.
+    pub fn with_transparency(
+        dlight: &'a [u8],
+        tables: &'a [[u8; LIGHT_TABLE_SIZE]; NUM_LIGHTING_LEVELS],
+        trans_val: &'a [i8],
+        trans_list: &'a [bool],
+    ) -> Self {
+        Self {
+            dlight,
+            tables,
+            trans_val,
+            trans_list,
+        }
+    }
+
+    /// C++ `TransList[dTransVal[x][y]]` (scrollrt.cpp:540). False when no
+    /// transparency data is present or the value is out of range.
+    fn transparency_for(&self, x: i32, y: i32) -> bool {
+        if x < 0 || y < 0 || x >= MAXDUN || y >= MAXDUN {
+            return false;
+        }
+        let Some(&v) = self
+            .trans_val
+            .get(y as usize * MAXDUN as usize + x as usize)
+        else {
+            return false;
+        };
+        if v <= 0 {
+            return false;
+        }
+        self.trans_list.get(v as usize).copied().unwrap_or(false)
     }
 
     /// 查 tile 的光照表（越界按全亮处理）。
@@ -374,6 +419,12 @@ const RIGHT_FRAME_DISPLACEMENT: Displacement = Displacement { delta_x: HALF_TILE
 /// `get(x, y) -> u16`，本 trait 让 draw_view 统一接收两者。
 pub trait DPieceGrid {
     fn d_piece(&self, x: i32, y: i32) -> u16;
+
+    /// Per-tile C++ `dTransVal` for transparency. `None` = no transparency
+    /// data (all opaque), matching the default layouts.
+    fn trans_val(&self, _x: i32, _y: i32) -> Option<i8> {
+        None
+    }
 }
 
 #[inline]
@@ -546,13 +597,52 @@ fn draw_cell(
     let tbl = lighting.table_for(tile_position.x, tile_position.y);
     let mut tbp = target_buffer_position;
 
+    // C++ scrollrt.cpp:540 — the tile is see-through only when the SOL data
+    // marks it Transparent AND the per-frame TransList enables its region.
+    let transparency = level.sol.tile_has_any(piece_id, TileProperties::TRANSPARENT)
+        && lighting.transparency_for(tile_position.x, tile_position.y);
+
+    // C++ getFirstTileMaskLeft/Right (scrollrt.cpp:547-578).
+    let first_mask_left = |tile_type: TileType| -> MaskType {
+        if !transparency {
+            return MaskType::Solid;
+        }
+        match tile_type {
+            TileType::LeftTrapezoid | TileType::TransparentSquare => {
+                if level.sol.tile_has_any(piece_id, TileProperties::TRANSPARENT_LEFT) {
+                    MaskType::Left
+                } else {
+                    MaskType::Solid
+                }
+            }
+            TileType::LeftTriangle => MaskType::Solid,
+            _ => MaskType::Transparent,
+        }
+    };
+    let first_mask_right = |tile_type: TileType| -> MaskType {
+        if !transparency {
+            return MaskType::Solid;
+        }
+        match tile_type {
+            TileType::RightTrapezoid | TileType::TransparentSquare => {
+                if level.sol.tile_has_any(piece_id, TileProperties::TRANSPARENT_RIGHT) {
+                    MaskType::Right
+                } else {
+                    MaskType::Solid
+                }
+            }
+            TileType::RightTriangle => MaskType::Solid,
+            _ => MaskType::Transparent,
+        }
+    };
+
     // mt[0] — 左地板/叶半（C++:588-599）。
     let block = mega.blocks[0];
     if block.has_value() {
         let tile_type = block.tile_type();
         if !is_floor || tile_type == TileType::TransparentSquare {
             if !(is_floor && tile_type == TileType::TransparentSquare) {
-                dun_render::render_tile(out, tbp, &level.level_cel, block, MaskType::Solid, Some(tbl));
+                dun_render::render_tile(out, tbp, &level.level_cel, block, first_mask_left(tile_type), Some(tbl));
             }
             // foliage 分支跳过（活 dun_render 无 render_tile_foliage）。
         }
@@ -568,7 +658,7 @@ fn draw_cell(
                     tbp + RIGHT_FRAME_DISPLACEMENT,
                     &level.level_cel,
                     block,
-                    MaskType::Solid,
+                    first_mask_right(tile_type),
                     Some(tbl),
                 );
             }
@@ -576,12 +666,14 @@ fn draw_cell(
     }
     tbp.y -= TILE_HEIGHT;
 
-    // 墙壁：mt[2..MicroTileLen] 成对，每行上移 TILE_HEIGHT。
+    // 墙壁：mt[2..MicroTileLen] 成对，每行上移 TILE_HEIGHT。C++ 用
+    // `transparency ? MaskType::Transparent : MaskType::Solid`。
+    let wall_mask = if transparency { MaskType::Transparent } else { MaskType::Solid };
     let mut i = 2;
     while i < micro_tile_len {
         let block = mega.blocks[i];
         if block.has_value() {
-            dun_render::render_tile(out, tbp, &level.level_cel, block, MaskType::Solid, Some(tbl));
+            dun_render::render_tile(out, tbp, &level.level_cel, block, wall_mask, Some(tbl));
         }
         let block = mega.blocks[i + 1];
         if block.has_value() {
@@ -590,7 +682,7 @@ fn draw_cell(
                 tbp + RIGHT_FRAME_DISPLACEMENT,
                 &level.level_cel,
                 block,
-                MaskType::Solid,
+                wall_mask,
                 Some(tbl),
             );
         }
@@ -1038,4 +1130,35 @@ mod tests {
         let n = grid.visits.borrow().len();
         assert!(n > 100, "draw_view should visit a full viewport, got {n} queries");
     }
+    #[test]
+    fn test_transparency_for_follows_translist_semantics() {
+        // C++ scrollrt.cpp:540 — `TransList[dTransVal[x][y]]`, guarded by a
+        // non-zero dTransVal and bounds.
+        let (tables, dlight) = test_lighting();
+
+        // No transparency data -> always opaque.
+        let plain = Lighting::new(&dlight, &tables);
+        assert!(!plain.transparency_for(56, 56));
+
+        let mut trans_val = vec![0i8; MAXDUN as usize * MAXDUN as usize];
+        trans_val[56 * MAXDUN as usize + 56] = 3;
+        let mut trans_list = vec![false; 16];
+
+        // Region not enabled -> opaque.
+        let off = Lighting::with_transparency(&dlight, &tables, &trans_val, &trans_list);
+        assert!(!off.transparency_for(56, 56));
+
+        // Region enabled -> see-through.
+        trans_list[3] = true;
+        let on = Lighting::with_transparency(&dlight, &tables, &trans_val, &trans_list);
+        assert!(on.transparency_for(56, 56));
+
+        // Zero dTransVal tiles stay opaque even when the list is on.
+        assert!(!on.transparency_for(57, 56));
+        // Out-of-bounds is always opaque.
+        assert!(!on.transparency_for(-1, 56));
+        assert!(!on.transparency_for(200, 56));
+    }
+
+
 }
