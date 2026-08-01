@@ -2167,31 +2167,29 @@ impl CavesGenerator {
     /// CanReplaceTile: Check if tile can be replaced (prevents overwriting special tiles)
     /// C++ equivalent: CanReplaceTile
     fn can_replace_tile(&self, dungeon: &Dungeon, replace: u8, tx: usize, ty: usize) -> bool {
+        // C++ CanReplaceTile (drlg_l3.cpp:1367): replace in [VWallEnd2, VWall8]
+        // = [84, 100]. The check: dungeon[NorthWest] <= 100 and any of the
+        // four diagonal/orthogonal neighbours (NW/SE/SW/NE) is >= 84.
         if replace < 84 || replace > 100 {
             return true;
         }
-
-        // Check 3x3 neighborhood for existing special tiles (84-100)
-        let check_tile = |x: i32, y: i32| -> bool {
-            if x >= 0 && x < DMAXX as i32 && y >= 0 && y < DMAXY as i32 {
-                let tile = dungeon.tiles[x as usize][y as usize];
-                tile >= 84 && tile <= 100
-            } else {
-                false
-            }
-        };
-
-        let tx = tx as i32;
-        let ty = ty as i32;
-
-        if check_tile(tx - 1, ty - 1) || check_tile(tx + 1, ty + 1)
-            || check_tile(tx - 1, ty + 1) || check_tile(tx + 1, ty - 1)
-            || check_tile(tx, ty - 1) || check_tile(tx, ty + 1)
-            || check_tile(tx - 1, ty) || check_tile(tx + 1, ty)
+        let x = tx as i32;
+        let y = ty as i32;
+        // Direction displacements: NorthWest=(-1,0) SouthEast=(1,0) SouthWest=(0,1) NorthEast=(0,-1)
+        let nw = (x - 1, y);
+        let se = (x + 1, y);
+        let sw = (x, y + 1);
+        let ne = (x, y - 1);
+        let inb = |p: (i32, i32)| p.0 >= 0 && p.0 < DMAXX as i32 && p.1 >= 0 && p.1 < DMAXY as i32;
+        if inb(nw)
+            && dungeon.tiles[nw.0 as usize][nw.1 as usize] <= 100
+            && ((inb(nw) && dungeon.tiles[nw.0 as usize][nw.1 as usize] >= 84)
+                || (inb(se) && dungeon.tiles[se.0 as usize][se.1 as usize] >= 84)
+                || (inb(sw) && dungeon.tiles[sw.0 as usize][sw.1 as usize] >= 84)
+                || (inb(ne) && dungeon.tiles[ne.0 as usize][ne.1 as usize] >= 84))
         {
             return false;
         }
-
         true
     }
 
