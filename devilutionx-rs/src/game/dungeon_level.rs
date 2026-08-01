@@ -131,6 +131,61 @@ pub fn build_hell_layout(dungeon: &Dungeon, level: &DungeonLevelData) -> Dungeon
     stamp_dungeon_layout(dungeon, level, DUNGEON_BG_TIL_INDEX[4])
 }
 
+
+/// Generate a render-ready layout for any dungeon level, dispatching to the
+/// faithful per-level generator (mirrors C++ `CreateL1..L4Dungeon` dispatch in
+/// `drlg_l1..l4.cpp`).
+///
+/// Level numbering is the simple 1=L1 Cathedral, 2=L2 Catacombs, 3=L3 Caves,
+/// 4=L4 Hell. `seed` drives the Diablo LCG so layouts are reproducible.
+pub fn generate_dungeon_layout(
+    level: u8,
+    seed: u32,
+    art: &DungeonLevelData,
+) -> Result<DungeonLayout, String> {
+    use crate::levels::drlg_l1::CathedralGenerator;
+    use crate::levels::drlg_l2::CatacombsGenerator;
+    use crate::levels::drlg_l3::CavesGenerator;
+    use crate::levels::drlg_l4::Dungeon4Generator;
+    use crate::levels::types::{DungeonType as LvType, LevelEntry};
+
+    match level {
+        1 => {
+            let mut gen = CathedralGenerator::new();
+            gen.generate(LvType::Cathedral, seed);
+            Ok(build_dungeon_layout(&gen, art))
+        }
+        2 => {
+            let mut dungeon = Dungeon::new();
+            dungeon.level_type = LvType::Catacombs;
+            let mut gen = CatacombsGenerator::new();
+            gen.generate(&mut dungeon, seed, 5)
+                .then_some(())
+                .ok_or_else(|| "L2 Catacombs generation failed".to_string())?;
+            Ok(build_catacombs_layout(&dungeon, art))
+        }
+        3 => {
+            let mut dungeon = Dungeon::new();
+            dungeon.level_type = LvType::Caves;
+            let mut gen = CavesGenerator::new();
+            gen.generate(&mut dungeon, seed, 9, LevelEntry::MainEntry)
+                .then_some(())
+                .ok_or_else(|| "L3 Caves generation failed".to_string())?;
+            Ok(build_caves_layout(&dungeon, art))
+        }
+        4 => {
+            let mut dungeon = Dungeon::new();
+            dungeon.level_type = LvType::Hell;
+            let mut gen = Dungeon4Generator::new();
+            gen.generate(&mut dungeon, seed, 13, LevelEntry::MainEntry)
+                .then_some(())
+                .ok_or_else(|| "L4 Hell generation failed".to_string())?;
+            Ok(build_hell_layout(&dungeon, art))
+        }
+        other => Err(format!("unsupported dungeon level: {other}")),
+    }
+}
+
 /// Build the dPiece grid from a generated Cathedral grid + the L1 TIL data.
 ///
 /// This is the dungeon-mode analogue of `build_town_layout`: it mirrors C++
@@ -535,6 +590,35 @@ mod tests {
             }
             yy += 2;
         }
+    }
+
+
+    #[test]
+    fn test_generate_dungeon_layout_dispatches_all_levels() {
+        use crate::engine::dungeon::{DungeonLevelData, DungeonType, MinData, PaletteData, SolData, TilData, TilEntry};
+
+        // A synthetic TIL large enough for every level (L4 uses tile ids < 256).
+        let mut til_tiles = Vec::new();
+        for i in 0..300u16 {
+            til_tiles.push(TilEntry { micro1: i, micro2: i + 1, micro3: i + 2, micro4: i + 3 });
+        }
+        let art = DungeonLevelData {
+            dungeon_type: DungeonType::Cathedral,
+            palette: PaletteData::default(),
+            sol: SolData { properties: vec![] },
+            min: MinData { mega_tiles: vec![], blocks_per_tile: 10 },
+            til: TilData { tiles: til_tiles },
+            level_cel: vec![],
+        };
+
+        for level in 1..=4u8 {
+            let layout = generate_dungeon_layout(level, 0x13572468, &art)
+                .unwrap_or_else(|e| panic!("L{} generation failed: {}", level, e));
+            assert!(count_filled(&layout) > 0, "L{} layout non-empty", level);
+        }
+
+        assert!(generate_dungeon_layout(0, 1, &art).is_err());
+        assert!(generate_dungeon_layout(5, 1, &art).is_err());
     }
 
 
