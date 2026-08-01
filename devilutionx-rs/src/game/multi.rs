@@ -288,6 +288,12 @@ pub struct MultiplayerManager {
     /// Loopback log of packets "sent" this session (drained by recv_packet).
     pub sent_log: Vec<Packet>,
 
+    /// C++-compatible storm network session (wire-framed loopback). Populated
+    /// in `net_init` for the loopback path so game commands travel through the
+    /// dvlnet PT_MESSAGE wire format.
+    #[cfg(feature = "network")]
+    pub storm: crate::net::storm::StormNet,
+
     /// Share next high priority message
     pub share_next_high_priority: bool,
 
@@ -326,6 +332,8 @@ impl MultiplayerManager {
             high_priority_buffer: NetBuffer::new(),
             low_priority_buffer: NetBuffer::new(),
             sent_log: Vec::new(),
+            #[cfg(feature = "network")]
+            storm: crate::net::storm::StormNet::new(),
             share_next_high_priority: false,
             players: Default::default(),
             pack_player_offsets: [0; MAX_PLRS],
@@ -466,6 +474,11 @@ impl MultiplayerManager {
             self.is_loopback = true;
             self.net_initialized = true;
         }
+        #[cfg(feature = "network")]
+        {
+            // Host a wire-framed loopback session (storm SNetCreateGame).
+            self.storm.create_game(&self.game_name, &self.game_password, &[]);
+        }
         true
     }
 
@@ -501,6 +514,13 @@ impl MultiplayerManager {
         }
         if player_id as usize >= MAX_PLRS {
             return false;
+        }
+        #[cfg(feature = "network")]
+        if self.is_loopback {
+            // Frame the command as a dvlnet PT_MESSAGE wire packet and send it
+            // through the loopback transport (storm SNetSendMessage).
+            self.sent_this_cycle += 1;
+            return self.storm.send_message(player_id, data);
         }
         let pkt = Packet::from_body(data);
         self.sent_log.push(pkt);
@@ -552,6 +572,15 @@ impl MultiplayerManager {
     /// receivable on the next call. Mirrors the `tmsg_get` polling loop in
     /// `ProcessTmsgs`.
     pub fn recv_packet(&mut self) -> Option<Packet> {
+        #[cfg(feature = "network")]
+        if self.is_loopback {
+            // Decode the next wire packet from the loopback transport and
+            // present it as a game packet (storm SNetReceiveMessage).
+            return self
+                .storm
+                .receive_message()
+                .map(|(_, payload)| Packet::from_body(&payload));
+        }
         if self.sent_log.is_empty() {
             return None;
         }
@@ -1030,4 +1059,20 @@ mod tests {
         assert!(mgr.high_priority_buffer.is_empty());
         assert!(mgr.low_priority_buffer.is_empty());
     }
+    #[test]
+    fn test_loopback_send_receive_through_wire_format() {
+        let mut mgr = MultiplayerManager::new();
+        assert!(mgr.net_init(false)); // loopback multiplayer
+
+        let cmd = [0x01u8, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF];
+        assert!(mgr.send_packet(0, &cmd));
+        assert_eq!(mgr.sent_this_cycle, 1);
+
+        let pkt = mgr.recv_packet().expect("command loops back");
+        assert_eq!(pkt.body, cmd.to_vec(), "game command survives the wire frame");
+
+        assert!(mgr.recv_packet().is_none(), "queue drained");
+    }
+
+
 }
