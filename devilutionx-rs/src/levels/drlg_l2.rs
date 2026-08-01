@@ -1696,10 +1696,13 @@ impl CatacombsGenerator {
                 x += 1;
             }
 
-            // If pattern matched, replace center tile
+            // If pattern matched, replace center tile. C++ DoPatternCheck
+            // does NOT return here: it continues through the whole table and
+            // the LAST matching pattern wins (the all-wildcard default row
+            // writes 3 first, then specific wall/door patterns overwrite it).
+            // Returning early left the whole grid as floor (3).
             if matches {
                 dungeon.tiles[i][j] = pattern[9] as u8;
-                return; // Only apply first matching pattern
             }
         }
     }
