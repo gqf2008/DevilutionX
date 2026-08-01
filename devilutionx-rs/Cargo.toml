@@ -40,6 +40,9 @@ tokio = { version = "1.35", features = ["full"], optional = true }
 
 # Compression (for MPQ)
 flate2 = "1.0"
+
+# Lua mod scripting (matches the C++ sol2/Lua 5.4 integration)
+mlua = { version = "0.11", features = ["vendored", "lua54"] }
 bzip2 = "0.6.1"           # BZip2 decompression for MPQ
 
 [dev-dependencies]

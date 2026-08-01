@@ -10,6 +10,7 @@ pub mod monhealthbar;
 pub mod stash;
 pub mod itemlabels;
 pub mod xpbar;
+pub mod lua;
 pub mod player;
 pub mod monster;
 pub mod monster_exact; // Adapter: re-exports + MonsterManager (consolidation shim)
