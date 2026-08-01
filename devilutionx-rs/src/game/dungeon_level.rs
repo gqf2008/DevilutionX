@@ -205,6 +205,50 @@ fn add_l2_torch_lights(layout: &mut DungeonLayout, seed: u32) {
     }
 }
 
+/// Scan a generated layout for door objects, mirroring C++ `AddL1Objs`,
+/// `AddL2Objs` and `AddL3Objs` (objects.cpp:3756-3795). Those functions place
+/// door objects from pure dPiece micro-value scans (no RNG), so the scan here
+/// is deterministic and byte-faithful given a fixture-aligned d_piece grid:
+///
+/// * Cathedral (L1): 43/50/213 -> OBJ_L1LDOOR, 45/55 -> OBJ_L1RDOOR
+/// * Catacombs (L2): 12/540 -> OBJ_L2LDOOR, 16/541 -> OBJ_L2RDOOR
+/// * Caves (L3): 530 -> OBJ_L3LDOOR, 533 -> OBJ_L3RDOOR
+///
+/// Returns `(x, y, door_type)` in C++ scan order (row-major y then x). The L1
+/// lava lights (dPiece 269 -> OBJ_L1LIGHT) are baked into dPreLight by
+/// `apply_static_lights` and are not returned as doors.
+pub fn scan_level_doors(level: u8, layout: &DungeonLayout) -> Vec<(i32, i32, crate::game::objdat::ObjectId)> {
+    use crate::game::objdat::ObjectId;
+    let mut doors = Vec::new();
+    for y in 0..MAXDUNY {
+        for x in 0..MAXDUNX {
+            let pn = layout.d_piece[y * MAXDUNX + x];
+            let door = match level {
+                1 => match pn {
+                    43 | 50 | 213 => Some(ObjectId::L1LDoor),
+                    45 | 55 => Some(ObjectId::L1RDoor),
+                    _ => None,
+                },
+                2 => match pn {
+                    12 | 540 => Some(ObjectId::L2LDoor),
+                    16 | 541 => Some(ObjectId::L2RDoor),
+                    _ => None,
+                },
+                3 => match pn {
+                    530 => Some(ObjectId::L3LDoor),
+                    533 => Some(ObjectId::L3RDoor),
+                    _ => None,
+                },
+                _ => None,
+            };
+            if let Some(door) = door {
+                doors.push((x as i32, y as i32, door));
+            }
+        }
+    }
+    doors
+}
+
 /// Build a render-ready `DungeonLayout` for an L2 Catacombs level
 /// (C++ `drlg_l2.cpp Pass3()` → `DRLG_LPass3(11)`).
 pub fn build_catacombs_layout(dungeon: &Dungeon, level: &DungeonLevelData) -> DungeonLayout {
@@ -855,6 +899,68 @@ mod tests {
         assert_eq!(layout.pre_light[29 * MAXDUNX + 10], 15, "failed flip(10) stays dark");
         // A far-away untouched tile keeps the ambient default.
         assert_eq!(layout.pre_light[80 * MAXDUNX + 80], 15);
+    }
+
+    /// C++ AddL1Objs/AddL2Objs/AddL3Objs (objects.cpp:3756-3795): doors come
+    /// from pure dPiece micro-value scans, so scan_level_doors must map the
+    /// exact C++ values to the correct ObjectId at the same position.
+    #[test]
+    fn test_scan_level_doors_matches_cpp_micro_values() {
+        use crate::game::objdat::ObjectId;
+
+        let mut layout = DungeonLayout::default();
+        for v in layout.d_piece.iter_mut() {
+            *v = 99; // non-door filler
+        }
+        // L1: 43/50/213 -> L1LDoor, 45/55 -> L1RDoor.
+        // d_piece is indexed [y * MAXDUNX + x]; the probe tiles sit at (10,10),
+        // (11,10), (12,10), (13,10), (14,10).
+        layout.d_piece[10 * MAXDUNX + 10] = 43;
+        layout.d_piece[10 * MAXDUNX + 11] = 50;
+        layout.d_piece[10 * MAXDUNX + 12] = 213;
+        layout.d_piece[10 * MAXDUNX + 13] = 45;
+        layout.d_piece[10 * MAXDUNX + 14] = 55;
+        let doors = scan_level_doors(1, &layout);
+        assert_eq!(doors, vec![
+            (10, 10, ObjectId::L1LDoor),
+            (11, 10, ObjectId::L1LDoor),
+            (12, 10, ObjectId::L1LDoor),
+            (13, 10, ObjectId::L1RDoor),
+            (14, 10, ObjectId::L1RDoor),
+        ]);
+
+        // L2: 12/540 -> L2LDoor, 16/541 -> L2RDoor.
+        let mut layout2 = DungeonLayout::default();
+        for v in layout2.d_piece.iter_mut() {
+            *v = 99;
+        }
+        layout2.d_piece[10 * MAXDUNX + 10] = 12;
+        layout2.d_piece[10 * MAXDUNX + 11] = 540;
+        layout2.d_piece[10 * MAXDUNX + 12] = 16;
+        layout2.d_piece[10 * MAXDUNX + 13] = 541;
+        let doors2 = scan_level_doors(2, &layout2);
+        assert_eq!(doors2, vec![
+            (10, 10, ObjectId::L2LDoor),
+            (11, 10, ObjectId::L2LDoor),
+            (12, 10, ObjectId::L2RDoor),
+            (13, 10, ObjectId::L2RDoor),
+        ]);
+
+        // L3: 530 -> L3LDoor, 533 -> L3RDoor.
+        let mut layout3 = DungeonLayout::default();
+        for v in layout3.d_piece.iter_mut() {
+            *v = 99;
+        }
+        layout3.d_piece[10 * MAXDUNX + 10] = 530;
+        layout3.d_piece[10 * MAXDUNX + 11] = 533;
+        let doors3 = scan_level_doors(3, &layout3);
+        assert_eq!(doors3, vec![
+            (10, 10, ObjectId::L3LDoor),
+            (11, 10, ObjectId::L3RDoor),
+        ]);
+
+        // L4 has no AddL4Objs door scan (C++ hell places no door objects).
+        assert!(scan_level_doors(4, &layout).is_empty());
     }
 
     /// A grid with no trigger micros consumes no RNG and bakes no lights.

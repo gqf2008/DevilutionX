@@ -763,6 +763,18 @@ pub fn descend_to_level(game_state: &mut GameState, level: u8) -> Result<(), Str
         level, seed, layout.width, layout.height, filled, art.til.tiles.len()
     );
 
+    // C++ InitObjects: AddL1Objs/AddL2Objs/AddL3Objs place doors from pure
+    // dPiece micro scans (objects.cpp:3756-3795). Populate the object list so
+    // monster-door checks (monster_check_doors) and position blocking see the
+    // real door objects.
+    let door_objects: Vec<crate::game::objects::Object> =
+        crate::game::dungeon_level::scan_level_doors(level, &layout)
+            .into_iter()
+            .map(|(x, y, otype)| {
+                crate::game::objects::Object::new(otype, crate::game::types::Point::new(x, y))
+            })
+            .collect();
+
     // Resolve the Cathedral→town up-stair tile (C++ `InitL1Triggers` scans for
     // `dPiece == 128`; the Rust generator instead stamps the EntranceStairs
     // TIL mega, so we detect by matching that mega's micro1 value in the
@@ -785,6 +797,7 @@ pub fn descend_to_level(game_state: &mut GameState, level: u8) -> Result<(), Str
     game_state.dungeon_up_stairs = up_stairs;
     game_state.current_dungeon_level = level;
     game_state.in_dungeon = true;
+    game_state.objects = door_objects;
     // Keep is_town in sync so GameState::update's monster/item logic matches the
     // active mode (dungeon processes monsters; town skips them).
     game_state.is_town = false;
