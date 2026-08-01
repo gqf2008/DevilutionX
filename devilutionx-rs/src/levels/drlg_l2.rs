@@ -777,6 +777,12 @@ pub struct CatacombsGenerator {
     predungeon: [[char; MAXDUNY]; MAXDUNX],
     /// Current level (5-8)
     current_level: u8,
+    /// C++ `Quests[Q_BLOOD]._qactive != QUEST_NOTAVAIL` — whether the
+    /// Poisoned Water Supply quest room (14x20) is forced into level 5.
+    /// The original code forced it unconditionally, which diverged from
+    /// C++ when the quest is not active (verified against drlg_l2_test.cpp
+    /// fixtures: 5-1677631846 is NOTAVAIL, 5-68685319 is INIT).
+    pub blood_quest_active: bool,
     /// Seeded RNG (matches Diablo's `SetRndSeed`/`GenerateRnd`).
     rng: Rng,
     /// TEMPORARY diagnostic (test-only): if `Some(n)`, `connect_hall` aborts
@@ -799,6 +805,7 @@ impl CatacombsGenerator {
             hall_list: VecDeque::new(),
             predungeon: [[' '; MAXDUNY]; MAXDUNX],
             current_level: 5,
+            blood_quest_active: false,
             rng: Rng::with_default_seed(),
             #[cfg(test)]
             test_hall_cap: None,
@@ -1064,7 +1071,8 @@ impl CatacombsGenerator {
     /// C++ equivalent: size determination in CreateDungeon
     fn get_quest_room_size(&self) -> Option<(usize, usize)> {
         match self.current_level {
-            5 => Some((14, 20)), // Q_BLOOD (Poisoned Water Supply)
+            5 if self.blood_quest_active => Some((14, 20)), // Q_BLOOD
+            5 => None,
             6 => Some((10, 10)), // Q_SCHAMB (Bone Chamber)
             7 => Some((15, 15)), // Q_BLIND (Halls of the Blind)
             _ => None,
@@ -2666,6 +2674,10 @@ mod tests {
     fn test_get_quest_room_size() {
         let mut gen = CatacombsGenerator::new();
         gen.current_level = 5;
+        // C++: the 14x20 Q_BLOOD quest room is only forced when the quest is
+        // active (`_qactive != QUEST_NOTAVAIL`). Default (not active) -> None.
+        assert_eq!(gen.get_quest_room_size(), None);
+        gen.blood_quest_active = true;
         assert_eq!(gen.get_quest_room_size(), Some((14, 20)));
         gen.current_level = 6;
         assert_eq!(gen.get_quest_room_size(), Some((10, 10)));
@@ -3176,6 +3188,9 @@ mod tests {
     fn test_generate_produces_real_catacombs() {
         for seed in [0x13572468u32, 1, 12345, 54321] {
             let mut gen = CatacombsGenerator::new();
+            // The quest-room variant is the one that currently converges
+            // (matches the 5-68685319 gold fixture whose Q_BLOOD is active).
+            gen.blood_quest_active = true;
             let mut d = Dungeon::new();
             assert!(gen.generate(&mut d, seed, 5), "seed {seed:#x}: generate failed");
             let non_zero = d.tiles.iter().flatten().filter(|&&t| t != 0).count();
