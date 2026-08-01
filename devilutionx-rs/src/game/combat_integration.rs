@@ -226,28 +226,45 @@ pub fn player_attack_monster(
     AttackResult::Hit { damage }
 }
 
-/// Calculate player's chance to hit monster
+/// Calculate player's chance to hit monster — exact port of C++
+/// `PlrHitMonst` (player.cpp:548-549):
 ///
-/// **C++ Reference**: `Source/player.cpp:549`
-///
-/// # Formula (simplified from C++)
-/// ```text
-/// hit = 50 + level/2 + dex/4 + weapon_to_hit - monster.ac
-/// hit = clamp(hit, 5, 95)
+/// ```cpp
+/// hper += GetMeleePiercingToHit() - CalculateArmorPierce(monster.armorClass, true);
+/// hper = clamp(hper, 5, 95);
 /// ```
 ///
-/// **Note**: C++ has complex formula with `GetMeleePiercingToHit()` and `CalculateArmorPierce()`.
-/// This is a simplified version focusing on core mechanics.
+/// - `GetMeleeToHit()` (player.h:573) = level + dex/2 + iBonusToHit + baseMeleeToHit
+/// - `GetMeleePiercingToHit()` (player.h:583, non-Hellfire) = GetMeleeToHit() + `_pIEnAc`
+/// - `CalculateArmorPierce(armor, isMelee=true)` (player.h:653, non-Hellfire):
+///   the Barbarian melee branch subtracts armor/8; tmac is clamped to >= 0.
 fn calculate_player_to_hit(player: &Player, monster: &Monster) -> i32 {
-    let level_bonus = (player._p_level as i32) / 2;
-    let dex_bonus = player._p_dexterity / 4;
-    let weapon_to_hit = player._p_i_bonus_to_hit; // From equipped weapon
+    let class = match player._p_class {
+        HeroClass::Warrior => crate::game::player_dat::HeroClass::Warrior,
+        HeroClass::Rogue => crate::game::player_dat::HeroClass::Rogue,
+        HeroClass::Sorcerer => crate::game::player_dat::HeroClass::Sorcerer,
+        HeroClass::Monk => crate::game::player_dat::HeroClass::Monk,
+        HeroClass::Bard => crate::game::player_dat::HeroClass::Bard,
+        HeroClass::Barbarian => crate::game::player_dat::HeroClass::Barbarian,
+    };
+    let combat_data = crate::game::player_dat::get_player_combat_data(class);
+    let mut hper = player._p_level as i32
+        + player._p_dexterity / 2
+        + player._p_i_bonus_to_hit
+        + combat_data.base_melee_to_hit as i32
+        + player._p_i_en_ac; // GetMeleePiercingToHit (non-Hellfire)
 
-    // Simplified formula (C++ is more complex with piercing calculations)
-    let mut hit_chance = 50 + level_bonus + dex_bonus + weapon_to_hit - (monster.armor_class as i32);    // Clamp to 5%-95% (C++ line 550)
-    hit_chance = hit_chance.clamp(5, 95);
+    // CalculateArmorPierce(monster.armor_class, is_melee=true), non-Hellfire path.
+    let mut tmac = monster.armor_class as i32;
+    if player._p_i_en_ac > 0 && player._p_class == HeroClass::Barbarian {
+        tmac -= monster.armor_class as i32 / 8;
+    }
+    if tmac < 0 {
+        tmac = 0;
+    }
+    hper -= tmac;
 
-    hit_chance
+    hper.clamp(5, 95)
 }
 
 //
@@ -313,6 +330,48 @@ mod tests {
             AttackResult::Miss | AttackResult::Hit { .. } => {},
             _ => panic!("Unexpected result"),
         }
+    }
+
+    /// Exact C++ `PlrHitMonst` to-hit (player.cpp:548-549): Warrior
+    /// baseMeleeToHit=70, so hper = level + dex/2 + iBonusToHit + 70 +
+    /// _pIEnAc - monster armor, clamped to 5-95.
+    #[test]
+    fn test_calculate_player_to_hit_matches_cpp() {
+        let mut monster = Monster::new(1, MonsterType::Zombie, 10, 10, 0);
+        monster.armor_class = 10;
+
+        let mut player = Player::new();
+        player._p_class = HeroClass::Warrior;
+        player._p_level = 5;
+        player._p_dexterity = 30;
+        player._p_i_bonus_to_hit = 0;
+        player._p_i_en_ac = 0;
+
+        // GetMeleeToHit = 5 + 15 + 0 + 70 = 90; armor 10 -> 80.
+        assert_eq!(calculate_player_to_hit(&player, &monster), 80);
+
+        // Bonus to-hit and pierce (_pIEnAc) raise it further.
+        player._p_i_bonus_to_hit = 7;
+        player._p_i_en_ac = 5;
+        // GetMeleePiercingToHit = 90 + 7 + 5 = 102; armor 10 -> 92.
+        assert_eq!(calculate_player_to_hit(&player, &monster), 92);
+
+        // Low chance clamps to 5.
+        let mut weak = Player::new();
+        weak._p_class = HeroClass::Warrior;
+        weak._p_level = 1;
+        weak._p_dexterity = 5;
+        monster.armor_class = 200;
+        assert_eq!(calculate_player_to_hit(&weak, &monster), 5);
+
+        // High chance clamps to 95.
+        let mut strong = Player::new();
+        strong._p_class = HeroClass::Warrior;
+        strong._p_level = 50;
+        strong._p_dexterity = 100;
+        strong._p_i_bonus_to_hit = 40;
+        monster.armor_class = 1;
+        assert_eq!(calculate_player_to_hit(&strong, &monster), 95);
     }
 
     #[test]
