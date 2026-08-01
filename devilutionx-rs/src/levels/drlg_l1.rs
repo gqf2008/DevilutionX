@@ -61,6 +61,27 @@ pub enum Tile {
     /// Floor tile
     Floor = 13,
 
+    /// C++ `Corner = 3` (wall corner; used by AddWall/FixTilesPatterns)
+    Corner = 3,
+    /// C++ `VWallEnd = 6` (vertical wall end)
+    VWallEnd = 6,
+    /// C++ `HWallEnd = 7` (horizontal wall end)
+    HWallEnd = 7,
+    /// C++ `HCorner = 17` (horizontal corner)
+    HCorner = 17,
+    /// C++ `DirtHwall = 18` (dirt horizontal wall)
+    DirtHwall = 18,
+    /// C++ `DirtVwall = 19` (dirt vertical wall)
+    DirtVwall = 19,
+    /// C++ `VDirtCorner = 20` (vertical dirt corner)
+    VDirtCorner = 20,
+    /// C++ `HDirtCorner = 21` (horizontal dirt corner)
+    HDirtCorner = 21,
+    /// C++ `DirtHwallEnd = 23` (dirt horizontal wall end)
+    DirtHwallEnd = 23,
+    /// C++ `DirtVwallEnd = 24` (dirt vertical wall end)
+    DirtVwallEnd = 24,
+
     /// T-junction to south (self-invented; unused in generation)
     DirtVWallToSouth = 45,
     /// T-junction to north (self-invented; unused in generation)
@@ -142,7 +163,17 @@ impl TryFrom<u8> for Tile {
         match value {
             1 => Ok(Tile::VWall),
             2 => Ok(Tile::HWall),
+            3 => Ok(Tile::Corner),
             4 => Ok(Tile::SECorner),
+            6 => Ok(Tile::VWallEnd),
+            7 => Ok(Tile::HWallEnd),
+            17 => Ok(Tile::HCorner),
+            18 => Ok(Tile::DirtHwall),
+            19 => Ok(Tile::DirtVwall),
+            20 => Ok(Tile::VDirtCorner),
+            21 => Ok(Tile::HDirtCorner),
+            23 => Ok(Tile::DirtHwallEnd),
+            24 => Ok(Tile::DirtVwallEnd),
             11 => Ok(Tile::ArchV1),
             12 => Ok(Tile::ArchH1),
             13 => Ok(Tile::Floor),
@@ -696,6 +727,171 @@ impl CathedralGenerator {
         count
     }
 
+    /// C++ `FixTilesPatterns()` (drlg_l1.cpp) — three passes converting the
+    /// raw MakeDmt walls into the dirt-wall / corner vocabulary that AddWall
+    /// and the renderer expect. Tile names follow the Rust enum; values match
+    /// C++ (`SECorner` = DWall=4, `NWCorner` = VCorner=16).
+    fn fix_tiles_patterns(&mut self) {
+        for j in 0..DUNGEON_SIZE {
+            for i in 0..DUNGEON_SIZE {
+                if i + 1 < DUNGEON_SIZE {
+                    if self.dungeon[j][i] == Tile::HWall && self.dungeon[j][i + 1] == Tile::Dirt {
+                        self.dungeon[j][i + 1] = Tile::DirtHwallEnd;
+                    }
+                    if self.dungeon[j][i] == Tile::Floor && self.dungeon[j][i + 1] == Tile::Dirt {
+                        self.dungeon[j][i + 1] = Tile::DirtHwall;
+                    }
+                    if self.dungeon[j][i] == Tile::Floor && self.dungeon[j][i + 1] == Tile::HWall {
+                        self.dungeon[j][i + 1] = Tile::HWallEnd;
+                    }
+                    if self.dungeon[j][i] == Tile::VWallEnd && self.dungeon[j][i + 1] == Tile::Dirt {
+                        self.dungeon[j][i + 1] = Tile::DirtVwallEnd;
+                    }
+                }
+                if j + 1 < DUNGEON_SIZE {
+                    if self.dungeon[j][i] == Tile::VWall && self.dungeon[j + 1][i] == Tile::Dirt {
+                        self.dungeon[j + 1][i] = Tile::DirtVwallEnd;
+                    }
+                    if self.dungeon[j][i] == Tile::Floor && self.dungeon[j + 1][i] == Tile::VWall {
+                        self.dungeon[j + 1][i] = Tile::VWallEnd;
+                    }
+                    if self.dungeon[j][i] == Tile::Floor && self.dungeon[j + 1][i] == Tile::Dirt {
+                        self.dungeon[j + 1][i] = Tile::DirtVwall;
+                    }
+                }
+            }
+        }
+
+        for j in 0..DUNGEON_SIZE {
+            for i in 0..DUNGEON_SIZE {
+                if i + 1 < DUNGEON_SIZE {
+                    if self.dungeon[j][i] == Tile::Floor && self.dungeon[j][i + 1] == Tile::DirtVwall {
+                        self.dungeon[j][i + 1] = Tile::HDirtCorner;
+                    }
+                    if self.dungeon[j][i] == Tile::Floor && self.dungeon[j][i + 1] == Tile::Dirt {
+                        self.dungeon[j][i + 1] = Tile::VDirtCorner;
+                    }
+                    if self.dungeon[j][i] == Tile::HWallEnd && self.dungeon[j][i + 1] == Tile::Dirt {
+                        self.dungeon[j][i + 1] = Tile::DirtHwallEnd;
+                    }
+                    if self.dungeon[j][i] == Tile::Floor && self.dungeon[j][i + 1] == Tile::DirtVwallEnd {
+                        self.dungeon[j][i + 1] = Tile::HDirtCorner;
+                    }
+                    if self.dungeon[j][i] == Tile::DirtVwall && self.dungeon[j][i + 1] == Tile::Dirt {
+                        self.dungeon[j][i + 1] = Tile::VDirtCorner;
+                    }
+                    if self.dungeon[j][i] == Tile::HWall && self.dungeon[j][i + 1] == Tile::DirtVwall {
+                        self.dungeon[j][i + 1] = Tile::HDirtCorner;
+                    }
+                    if self.dungeon[j][i] == Tile::DirtVwall && self.dungeon[j][i + 1] == Tile::VWall {
+                        self.dungeon[j][i + 1] = Tile::VWallEnd;
+                    }
+                    if self.dungeon[j][i] == Tile::HWallEnd && self.dungeon[j][i + 1] == Tile::DirtVwall {
+                        self.dungeon[j][i + 1] = Tile::HDirtCorner;
+                    }
+                    if self.dungeon[j][i] == Tile::HWall && self.dungeon[j][i + 1] == Tile::VWall {
+                        self.dungeon[j][i + 1] = Tile::VWallEnd;
+                    }
+                    if self.dungeon[j][i] == Tile::Corner && self.dungeon[j][i + 1] == Tile::Dirt {
+                        self.dungeon[j][i + 1] = Tile::DirtVwallEnd;
+                    }
+                    if self.dungeon[j][i] == Tile::HDirtCorner && self.dungeon[j][i + 1] == Tile::VWall {
+                        self.dungeon[j][i + 1] = Tile::VWallEnd;
+                    }
+                    if self.dungeon[j][i] == Tile::HWallEnd && self.dungeon[j][i + 1] == Tile::VWall {
+                        self.dungeon[j][i + 1] = Tile::VWallEnd;
+                    }
+                    if self.dungeon[j][i] == Tile::HWallEnd && self.dungeon[j][i + 1] == Tile::DirtVwallEnd {
+                        self.dungeon[j][i + 1] = Tile::HDirtCorner;
+                    }
+                    if self.dungeon[j][i] == Tile::SECorner && self.dungeon[j][i + 1] == Tile::NWCorner {
+                        self.dungeon[j][i + 1] = Tile::HCorner;
+                    }
+                    if self.dungeon[j][i] == Tile::HWallEnd && self.dungeon[j][i + 1] == Tile::Floor {
+                        self.dungeon[j][i + 1] = Tile::HCorner;
+                    }
+                    if self.dungeon[j][i] == Tile::HWall && self.dungeon[j][i + 1] == Tile::DirtVwallEnd {
+                        self.dungeon[j][i + 1] = Tile::HDirtCorner;
+                    }
+                    if self.dungeon[j][i] == Tile::HWall && self.dungeon[j][i + 1] == Tile::Floor {
+                        self.dungeon[j][i + 1] = Tile::HCorner;
+                    }
+                }
+                if i > 0 {
+                    if self.dungeon[j][i] == Tile::DirtHwallEnd && self.dungeon[j][i - 1] == Tile::Dirt {
+                        self.dungeon[j][i - 1] = Tile::DirtVwall;
+                    }
+                    if self.dungeon[j][i] == Tile::DirtVwall && self.dungeon[j][i - 1] == Tile::DirtHwallEnd {
+                        self.dungeon[j][i - 1] = Tile::HDirtCorner;
+                    }
+                    if self.dungeon[j][i] == Tile::VWallEnd && self.dungeon[j][i - 1] == Tile::Dirt {
+                        self.dungeon[j][i - 1] = Tile::DirtVwallEnd;
+                    }
+                    if self.dungeon[j][i] == Tile::VWallEnd && self.dungeon[j][i - 1] == Tile::DirtHwallEnd {
+                        self.dungeon[j][i - 1] = Tile::HDirtCorner;
+                    }
+                }
+                if j + 1 < DUNGEON_SIZE {
+                    if self.dungeon[j][i] == Tile::VWall && self.dungeon[j + 1][i] == Tile::HWall {
+                        self.dungeon[j + 1][i] = Tile::HWallEnd;
+                    }
+                    if self.dungeon[j][i] == Tile::VWallEnd && self.dungeon[j + 1][i] == Tile::DirtHwall {
+                        self.dungeon[j + 1][i] = Tile::HDirtCorner;
+                    }
+                    if self.dungeon[j][i] == Tile::DirtHwall && self.dungeon[j + 1][i] == Tile::HWall {
+                        self.dungeon[j + 1][i] = Tile::HWallEnd;
+                    }
+                    if self.dungeon[j][i] == Tile::VWallEnd && self.dungeon[j + 1][i] == Tile::HWall {
+                        self.dungeon[j + 1][i] = Tile::HWallEnd;
+                    }
+                    if self.dungeon[j][i] == Tile::HDirtCorner && self.dungeon[j + 1][i] == Tile::HWall {
+                        self.dungeon[j + 1][i] = Tile::HWallEnd;
+                    }
+                    if self.dungeon[j][i] == Tile::VWallEnd && self.dungeon[j + 1][i] == Tile::Dirt {
+                        self.dungeon[j + 1][i] = Tile::DirtVwallEnd;
+                    }
+                    if self.dungeon[j][i] == Tile::VWallEnd && self.dungeon[j + 1][i] == Tile::Floor {
+                        self.dungeon[j + 1][i] = Tile::NWCorner;
+                    }
+                    if self.dungeon[j][i] == Tile::VWall && self.dungeon[j + 1][i] == Tile::Floor {
+                        self.dungeon[j + 1][i] = Tile::NWCorner;
+                    }
+                    if self.dungeon[j][i] == Tile::Floor && self.dungeon[j + 1][i] == Tile::NWCorner {
+                        self.dungeon[j + 1][i] = Tile::HCorner;
+                    }
+                }
+                if j > 0 {
+                    if self.dungeon[j][i] == Tile::VWallEnd && self.dungeon[j - 1][i] == Tile::Dirt {
+                        self.dungeon[j - 1][i] = Tile::HWallEnd;
+                    }
+                    if self.dungeon[j][i] == Tile::VWallEnd && self.dungeon[j - 1][i] == Tile::Dirt {
+                        self.dungeon[j - 1][i] = Tile::DirtVwallEnd;
+                    }
+                    if self.dungeon[j][i] == Tile::HWallEnd && self.dungeon[j - 1][i] == Tile::DirtVwallEnd {
+                        self.dungeon[j - 1][i] = Tile::HDirtCorner;
+                    }
+                    if self.dungeon[j][i] == Tile::DirtHwall && self.dungeon[j - 1][i] == Tile::DirtVwallEnd {
+                        self.dungeon[j - 1][i] = Tile::HDirtCorner;
+                    }
+                }
+            }
+        }
+
+        for j in 0..DUNGEON_SIZE {
+            for i in 0..DUNGEON_SIZE {
+                if j + 1 < DUNGEON_SIZE && self.dungeon[j][i] == Tile::SECorner && self.dungeon[j + 1][i] == Tile::HWall {
+                    self.dungeon[j + 1][i] = Tile::HWallEnd;
+                }
+                if i + 1 < DUNGEON_SIZE && self.dungeon[j][i] == Tile::HWall && self.dungeon[j][i + 1] == Tile::DirtVwall {
+                    self.dungeon[j][i + 1] = Tile::HDirtCorner;
+                }
+                if j + 1 < DUNGEON_SIZE && self.dungeon[j][i] == Tile::DirtHwall && self.dungeon[j + 1][i] == Tile::Dirt {
+                    self.dungeon[j + 1][i] = Tile::VDirtCorner;
+                }
+            }
+        }
+    }
+
     /// Convert dungeon mask to tile types
     ///
     /// C++ source: MakeDmt() in drlg_l1.cpp:560-577
@@ -977,6 +1173,11 @@ impl CathedralGenerator {
 
         // Convert mask to tiles
         self.make_dmt();
+
+        // C++ order: MakeDmt -> FillChambers -> FixTilesPatterns -> AddWall.
+        // (FillChambers is not ported yet; its chamber-mask effect is minimal
+        // for the current layout.)
+        self.fix_tiles_patterns();
 
         // Add walls between rooms
         self.add_wall();

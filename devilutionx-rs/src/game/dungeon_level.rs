@@ -334,9 +334,15 @@ fn tile_to_l1_til_index(tile: Tile) -> usize {
 
         // Corners
         Tile::NWCorner => 3,
+        Tile::Corner => 3,
+        Tile::HCorner => 3,
         Tile::NECorner => 4,
         Tile::SWCorner => 5,
         Tile::SECorner => 6,
+
+        // Wall ends (C++ VWallEnd/HWallEnd)
+        Tile::VWallEnd => 1,
+        Tile::HWallEnd => 2,
 
         // Dirt / background
         Tile::Dirt => 7,
@@ -360,7 +366,14 @@ fn tile_to_l1_til_index(tile: Tile) -> usize {
         | Tile::DirtSECorner
         | Tile::DirtCross
         | Tile::DirtHWall
-        | Tile::DirtVWall => 7,
+        | Tile::DirtVWall
+        // C++ dirt-wall tiles produced by FixTilesPatterns
+        | Tile::DirtHwall
+        | Tile::DirtVwall
+        | Tile::VDirtCorner
+        | Tile::HDirtCorner
+        | Tile::DirtHwallEnd
+        | Tile::DirtVwallEnd => 7,
 
         // Stairs down (entrance) — Cathedral uses a dedicated stairs mega
         Tile::EntranceStairs => 12,
