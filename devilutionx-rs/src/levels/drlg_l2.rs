@@ -1825,24 +1825,29 @@ impl CatacombsGenerator {
                     continue;
                 }
 
-                // Find random alternative tile with same type
-                let mut rv = self.random_range(0, 16);
-                let mut candidate_tile = 0u8;
-
-                for i in 0..161 {
-                    if TILE_TYPES_L2[i] == tile_type {
-                        if rv == 0 {
-                            candidate_tile = i as u8;
-                            break;
-                        }
+                // Find random alternative tile with same type. C++
+                // `while (rv >= 0)` wraps `i` around the 161-entry table, so a
+                // type with few occurrences still resolves to a valid tile
+                // (the old one-pass loop left `candidate_tile` at 0).
+                let mut rv = self.random_range(0, 16) as i32;
+                let mut i: i32 = -1;
+                while rv >= 0 {
+                    i += 1;
+                    if i == 161 {
+                        i = 0;
+                    }
+                    if TILE_TYPES_L2[i as usize] == tile_type {
                         rv -= 1;
                     }
                 }
+                let candidate_tile = i as u8;
 
-                // Check if candidate tile already exists in 5×5 neighborhood
+                // Check if candidate tile already exists in the 4x4
+                // neighborhood (C++: `j = y-2..y+1, k = x-2..x+1`, exclusive
+                // of y+2/x+2 — the old loop scanned a 5x5 area).
                 let mut found_duplicate = false;
-                'outer: for dy in (y.saturating_sub(2))..=(y + 2).min(DMAXY - 1) {
-                    for dx in (x.saturating_sub(2))..=(x + 2).min(DMAXX - 1) {
+                'outer: for dy in (y.saturating_sub(2))..(y + 2).min(DMAXY) {
+                    for dx in (x.saturating_sub(2))..(x + 2).min(DMAXX) {
                         if dungeon.tiles[dx][dy] == candidate_tile {
                             found_duplicate = true;
                             break 'outer;
