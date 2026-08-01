@@ -514,339 +514,412 @@ pub const MONSTERS_DATA: [MonsterData; NUM_DEFAULT_MTYPES] = [
           MonsterClass::Undead, MonsterResistance::IMMUNE_MAGIC, MonsterResistance::IMMUNE_MAGIC, 58),
     // 2: MT_GZOMBIE
     mdat!("Rotting Carcass", 2, 4, 4, 15, 25, MonsterAIID::Zombie, 2, 25, 5, 15, 0, 0, 0, 15,
-          MonsterClass::Undead, MonsterResistance::IMMUNE_MAGIC,
-          MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_FIRE.0), 136),
+          MonsterClass::Undead, MonsterResistance::IMMUNE_MAGIC, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_FIRE.0), 136),
     // 3: MT_YZOMBIE
     mdat!("Black Death", 3, 5, 6, 25, 40, MonsterAIID::Zombie, 3, 30, 6, 22, 0, 0, 0, 20,
-          MonsterClass::Undead, MonsterResistance::IMMUNE_MAGIC,
-          MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_LIGHTNING.0), 240),
-    // 4-7: Fallen (Spear)
+          MonsterClass::Undead, MonsterResistance::IMMUNE_MAGIC, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_LIGHTNING.0), 240),
+    // 4: MT_RFALLSP
     mdat!("Fallen One", 1, 2, 1, 1, 4, MonsterAIID::Fallen, 0, 15, 1, 3, 0, 0, 0, 0,
           MonsterClass::Animal, MonsterResistance::NONE, MonsterResistance::NONE, 46),
+    // 5: MT_DFALLSP
     mdat!("Carver", 2, 3, 3, 4, 8, MonsterAIID::Fallen, 2, 20, 2, 5, 0, 0, 0, 5,
           MonsterClass::Animal, MonsterResistance::NONE, MonsterResistance::NONE, 80),
+    // 6: MT_YFALLSP
     mdat!("Devil Kin", 2, 4, 5, 12, 24, MonsterAIID::Fallen, 2, 25, 3, 7, 0, 0, 0, 10,
           MonsterClass::Animal, MonsterResistance::NONE, MonsterResistance::RESIST_FIRE, 155),
+    // 7: MT_BFALLSP
     mdat!("Dark One", 3, 5, 7, 20, 36, MonsterAIID::Fallen, 3, 30, 4, 8, 0, 0, 0, 15,
           MonsterClass::Animal, MonsterResistance::NONE, MonsterResistance::RESIST_LIGHTNING, 255),
-    // 8-11: Skeleton (Axe)
+    // 8: MT_WSKELAX
     mdat!("Skeleton", 1, 2, 1, 2, 4, MonsterAIID::SkeletonMelee, 0, 20, 1, 4, 0, 0, 0, 0,
           MonsterClass::Undead, MonsterResistance::IMMUNE_MAGIC, MonsterResistance::IMMUNE_MAGIC, 64),
+    // 9: MT_TSKELAX
     mdat!("Corpse Axe", 2, 3, 2, 4, 7, MonsterAIID::SkeletonMelee, 1, 25, 3, 5, 0, 0, 0, 0,
           MonsterClass::Undead, MonsterResistance::IMMUNE_MAGIC, MonsterResistance::IMMUNE_MAGIC, 68),
+    // 10: MT_RSKELAX
     mdat!("Burning Dead", 2, 4, 4, 8, 12, MonsterAIID::SkeletonMelee, 2, 30, 3, 7, 0, 0, 0, 5,
-          MonsterClass::Undead, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_FIRE.0),
-          MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 154),
+          MonsterClass::Undead, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_FIRE.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 154),
+    // 11: MT_XSKELAX
     mdat!("Horror", 3, 5, 6, 12, 20, MonsterAIID::SkeletonMelee, 3, 35, 4, 9, 0, 0, 0, 15,
-          MonsterClass::Undead, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_LIGHTNING.0),
-          MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_LIGHTNING.0), 264),
-    // 12-15: Fallen (Sword)
+          MonsterClass::Undead, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_LIGHTNING.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_LIGHTNING.0), 264),
+    // 12: MT_RFALLSD
     mdat!("Fallen One", 1, 2, 1, 2, 5, MonsterAIID::Fallen, 0, 15, 1, 4, 0, 0, 0, 10,
           MonsterClass::Animal, MonsterResistance::NONE, MonsterResistance::NONE, 52),
+    // 13: MT_DFALLSD
     mdat!("Carver", 2, 3, 3, 5, 9, MonsterAIID::Fallen, 1, 20, 2, 7, 0, 0, 0, 15,
           MonsterClass::Animal, MonsterResistance::NONE, MonsterResistance::NONE, 90),
+    // 14: MT_YFALLSD
     mdat!("Devil Kin", 2, 4, 5, 16, 24, MonsterAIID::Fallen, 2, 25, 4, 10, 0, 0, 0, 20,
           MonsterClass::Animal, MonsterResistance::NONE, MonsterResistance::RESIST_FIRE, 180),
+    // 15: MT_BFALLSD
     mdat!("Dark One", 3, 5, 7, 24, 36, MonsterAIID::Fallen, 3, 30, 4, 12, 0, 0, 0, 25,
           MonsterClass::Animal, MonsterResistance::NONE, MonsterResistance::RESIST_LIGHTNING, 280),
-    // 16-19: Scavengers
+    // 16: MT_NSCAV
     mdat!("Scavenger", 1, 3, 2, 3, 6, MonsterAIID::Scavenger, 0, 20, 1, 5, 0, 0, 0, 10,
           MonsterClass::Animal, MonsterResistance::NONE, MonsterResistance::RESIST_FIRE, 80),
+    // 17: MT_BSCAV
     mdat!("Plague Eater", 2, 4, 4, 12, 24, MonsterAIID::Scavenger, 1, 30, 1, 8, 0, 0, 0, 20,
           MonsterClass::Animal, MonsterResistance::NONE, MonsterResistance::RESIST_LIGHTNING, 188),
+    // 18: MT_WSCAV
     mdat!("Shadow Beast", 3, 5, 6, 24, 36, MonsterAIID::Scavenger, 2, 35, 3, 12, 0, 0, 0, 25,
           MonsterClass::Animal, MonsterResistance::NONE, MonsterResistance::RESIST_FIRE, 375),
-    mdat!("Bone Gasher", 4, 6, 8, 32, 48, MonsterAIID::Scavenger, 2, 40, 6, 14, 0, 0, 0, 30,
-          MonsterClass::Animal, MonsterResistance::NONE, MonsterResistance::RESIST_LIGHTNING, 465),
-    // 20-23: Skeleton (Bow)
-    mdat!("Skeleton Archer", 1, 3, 3, 3, 7, MonsterAIID::SkeletonRanged, 0, 25, 2, 5, 0, 0, 0, 0,
+    // 19: MT_YSCAV
+    mdat!("Bone Gasher", 4, 6, 8, 28, 40, MonsterAIID::Scavenger, 3, 35, 5, 15, 0, 0, 0, 30,
+          MonsterClass::Animal, MonsterResistance::RESIST_MAGIC, MonsterResistance::RESIST_LIGHTNING, 552),
+    // 20: MT_WSKELBW
+    mdat!("Skeleton", 2, 3, 3, 2, 4, MonsterAIID::SkeletonRanged, 0, 15, 1, 2, 0, 0, 0, 0,
+          MonsterClass::Undead, MonsterResistance::IMMUNE_MAGIC, MonsterResistance::IMMUNE_MAGIC, 110),
+    // 21: MT_TSKELBW
+    mdat!("Corpse Bow", 2, 4, 5, 8, 16, MonsterAIID::SkeletonRanged, 1, 25, 1, 4, 0, 0, 0, 0,
+          MonsterClass::Undead, MonsterResistance::IMMUNE_MAGIC, MonsterResistance::IMMUNE_MAGIC, 210),
+    // 22: MT_RSKELBW
+    mdat!("Burning Dead", 3, 5, 7, 10, 24, MonsterAIID::SkeletonRanged, 2, 30, 1, 6, 0, 0, 0, 5,
+          MonsterClass::Undead, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_FIRE.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 364),
+    // 23: MT_XSKELBW
+    mdat!("Horror", 4, 6, 9, 15, 45, MonsterAIID::SkeletonRanged, 3, 35, 2, 9, 0, 0, 0, 15,
+          MonsterClass::Undead, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_LIGHTNING.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_LIGHTNING.0), 594),
+    // 24: MT_WSKELSD
+    mdat!("Skeleton Captain", 1, 3, 2, 3, 6, MonsterAIID::SkeletonMelee, 0, 20, 2, 7, 0, 0, 0, 10,
           MonsterClass::Undead, MonsterResistance::IMMUNE_MAGIC, MonsterResistance::IMMUNE_MAGIC, 90),
-    mdat!("Corpse Bow", 2, 4, 5, 8, 12, MonsterAIID::SkeletonRanged, 1, 30, 3, 7, 0, 0, 0, 5,
+    // 25: MT_TSKELSD
+    mdat!("Corpse Captain", 2, 4, 4, 12, 20, MonsterAIID::SkeletonMelee, 1, 30, 3, 9, 0, 0, 0, 5,
           MonsterClass::Undead, MonsterResistance::IMMUNE_MAGIC, MonsterResistance::IMMUNE_MAGIC, 200),
-    mdat!("Burning Dead Archer", 3, 5, 7, 12, 18, MonsterAIID::SkeletonRanged, 2, 35, 4, 10, 0, 0, 0, 10,
-          MonsterClass::Undead, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_FIRE.0),
-          MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 310),
-    mdat!("Horror Archer", 4, 6, 9, 16, 24, MonsterAIID::SkeletonRanged, 3, 40, 5, 12, 0, 0, 0, 15,
-          MonsterClass::Undead, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_LIGHTNING.0),
-          MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_LIGHTNING.0), 420),
-    // 24-27: Skeleton (Sword)
-    mdat!("Skeleton Captain", 2, 4, 4, 8, 12, MonsterAIID::SkeletonMelee, 0, 30, 2, 6, 0, 0, 0, 5,
-          MonsterClass::Undead, MonsterResistance::IMMUNE_MAGIC, MonsterResistance::IMMUNE_MAGIC, 156),
-    mdat!("Corpse Captain", 3, 5, 6, 12, 18, MonsterAIID::SkeletonMelee, 1, 35, 4, 10, 0, 0, 0, 10,
-          MonsterClass::Undead, MonsterResistance::IMMUNE_MAGIC, MonsterResistance::IMMUNE_MAGIC, 264),
-    mdat!("Burning Dead Captain", 4, 6, 8, 16, 24, MonsterAIID::SkeletonMelee, 2, 40, 6, 14, 0, 0, 0, 15,
-          MonsterClass::Undead, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_FIRE.0),
-          MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 372),
-    mdat!("Horror Captain", 5, 7, 10, 20, 30, MonsterAIID::SkeletonMelee, 3, 45, 8, 16, 0, 0, 0, 20,
-          MonsterClass::Undead, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_LIGHTNING.0),
-          MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_LIGHTNING.0), 480),
-    // 28-33: Hidden/Invisible
-    mdat!("Invisible Lord", 3, 5, 6, 24, 36, MonsterAIID::Sneak, 2, 35, 6, 12, 0, 0, 0, 15,
-          MonsterClass::Demon, MonsterResistance::RESIST_MAGIC, MonsterResistance::RESIST_MAGIC, 375),
-    mdat!("Sneak", 3, 5, 6, 24, 36, MonsterAIID::Sneak, 2, 35, 6, 12, 0, 0, 0, 15,
-          MonsterClass::Demon, MonsterResistance::RESIST_MAGIC, MonsterResistance::RESIST_MAGIC, 375),
-    mdat!("Stalker", 4, 6, 8, 32, 48, MonsterAIID::Sneak, 2, 40, 8, 14, 0, 0, 0, 20,
-          MonsterClass::Demon, MonsterResistance::RESIST_MAGIC, MonsterResistance::RESIST_MAGIC, 465),
-    mdat!("Unseen", 5, 7, 10, 40, 60, MonsterAIID::Sneak, 3, 45, 10, 16, 0, 0, 0, 25,
-          MonsterClass::Demon, MonsterResistance::RESIST_MAGIC, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0), 600),
-    mdat!("Illusion Weaver", 6, 8, 13, 50, 75, MonsterAIID::Sneak, 3, 55, 12, 20, 0, 0, 0, 30,
-          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0),
-          MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), 850),
-    mdat!("Lord Sayter", 3, 5, 6, 24, 36, MonsterAIID::Sneak, 2, 35, 6, 12, 0, 0, 0, 15,
-          MonsterClass::Demon, MonsterResistance::RESIST_MAGIC, MonsterResistance::RESIST_MAGIC, 375),
-    // 34-37: Goat Men (Melee)
-    mdat!("Flesh Clan", 2, 4, 3, 8, 12, MonsterAIID::GoatMelee, 0, 25, 2, 6, 0, 0, 0, 10,
-          MonsterClass::Animal, MonsterResistance::NONE, MonsterResistance::NONE, 106),
-    mdat!("Stone Clan", 3, 5, 5, 12, 24, MonsterAIID::GoatMelee, 1, 30, 4, 8, 0, 0, 0, 15,
-          MonsterClass::Animal, MonsterResistance::NONE, MonsterResistance::RESIST_FIRE, 200),
-    mdat!("Fire Clan", 4, 6, 7, 18, 30, MonsterAIID::GoatMelee, 2, 35, 6, 12, 0, 0, 0, 20,
-          MonsterClass::Animal, MonsterResistance::RESIST_FIRE, MonsterResistance::IMMUNE_FIRE, 310),
-    mdat!("Night Clan", 5, 7, 9, 24, 36, MonsterAIID::GoatMelee, 3, 40, 8, 14, 0, 0, 0, 25,
-          MonsterClass::Animal, MonsterResistance::NONE, MonsterResistance::RESIST_LIGHTNING, 420),
-    // 38-41: Succubi
-    mdat!("Fiend", 4, 6, 9, 24, 36, MonsterAIID::Succubus, 2, 45, 6, 14, 40, 6, 12, 25,
-          MonsterClass::Demon, MonsterResistance::RESIST_MAGIC, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0), 525),
-    mdat!("Blink", 5, 7, 11, 32, 48, MonsterAIID::Succubus, 3, 50, 8, 16, 45, 8, 14, 30,
-          MonsterClass::Demon, MonsterResistance::RESIST_MAGIC, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0), 705),
-    mdat!("Gloom", 6, 8, 13, 40, 60, MonsterAIID::Succubus, 3, 55, 10, 18, 50, 10, 16, 35,
-          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0),
-          MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_FIRE.0), 900),
-    mdat!("Familiar", 7, 9, 15, 48, 72, MonsterAIID::Succubus, 3, 60, 12, 20, 55, 12, 18, 40,
-          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0),
-          MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 1125),
-    // 42-45: Goat Men (Bow)
-    mdat!("Flesh Clan Archer", 2, 4, 4, 8, 12, MonsterAIID::GoatRanged, 0, 30, 2, 6, 0, 0, 0, 10,
-          MonsterClass::Animal, MonsterResistance::NONE, MonsterResistance::NONE, 156),
-    mdat!("Stone Clan Archer", 3, 5, 6, 12, 24, MonsterAIID::GoatRanged, 1, 35, 4, 8, 0, 0, 0, 15,
-          MonsterClass::Animal, MonsterResistance::NONE, MonsterResistance::RESIST_FIRE, 264),
-    mdat!("Fire Clan Archer", 4, 6, 8, 18, 30, MonsterAIID::GoatRanged, 2, 40, 6, 12, 0, 0, 0, 20,
-          MonsterClass::Animal, MonsterResistance::RESIST_FIRE, MonsterResistance::IMMUNE_FIRE, 372),
-    mdat!("Night Clan Archer", 5, 7, 10, 24, 36, MonsterAIID::GoatRanged, 3, 45, 8, 14, 0, 0, 0, 25,
-          MonsterClass::Animal, MonsterResistance::NONE, MonsterResistance::RESIST_LIGHTNING, 480),
-    //  46-49: Acid Beasts
-    mdat!("Acid Beast", 3, 5, 5, 16, 24, MonsterAIID::Acid, 1, 30, 6, 10, 0, 0, 0, 15,
-          MonsterClass::Animal, MonsterResistance::NONE, MonsterResistance::RESIST_FIRE, 200),
-    mdat!("Poison Spitter", 4, 6, 7, 20, 32, MonsterAIID::Acid, 2, 35, 8, 12, 0, 0, 0, 20,
-          MonsterClass::Animal, MonsterResistance::RESIST_FIRE, MonsterResistance::IMMUNE_FIRE, 310),
-    mdat!("Pit Beast", 5, 7, 9, 28, 40, MonsterAIID::Acid, 2, 40, 10, 16, 0, 0, 0, 25,
-          MonsterClass::Animal, MonsterResistance::RESIST_FIRE, MonsterResistance(MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), 420),
-    mdat!("Lava Maw", 6, 8, 11, 36, 48, MonsterAIID::Acid, 3, 45, 12, 18, 0, 0, 0, 30,
-          MonsterClass::Animal, MonsterResistance(MonsterResistance::RESIST_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0),
-          MonsterResistance(MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::IMMUNE_LIGHTNING.0), 625),
-    // 50-51: Unique Bosses
-    mdat!("Skeleton King", 3, 3, 7, 240, 240, MonsterAIID::SkeletonKing, 3, 40, 6, 16, 0, 0, 0, 35,
-          MonsterClass::Undead, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0),
-          MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), 2100),
-    mdat!("The Butcher", 2, 2, 7, 110, 110, MonsterAIID::Butcher, 0, 55, 6, 12, 0, 0, 0, 30,
-          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0),
-          MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0), 900),
-    // 52-108: Remaining Diablo monsters (placeholders - TODO: fill from monstdat.tsv)
-    mdat!("Overlord", 4, 6, 8, 32, 48, MonsterAIID::Fat, 2, 40, 10, 16, 0, 0, 0, 30,
-          MonsterClass::Demon, MonsterResistance::RESIST_MAGIC, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0), 465), // 52
-    mdat!("Mudman", 4, 6, 8, 32, 48, MonsterAIID::Fat, 2, 40, 10, 16, 0, 0, 0, 30,
-          MonsterClass::Demon, MonsterResistance::RESIST_MAGIC, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0), 465), // 53
-    mdat!("Toad", 4, 6, 8, 32, 48, MonsterAIID::Fat, 2, 40, 10, 16, 0, 0, 0, 30,
-          MonsterClass::Demon, MonsterResistance::RESIST_MAGIC, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0), 465), // 54
-    mdat!("Flayed", 4, 6, 8, 32, 48, MonsterAIID::Rhino, 2, 40, 10, 16, 0, 0, 0, 30,
-          MonsterClass::Animal, MonsterResistance::NONE, MonsterResistance::RESIST_FIRE, 465), // 55
-    mdat!("Wyrm", 4, 6, 8, 32, 48, MonsterAIID::Rhino, 2, 40, 10, 16, 0, 0, 0, 30,
-          MonsterClass::Animal, MonsterResistance::NONE, MonsterResistance::RESIST_FIRE, 465), // 56
-    mdat!("Cave Slug", 4, 6, 8, 32, 48, MonsterAIID::Rhino, 2, 40, 10, 16, 0, 0, 0, 30,
-          MonsterClass::Animal, MonsterResistance::NONE, MonsterResistance::RESIST_FIRE, 465), // 57
-    mdat!("Devil Wyrm", 5, 7, 10, 40, 60, MonsterAIID::Rhino, 3, 45, 12, 18, 0, 0, 0, 35,
-          MonsterClass::Animal, MonsterResistance::RESIST_FIRE, MonsterResistance::IMMUNE_FIRE, 600), // 58
-    mdat!("Devour", 5, 7, 10, 40, 60, MonsterAIID::Rhino, 3, 45, 12, 18, 0, 0, 0, 35,
-          MonsterClass::Animal, MonsterResistance::RESIST_FIRE, MonsterResistance::IMMUNE_FIRE, 600), // 59
-    mdat!("Magma Demon", 5, 7, 10, 40, 60, MonsterAIID::Magma, 3, 45, 12, 18, 40, 10, 16, 35,
-          MonsterClass::Demon, MonsterResistance::RESIST_FIRE, MonsterResistance::IMMUNE_FIRE, 600), // 60
-    mdat!("Magma Demon", 6, 8, 12, 48, 72, MonsterAIID::Magma, 3, 50, 14, 20, 45, 12, 18, 40,
-          MonsterClass::Demon, MonsterResistance::RESIST_FIRE, MonsterResistance::IMMUNE_FIRE, 720), // 61
-    mdat!("Magma Demon", 7, 9, 14, 56, 84, MonsterAIID::Magma, 3, 55, 16, 22, 50, 14, 20, 45,
-          MonsterClass::Demon, MonsterResistance::IMMUNE_FIRE, MonsterResistance::IMMUNE_FIRE, 850), // 62
-    mdat!("Magma Demon", 8, 10, 16, 64, 96, MonsterAIID::Magma, 3, 60, 18, 24, 55, 16, 22, 50,
-          MonsterClass::Demon, MonsterResistance::IMMUNE_FIRE, MonsterResistance::IMMUNE_FIRE, 1000), // 63
-    mdat!("Horned Demon", 6, 8, 12, 48, 72, MonsterAIID::Rhino, 2, 50, 12, 20, 0, 0, 0, 40,
-          MonsterClass::Demon, MonsterResistance::RESIST_MAGIC, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0), 720), // 64
-    mdat!("Mudrun", 7, 9, 14, 56, 84, MonsterAIID::Rhino, 3, 55, 14, 22, 0, 0, 0, 45,
-          MonsterClass::Demon, MonsterResistance::RESIST_MAGIC, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0), 850), // 65
-    mdat!("Frost Charger", 8, 10, 16, 64, 96, MonsterAIID::Rhino, 3, 60, 16, 24, 0, 0, 0, 50,
-          MonsterClass::Demon, MonsterResistance::RESIST_MAGIC, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_LIGHTNING.0), 1000), // 66
-    mdat!("Obsidian Lord", 9, 11, 18, 72, 108, MonsterAIID::Rhino, 3, 65, 18, 26, 0, 0, 0, 55,
-          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0),
-          MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 1170), // 67
-    mdat!("Bone Demon", 7, 9, 14, 56, 84, MonsterAIID::BoneDemon, 3, 55, 14, 22, 50, 14, 20, 45,
-          MonsterClass::Undead, MonsterResistance::IMMUNE_MAGIC, MonsterResistance::IMMUNE_MAGIC, 850), // 68
-    mdat!("Red Death", 8, 10, 16, 64, 96, MonsterAIID::Mega, 3, 60, 16, 24, 0, 0, 0, 50,
-          MonsterClass::Undead, MonsterResistance::IMMUNE_MAGIC, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_FIRE.0), 1000), // 69
-    mdat!("Litch Demon", 9, 11, 18, 72, 108, MonsterAIID::Lich, 3, 65, 18, 26, 60, 18, 24, 55,
-          MonsterClass::Undead, MonsterResistance::IMMUNE_MAGIC, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_LIGHTNING.0), 1170), // 70
-    mdat!("Undead Balrog", 10, 12, 20, 80, 120, MonsterAIID::Mega, 3, 70, 20, 28, 0, 0, 0, 60,
-          MonsterClass::Undead, MonsterResistance::IMMUNE_MAGIC, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 1350), // 71
-    mdat!("Incinerator", 8, 10, 16, 64, 96, MonsterAIID::FireMan, 3, 60, 16, 24, 55, 16, 22, 50,
-          MonsterClass::Demon, MonsterResistance::IMMUNE_FIRE, MonsterResistance::IMMUNE_FIRE, 1000), // 72
-    mdat!("Flame Lord", 9, 11, 18, 72, 108, MonsterAIID::FireMan, 3, 65, 18, 26, 60, 18, 24, 55,
-          MonsterClass::Demon, MonsterResistance::IMMUNE_FIRE, MonsterResistance::IMMUNE_FIRE, 1170), // 73
-    mdat!("Doom Fire", 10, 12, 20, 80, 120, MonsterAIID::FireMan, 3, 70, 20, 28, 65, 20, 26, 60,
-          MonsterClass::Demon, MonsterResistance::IMMUNE_FIRE, MonsterResistance::IMMUNE_FIRE, 1350), // 74
-    mdat!("Hell Burn", 11, 13, 22, 88, 132, MonsterAIID::FireMan, 3, 75, 22, 30, 70, 22, 28, 65,
-          MonsterClass::Demon, MonsterResistance::IMMUNE_FIRE, MonsterResistance::IMMUNE_FIRE, 1540), // 75
-    mdat!("Storm Demon", 7, 9, 14, 56, 84, MonsterAIID::Storm, 3, 55, 14, 22, 50, 14, 20, 45,
-          MonsterClass::Demon, MonsterResistance::RESIST_LIGHTNING, MonsterResistance::IMMUNE_LIGHTNING, 850), // 76
-    mdat!("Storm Rider", 8, 10, 16, 64, 96, MonsterAIID::Storm, 3, 60, 16, 24, 55, 16, 22, 50,
-          MonsterClass::Demon, MonsterResistance::RESIST_LIGHTNING, MonsterResistance::IMMUNE_LIGHTNING, 1000), // 77
-    mdat!("Storm Lord", 9, 11, 18, 72, 108, MonsterAIID::Storm, 3, 65, 18, 26, 60, 18, 24, 55,
-          MonsterClass::Demon, MonsterResistance::IMMUNE_LIGHTNING, MonsterResistance::IMMUNE_LIGHTNING, 1170), // 78
-    mdat!("Maelstrom", 10, 12, 20, 80, 120, MonsterAIID::Storm, 3, 70, 20, 28, 65, 20, 26, 60,
-          MonsterClass::Demon, MonsterResistance::IMMUNE_LIGHTNING, MonsterResistance::IMMUNE_LIGHTNING, 1350), // 79
-    mdat!("Big Fallen", 4, 6, 8, 32, 48, MonsterAIID::Fallen, 2, 40, 10, 16, 0, 0, 0, 30,
-          MonsterClass::Animal, MonsterResistance::NONE, MonsterResistance::RESIST_FIRE, 465), // 80
-    mdat!("Winged", 6, 8, 12, 48, 72, MonsterAIID::Bat, 2, 50, 12, 20, 0, 0, 0, 40,
-          MonsterClass::Demon, MonsterResistance::RESIST_FIRE, MonsterResistance::IMMUNE_FIRE, 720), // 81
-    mdat!("Gargoyle", 7, 9, 14, 56, 84, MonsterAIID::Gargoyle, 3, 55, 14, 22, 0, 0, 0, 45,
-          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0),
-          MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 850), // 82
-    mdat!("Blood Claw", 8, 10, 16, 64, 96, MonsterAIID::Gargoyle, 3, 60, 16, 24, 0, 0, 0, 50,
-          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0),
-          MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 1000), // 83
-    mdat!("Death Wing", 9, 11, 18, 72, 108, MonsterAIID::Gargoyle, 3, 65, 18, 26, 0, 0, 0, 55,
-          MonsterClass::Demon, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_FIRE.0),
-          MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 1170), // 84
-    mdat!("Mega Demon", 8, 10, 16, 64, 96, MonsterAIID::Mega, 3, 60, 16, 24, 55, 16, 22, 50,
-          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0),
-          MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_FIRE.0), 1000), // 85
-    mdat!("Guard", 9, 11, 18, 72, 108, MonsterAIID::Mega, 3, 65, 18, 26, 60, 18, 24, 55,
-          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0),
-          MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 1170), // 86
-    mdat!("Vortex Lord", 10, 12, 20, 80, 120, MonsterAIID::Mega, 3, 70, 20, 28, 65, 20, 26, 60,
-          MonsterClass::Demon, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_FIRE.0),
-          MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 1350), // 87
-    mdat!("Balrog", 11, 13, 22, 88, 132, MonsterAIID::Mega, 3, 75, 22, 30, 70, 22, 28, 65,
-          MonsterClass::Demon, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0),
-          MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 1540), // 88
-    mdat!("Viper", 6, 8, 12, 48, 72, MonsterAIID::Snake, 2, 50, 12, 20, 45, 12, 18, 40,
-          MonsterClass::Animal, MonsterResistance::NONE, MonsterResistance::RESIST_FIRE, 720), // 89
-    mdat!("Red Snake", 7, 9, 14, 56, 84, MonsterAIID::Snake, 3, 55, 14, 22, 50, 14, 20, 45,
-          MonsterClass::Animal, MonsterResistance::RESIST_FIRE, MonsterResistance::IMMUNE_FIRE, 850), // 90
-    mdat!("Cave Viper", 8, 10, 16, 64, 96, MonsterAIID::Snake, 3, 60, 16, 24, 55, 16, 22, 50,
-          MonsterClass::Animal, MonsterResistance::RESIST_FIRE, MonsterResistance(MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), 1000), // 91
-    mdat!("Golden Viper", 9, 11, 18, 72, 108, MonsterAIID::Snake, 3, 65, 18, 26, 60, 18, 24, 55,
-          MonsterClass::Animal, MonsterResistance(MonsterResistance::RESIST_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0),
-          MonsterResistance(MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::IMMUNE_LIGHTNING.0), 1170), // 92
-    mdat!("Black Knight", 7, 9, 14, 56, 84, MonsterAIID::Mega, 3, 55, 14, 22, 0, 0, 0, 45,
-          MonsterClass::Undead, MonsterResistance::IMMUNE_MAGIC, MonsterResistance::IMMUNE_MAGIC, 850), // 93
-    mdat!("Doom Guard", 8, 10, 16, 64, 96, MonsterAIID::Mega, 3, 60, 16, 24, 0, 0, 0, 50,
-          MonsterClass::Undead, MonsterResistance::IMMUNE_MAGIC, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_FIRE.0), 1000), // 94
-    mdat!("Steel Lord", 9, 11, 18, 72, 108, MonsterAIID::Mega, 3, 65, 18, 26, 0, 0, 0, 55,
-          MonsterClass::Undead, MonsterResistance::IMMUNE_MAGIC, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_LIGHTNING.0), 1170), // 95
-    mdat!("Blood Knight", 10, 12, 20, 80, 120, MonsterAIID::Mega, 3, 70, 20, 28, 0, 0, 0, 60,
-          MonsterClass::Undead, MonsterResistance::IMMUNE_MAGIC, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 1350), // 96
-    mdat!("Unraveler", 10, 12, 20, 80, 120, MonsterAIID::Counselor, 3, 70, 20, 28, 65, 20, 26, 60,
-          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0),
-          MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_FIRE.0), 1350), // 97
-    mdat!("Hollow One", 11, 13, 22, 88, 132, MonsterAIID::Counselor, 3, 75, 22, 30, 70, 22, 28, 65,
-          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0),
-          MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 1540), // 98
-    mdat!("Pain Master", 12, 14, 24, 96, 144, MonsterAIID::Counselor, 3, 80, 24, 32, 75, 24, 30, 70,
-          MonsterClass::Demon, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_FIRE.0),
-          MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 1740), // 99
-    mdat!("Reality Weaver", 13, 15, 26, 104, 156, MonsterAIID::Counselor, 3, 85, 26, 34, 80, 26, 32, 75,
-          MonsterClass::Demon, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0),
-          MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 1950), // 100
-    mdat!("Succubus", 11, 13, 22, 88, 132, MonsterAIID::Succubus, 3, 75, 22, 30, 70, 22, 28, 65,
-          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0),
-          MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 1540), // 101
-    mdat!("Snow Witch", 12, 14, 24, 96, 144, MonsterAIID::Succubus, 3, 80, 24, 32, 75, 24, 30, 70,
-          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0),
-          MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 1740), // 102
-    mdat!("Hell Spawn", 13, 15, 26, 104, 156, MonsterAIID::Succubus, 3, 85, 26, 34, 80, 26, 32, 75,
-          MonsterClass::Demon, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_FIRE.0),
-          MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 1950), // 103
-    mdat!("Soul Burner", 13, 15, 26, 104, 156, MonsterAIID::Counselor, 3, 85, 26, 34, 80, 26, 32, 75,
-          MonsterClass::Demon, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0),
-          MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 1950), // 104
-    mdat!("Counselor", 10, 12, 20, 80, 120, MonsterAIID::Counselor, 3, 70, 20, 28, 65, 20, 26, 60,
-          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0),
-          MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_FIRE.0), 1350), // 105
-    mdat!("Magistrate", 11, 13, 22, 88, 132, MonsterAIID::Counselor, 3, 75, 22, 30, 70, 22, 28, 65,
-          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0),
-          MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 1540), // 106
-    mdat!("Cabalist", 12, 14, 24, 96, 144, MonsterAIID::Counselor, 3, 80, 24, 32, 75, 24, 30, 70,
-          MonsterClass::Demon, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_FIRE.0),
-          MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 1740), // 107
-    mdat!("Advocate", 13, 15, 26, 104, 156, MonsterAIID::Counselor, 3, 85, 26, 34, 80, 26, 32, 75,
-          MonsterClass::Demon, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0),
-          MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 1950), // 108
+    // 26: MT_RSKELSD
+    mdat!("Burning Dead Captain", 3, 5, 6, 16, 30, MonsterAIID::SkeletonMelee, 2, 35, 4, 10, 0, 0, 0, 15,
+          MonsterClass::Undead, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_FIRE.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 393),
+    // 27: MT_XSKELSD
+    mdat!("Horror Captain", 4, 6, 8, 35, 50, MonsterAIID::SkeletonMelee, 3, 40, 5, 14, 0, 0, 0, 30,
+          MonsterClass::Undead, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_LIGHTNING.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_LIGHTNING.0), 604),
+    // 28: MT_INVILORD
+    mdat!("Invisible Lord", 19, 20, 14, 278, 278, MonsterAIID::SkeletonMelee, 3, 65, 16, 30, 0, 0, 0, 60,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), 2000),
+    // 29: MT_SNEAK
+    mdat!("Hidden", 2, 5, 5, 8, 24, MonsterAIID::Sneak, 0, 35, 3, 6, 0, 0, 0, 25,
+          MonsterClass::Demon, MonsterResistance::NONE, MonsterResistance::NONE, 278),
+    // 30: MT_STALKER
+    mdat!("Stalker", 5, 7, 9, 30, 45, MonsterAIID::Sneak, 1, 40, 8, 16, 0, 0, 0, 30,
+          MonsterClass::Demon, MonsterResistance::NONE, MonsterResistance::NONE, 630),
+    // 31: MT_UNSEEN
+    mdat!("Unseen", 6, 8, 11, 35, 50, MonsterAIID::Sneak, 2, 45, 12, 20, 0, 0, 0, 30,
+          MonsterClass::Demon, MonsterResistance::RESIST_MAGIC, MonsterResistance::IMMUNE_MAGIC, 935),
+    // 32: MT_ILLWEAV
+    mdat!("Illusion Weaver", 8, 10, 13, 40, 60, MonsterAIID::Sneak, 3, 60, 16, 24, 0, 0, 0, 30,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_FIRE.0), 1500),
+    // 33: MT_LRDSAYTR
+    mdat!("Satyr Lord", 21, 22, 28, 160, 200, MonsterAIID::SkeletonMelee, 3, 90, 20, 30, 0, 0, 0, 70,
+          MonsterClass::Animal, MonsterResistance(MonsterResistance::RESIST_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::IMMUNE_LIGHTNING.0), 2800),
+    // 34: MT_NGOATMC
+    mdat!("Flesh Clan", 4, 6, 8, 30, 45, MonsterAIID::GoatMelee, 0, 50, 4, 10, 0, 0, 0, 40,
+          MonsterClass::Demon, MonsterResistance::NONE, MonsterResistance::NONE, 460),
+    // 35: MT_BGOATMC
+    mdat!("Stone Clan", 5, 7, 10, 40, 55, MonsterAIID::GoatMelee, 1, 60, 6, 12, 0, 0, 0, 40,
+          MonsterClass::Demon, MonsterResistance::RESIST_MAGIC, MonsterResistance::IMMUNE_MAGIC, 685),
+    // 36: MT_RGOATMC
+    mdat!("Fire Clan", 6, 8, 12, 50, 65, MonsterAIID::GoatMelee, 2, 70, 8, 16, 0, 0, 0, 45,
+          MonsterClass::Demon, MonsterResistance::RESIST_FIRE, MonsterResistance::IMMUNE_FIRE, 906),
+    // 37: MT_GGOATMC
+    mdat!("Night Clan", 7, 9, 14, 55, 70, MonsterAIID::GoatMelee, 3, 80, 10, 20, 15, 30, 30, 50,
+          MonsterClass::Demon, MonsterResistance::RESIST_MAGIC, MonsterResistance::IMMUNE_MAGIC, 1190),
+    // 38: MT_FIEND
+    mdat!("Fiend", 2, 3, 3, 3, 6, MonsterAIID::Bat, 0, 35, 1, 6, 0, 0, 0, 0,
+          MonsterClass::Animal, MonsterResistance::NONE, MonsterResistance::NONE, 102),
+    // 39: MT_BLINK
+    mdat!("Blink", 3, 5, 7, 12, 28, MonsterAIID::Bat, 1, 45, 1, 8, 0, 0, 0, 15,
+          MonsterClass::Animal, MonsterResistance::NONE, MonsterResistance::NONE, 340),
+    // 40: MT_GLOOM
+    mdat!("Gloom", 4, 6, 9, 28, 36, MonsterAIID::Bat, 2, 70, 4, 12, 0, 0, 0, 35,
+          MonsterClass::Animal, MonsterResistance::RESIST_MAGIC, MonsterResistance::RESIST_MAGIC, 509),
+    // 41: MT_FAMILIAR
+    mdat!("Familiar", 6, 8, 13, 20, 35, MonsterAIID::Bat, 3, 50, 4, 16, 0, 0, 0, 35,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::IMMUNE_LIGHTNING.0), MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::IMMUNE_LIGHTNING.0), 448),
+    // 42: MT_NGOATBW
+    mdat!("Flesh Clan", 4, 6, 8, 20, 35, MonsterAIID::GoatRanged, 0, 35, 1, 7, 0, 0, 0, 35,
+          MonsterClass::Demon, MonsterResistance::NONE, MonsterResistance::NONE, 448),
+    // 43: MT_BGOATBW
+    mdat!("Stone Clan", 5, 7, 10, 30, 40, MonsterAIID::GoatRanged, 1, 40, 2, 9, 0, 0, 0, 35,
+          MonsterClass::Demon, MonsterResistance::RESIST_MAGIC, MonsterResistance::IMMUNE_MAGIC, 645),
+    // 44: MT_RGOATBW
+    mdat!("Fire Clan", 6, 8, 12, 40, 50, MonsterAIID::GoatRanged, 2, 45, 3, 11, 0, 0, 0, 35,
+          MonsterClass::Demon, MonsterResistance::RESIST_FIRE, MonsterResistance::IMMUNE_FIRE, 822),
+    // 45: MT_GGOATBW
+    mdat!("Night Clan", 7, 9, 14, 50, 65, MonsterAIID::GoatRanged, 3, 50, 4, 13, 15, 0, 0, 40,
+          MonsterClass::Demon, MonsterResistance::RESIST_MAGIC, MonsterResistance::IMMUNE_MAGIC, 1092),
+    // 46: MT_NACID
+    mdat!("Acid Beast", 6, 8, 11, 40, 66, MonsterAIID::Acid, 0, 40, 4, 12, 25, 0, 0, 30,
+          MonsterClass::Animal, MonsterResistance::IMMUNE_ACID, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_ACID.0), 846),
+    // 47: MT_RACID
+    mdat!("Poison Spitter", 8, 10, 15, 60, 85, MonsterAIID::Acid, 1, 45, 4, 16, 25, 0, 0, 30,
+          MonsterClass::Animal, MonsterResistance::IMMUNE_ACID, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_ACID.0), 1248),
+    // 48: MT_BACID
+    mdat!("Pit Beast", 10, 12, 21, 80, 110, MonsterAIID::Acid, 2, 55, 8, 18, 35, 0, 0, 35,
+          MonsterClass::Animal, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::IMMUNE_ACID.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_LIGHTNING.0 | MonsterResistance::IMMUNE_ACID.0), 2060),
+    // 49: MT_XACID
+    mdat!("Lava Maw", 12, 14, 25, 100, 150, MonsterAIID::Acid, 3, 65, 10, 20, 40, 0, 0, 35,
+          MonsterClass::Animal, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::IMMUNE_ACID.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::IMMUNE_ACID.0), 2940),
+    // 50: MT_SKING
+    mdat!("Skeleton King", 4, 4, 9, 140, 140, MonsterAIID::SkeletonKing, 3, 60, 6, 16, 0, 0, 0, 70,
+          MonsterClass::Undead, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::IMMUNE_LIGHTNING.0), 570),
+    // 51: MT_CLEAVER
+    mdat!("The Butcher", 1, 1, 1, 320, 320, MonsterAIID::Butcher, 3, 50, 6, 12, 0, 0, 0, 50,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::IMMUNE_LIGHTNING.0), 710),
+    // 52: MT_FAT
+    mdat!("Overlord", 5, 7, 10, 60, 80, MonsterAIID::Fat, 0, 55, 6, 12, 0, 0, 0, 55,
+          MonsterClass::Demon, MonsterResistance::NONE, MonsterResistance::RESIST_FIRE, 635),
+    // 53: MT_MUDMAN
+    mdat!("Mud Man", 7, 9, 14, 100, 125, MonsterAIID::Fat, 1, 60, 8, 16, 0, 0, 0, 60,
+          MonsterClass::Demon, MonsterResistance::NONE, MonsterResistance::IMMUNE_LIGHTNING, 1165),
+    // 54: MT_TOAD
+    mdat!("Toad Demon", 8, 10, 16, 135, 160, MonsterAIID::Fat, 2, 70, 8, 16, 40, 8, 20, 65,
+          MonsterClass::Demon, MonsterResistance::IMMUNE_MAGIC, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_LIGHTNING.0), 1380),
+    // 55: MT_FLAYED
+    mdat!("Flayed One", 10, 12, 20, 160, 200, MonsterAIID::Fat, 3, 85, 10, 20, 0, 0, 0, 70,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 2058),
+    // 56: MT_WYRM
+    mdat!("Wyrm", 5, 7, 11, 60, 90, MonsterAIID::SkeletonMelee, 0, 40, 4, 10, 0, 0, 0, 25,
+          MonsterClass::Animal, MonsterResistance::RESIST_MAGIC, MonsterResistance::RESIST_MAGIC, 660),
+    // 57: MT_CAVSLUG
+    mdat!("Cave Slug", 6, 8, 13, 75, 110, MonsterAIID::SkeletonMelee, 1, 50, 6, 13, 0, 0, 0, 30,
+          MonsterClass::Animal, MonsterResistance::RESIST_MAGIC, MonsterResistance::RESIST_MAGIC, 994),
+    // 58: MT_DVLWYRM
+    mdat!("Devil Wyrm", 7, 9, 15, 100, 140, MonsterAIID::SkeletonMelee, 2, 55, 8, 16, 0, 0, 0, 30,
+          MonsterClass::Animal, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0), MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0), 1320),
+    // 59: MT_DEVOUR
+    mdat!("Devourer", 8, 10, 17, 125, 200, MonsterAIID::SkeletonMelee, 3, 60, 10, 20, 0, 0, 0, 35,
+          MonsterClass::Animal, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0), MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0), 1827),
+    // 60: MT_NMAGMA
+    mdat!("Magma Demon", 8, 9, 13, 50, 70, MonsterAIID::Magma, 0, 45, 2, 10, 50, 0, 0, 45,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_FIRE.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 1076),
+    // 61: MT_YMAGMA
+    mdat!("Blood Stone", 8, 10, 14, 55, 75, MonsterAIID::Magma, 1, 50, 2, 12, 50, 0, 0, 45,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 1309),
+    // 62: MT_BMAGMA
+    mdat!("Hell Stone", 9, 11, 16, 60, 80, MonsterAIID::Magma, 2, 60, 2, 20, 60, 0, 0, 50,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 1680),
+    // 63: MT_WMAGMA
+    mdat!("Lava Lord", 9, 11, 18, 70, 85, MonsterAIID::Magma, 3, 75, 4, 24, 60, 0, 0, 60,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 2124),
+    // 64: MT_HORNED
+    mdat!("Horned Demon", 7, 9, 13, 40, 80, MonsterAIID::Rhino, 0, 60, 2, 16, 100, 5, 32, 40,
+          MonsterClass::Animal, MonsterResistance::NONE, MonsterResistance::RESIST_FIRE, 1172),
+    // 65: MT_MUDRUN
+    mdat!("Mud Runner", 8, 10, 15, 50, 90, MonsterAIID::Rhino, 1, 70, 6, 18, 100, 12, 36, 45,
+          MonsterClass::Animal, MonsterResistance::NONE, MonsterResistance::RESIST_FIRE, 1404),
+    // 66: MT_FROSTC
+    mdat!("Frost Charger", 9, 11, 17, 60, 100, MonsterAIID::Rhino, 2, 80, 8, 20, 100, 20, 40, 50,
+          MonsterClass::Animal, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_LIGHTNING.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_LIGHTNING.0), 1720),
+    // 67: MT_OBLORD
+    mdat!("Obsidian Lord", 10, 12, 19, 70, 110, MonsterAIID::Rhino, 3, 90, 10, 22, 100, 20, 50, 55,
+          MonsterClass::Animal, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_LIGHTNING.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::IMMUNE_LIGHTNING.0), 1809),
+    // 68: MT_BONEDMN
+    mdat!("oldboned", 24, 24, 12, 70, 70, MonsterAIID::Storm, 0, 60, 6, 14, 12, 0, 0, 50,
+          MonsterClass::Demon, MonsterResistance::IMMUNE_MAGIC, MonsterResistance::IMMUNE_MAGIC, 1344),
+    // 69: MT_REDDTH
+    mdat!("Red Death", 8, 10, 16, 96, 96, MonsterAIID::Storm, 1, 75, 10, 20, 0, 0, 0, 60,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 2168),
+    // 70: MT_LTCHDMN
+    mdat!("Litch Demon", 9, 11, 18, 110, 110, MonsterAIID::Storm, 2, 80, 10, 24, 0, 0, 0, 45,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_LIGHTNING.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_LIGHTNING.0), 2736),
+    // 71: MT_UDEDBLRG
+    mdat!("Undead Balrog", 11, 13, 22, 130, 130, MonsterAIID::Storm, 3, 85, 12, 30, 0, 0, 0, 65,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), 3575),
+    // 72: MT_INCIN
+    mdat!("Incinerator", 21, 22, 16, 30, 45, MonsterAIID::FireMan, 0, 75, 8, 16, 0, 0, 0, 25,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 1888),
+    // 73: MT_FLAMLRD
+    mdat!("Flame Lord", 22, 23, 18, 40, 55, MonsterAIID::FireMan, 1, 75, 10, 20, 0, 0, 0, 25,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 2250),
+    // 74: MT_DOOMFIRE
+    mdat!("Doom Fire", 23, 24, 20, 50, 65, MonsterAIID::FireMan, 2, 80, 12, 24, 0, 0, 0, 30,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), 2740),
+    // 75: MT_HELLBURN
+    mdat!("Hell Burner", 24, 24, 22, 60, 80, MonsterAIID::FireMan, 3, 85, 15, 30, 0, 0, 0, 30,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), 3355),
+    // 76: MT_STORM
+    mdat!("Red Storm", 9, 11, 18, 55, 110, MonsterAIID::Storm, 0, 80, 8, 18, 75, 4, 16, 30,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_LIGHTNING.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_LIGHTNING.0), 2160),
+    // 77: MT_RSTORM
+    mdat!("Storm Rider", 10, 12, 20, 60, 120, MonsterAIID::Storm, 1, 80, 8, 18, 80, 4, 16, 30,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::IMMUNE_LIGHTNING.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_LIGHTNING.0), 2391),
+    // 78: MT_STORML
+    mdat!("Storm Lord", 11, 13, 22, 75, 135, MonsterAIID::Storm, 2, 85, 12, 24, 75, 4, 16, 35,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::IMMUNE_LIGHTNING.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_LIGHTNING.0), 2775),
+    // 79: MT_MAEL
+    mdat!("Maelstrom", 12, 14, 24, 90, 150, MonsterAIID::Storm, 3, 90, 12, 28, 75, 4, 16, 40,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::IMMUNE_LIGHTNING.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_LIGHTNING.0), 3177),
+    // 80: MT_BIGFALL
+    mdat!("Devil Kin Brute", 21, 22, 27, 120, 160, MonsterAIID::SkeletonMelee, 3, 100, 18, 24, 0, 0, 0, 70,
+          MonsterClass::Animal, MonsterResistance(MonsterResistance::RESIST_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), 2400),
+    // 81: MT_WINGED
+    mdat!("Winged-Demon", 5, 7, 9, 45, 60, MonsterAIID::Gargoyle, 0, 50, 10, 16, 0, 0, 0, 45,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_FIRE.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 662),
+    // 82: MT_GARGOYLE
+    mdat!("Gargoyle", 7, 9, 13, 60, 90, MonsterAIID::Gargoyle, 1, 65, 10, 16, 0, 0, 0, 45,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_LIGHTNING.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_LIGHTNING.0), 1205),
+    // 83: MT_BLOODCLW
+    mdat!("Blood Claw", 9, 11, 19, 75, 125, MonsterAIID::Gargoyle, 2, 80, 14, 22, 0, 0, 0, 50,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), 1873),
+    // 84: MT_DEATHW
+    mdat!("Death Wing", 10, 12, 23, 90, 150, MonsterAIID::Gargoyle, 3, 95, 16, 28, 0, 0, 0, 60,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_LIGHTNING.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_FIRE.0 | MonsterResistance::IMMUNE_LIGHTNING.0), 2278),
+    // 85: MT_MEGA
+    mdat!("Slayer", 10, 12, 20, 120, 140, MonsterAIID::Mega, 0, 100, 12, 20, 0, 0, 0, 60,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 2300),
+    // 86: MT_GUARD
+    mdat!("Guardian", 11, 13, 22, 140, 160, MonsterAIID::Mega, 1, 110, 14, 22, 0, 0, 0, 65,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 2714),
+    // 87: MT_VTEXLRD
+    mdat!("Vortex Lord", 12, 14, 24, 160, 180, MonsterAIID::Mega, 2, 120, 18, 24, 0, 0, 0, 70,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), 3252),
+    // 88: MT_BALROG
+    mdat!("Balrog", 13, 15, 26, 180, 200, MonsterAIID::Mega, 3, 130, 22, 30, 0, 0, 0, 75,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), 3643),
+    // 89: MT_NSNAKE
+    mdat!("Cave Viper", 11, 13, 21, 100, 150, MonsterAIID::Snake, 0, 90, 8, 20, 0, 0, 0, 60,
+          MonsterClass::Demon, MonsterResistance::IMMUNE_MAGIC, MonsterResistance::IMMUNE_MAGIC, 2725),
+    // 90: MT_RSNAKE
+    mdat!("Fire Drake", 12, 14, 23, 120, 170, MonsterAIID::Snake, 1, 105, 12, 24, 0, 0, 0, 65,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_FIRE.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 3139),
+    // 91: MT_BSNAKE
+    mdat!("Gold Viper", 13, 14, 25, 140, 180, MonsterAIID::Snake, 2, 120, 15, 26, 0, 0, 0, 70,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_LIGHTNING.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_LIGHTNING.0), 3540),
+    // 92: MT_GSNAKE
+    mdat!("Azure Drake", 15, 16, 27, 160, 200, MonsterAIID::Snake, 3, 130, 18, 30, 0, 0, 0, 75,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_FIRE.0 | MonsterResistance::IMMUNE_LIGHTNING.0), 3791),
+    // 93: MT_NBLACK
+    mdat!("Black Knight", 12, 14, 24, 150, 150, MonsterAIID::SkeletonMelee, 0, 110, 15, 20, 0, 0, 0, 75,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_LIGHTNING.0), MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::IMMUNE_LIGHTNING.0), 3360),
+    // 94: MT_RTBLACK
+    mdat!("Doom Guard", 13, 15, 26, 165, 165, MonsterAIID::SkeletonMelee, 0, 130, 18, 25, 0, 0, 0, 75,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0), MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 3650),
+    // 95: MT_BTBLACK
+    mdat!("Steel Lord", 14, 16, 28, 180, 180, MonsterAIID::SkeletonMelee, 1, 120, 20, 30, 0, 0, 0, 80,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), 4252),
+    // 96: MT_RBLACK
+    mdat!("Blood Knight", 13, 14, 30, 200, 200, MonsterAIID::SkeletonMelee, 1, 130, 25, 35, 0, 0, 0, 85,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_FIRE.0 | MonsterResistance::IMMUNE_LIGHTNING.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_FIRE.0 | MonsterResistance::IMMUNE_LIGHTNING.0), 5130),
+    // 97: MT_UNRAV
+    mdat!("The Shredded", 17, 18, 23, 70, 90, MonsterAIID::SkeletonMelee, 0, 75, 4, 12, 0, 0, 0, 65,
+          MonsterClass::Undead, MonsterResistance(MonsterResistance::RESIST_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), MonsterResistance(MonsterResistance::RESIST_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), 900),
+    // 98: MT_HOLOWONE
+    mdat!("Hollow One", 18, 19, 27, 135, 240, MonsterAIID::SkeletonMelee, 1, 75, 12, 24, 0, 0, 0, 75,
+          MonsterClass::Undead, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), 4374),
+    // 99: MT_PAINMSTR
+    mdat!("Pain Master", 19, 20, 29, 110, 200, MonsterAIID::SkeletonMelee, 2, 80, 16, 30, 0, 0, 0, 80,
+          MonsterClass::Undead, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), 5147),
+    // 100: MT_REALWEAV
+    mdat!("Reality Weaver", 20, 20, 30, 135, 240, MonsterAIID::SkeletonMelee, 3, 85, 20, 35, 0, 0, 0, 85,
+          MonsterClass::Undead, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::IMMUNE_LIGHTNING.0), MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::IMMUNE_LIGHTNING.0), 5925),
+    // 101: MT_SUCCUBUS
+    mdat!("Succubus", 12, 14, 24, 120, 150, MonsterAIID::Succubus, 0, 100, 1, 20, 0, 0, 0, 60,
+          MonsterClass::Demon, MonsterResistance::RESIST_MAGIC, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_FIRE.0), 3696),
+    // 102: MT_SNOWWICH
+    mdat!("Snow Witch", 13, 15, 26, 135, 175, MonsterAIID::Succubus, 1, 110, 1, 24, 0, 0, 0, 65,
+          MonsterClass::Demon, MonsterResistance::RESIST_LIGHTNING, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_LIGHTNING.0), 4084),
+    // 103: MT_HLSPWN
+    mdat!("Hell Spawn", 14, 16, 28, 150, 200, MonsterAIID::Succubus, 2, 115, 1, 30, 0, 0, 0, 75,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::IMMUNE_LIGHTNING.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), 4480),
+    // 104: MT_SOLBRNR
+    mdat!("Soul Burner", 15, 16, 30, 140, 225, MonsterAIID::Succubus, 3, 120, 1, 35, 0, 0, 0, 85,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::IMMUNE_LIGHTNING.0), 4644),
+    // 105: MT_COUNSLR
+    mdat!("Counselor", 13, 14, 25, 70, 70, MonsterAIID::Counselor, 0, 90, 8, 20, 0, 0, 0, 0,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), 4070),
+    // 106: MT_MAGISTR
+    mdat!("Magistrate", 14, 15, 27, 85, 85, MonsterAIID::Counselor, 1, 100, 10, 24, 0, 0, 0, 0,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), 4478),
+    // 107: MT_CABALIST
+    mdat!("Cabalist", 15, 16, 29, 120, 120, MonsterAIID::Counselor, 2, 110, 14, 30, 0, 0, 0, 0,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0 | MonsterResistance::IMMUNE_LIGHTNING.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_FIRE.0 | MonsterResistance::IMMUNE_LIGHTNING.0), 4929),
+    // 108: MT_ADVOCATE
+    mdat!("Advocate", 16, 16, 30, 145, 145, MonsterAIID::Counselor, 3, 120, 15, 25, 0, 0, 0, 0,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_FIRE.0 | MonsterResistance::IMMUNE_LIGHTNING.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::IMMUNE_LIGHTNING.0), 4968),
     // 109: MT_GOLEM
-    mdat!("Golem", 0, 0, 0, 0, 0, MonsterAIID::Golem, 0, 0, 0, 0, 0, 0, 0, 25,
-          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0),
-          MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), 0),
+    mdat!("Golem", 1, 1, 12, 1, 1, MonsterAIID::Golem, 0, 0, 1, 1, 0, 0, 0, 1,
+          MonsterClass::Demon, MonsterResistance::NONE, MonsterResistance::NONE, 0),
     // 110: MT_DIABLO
-    mdat!("Diablo", 16, 16, 45, 1666, 1666, MonsterAIID::Diablo, 3, 150, 30, 60, 0, 0, 0, 145,
-          MonsterClass::Demon, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::IMMUNE_LIGHTNING.0),
-          MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::IMMUNE_LIGHTNING.0), 33300),
-    // 111-137: Hellfire expansion monsters (placeholders)
-    mdat!("Dark Mage", 14, 16, 28, 112, 168, MonsterAIID::Counselor, 3, 90, 28, 36, 85, 28, 34, 80,
-          MonsterClass::Demon, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0),
-          MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 2170), // 111
-    mdat!("Hell Boar", 3, 5, 6, 24, 36, MonsterAIID::Rhino, 2, 35, 6, 12, 0, 0, 0, 15,
-          MonsterClass::Animal, MonsterResistance::NONE, MonsterResistance::RESIST_FIRE, 375), // 112
-    mdat!("Stinger", 3, 5, 6, 24, 36, MonsterAIID::Bat, 2, 35, 6, 12, 0, 0, 0, 15,
-          MonsterClass::Animal, MonsterResistance::NONE, MonsterResistance::RESIST_LIGHTNING, 375), // 113
-    mdat!("Psychorb", 10, 12, 20, 80, 120, MonsterAIID::Psychorb, 3, 70, 20, 28, 65, 20, 26, 60,
-          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0),
-          MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_FIRE.0), 1350), // 114
-    mdat!("Arachnon", 6, 8, 12, 48, 72, MonsterAIID::Sneak, 2, 50, 12, 20, 0, 0, 0, 40,
-          MonsterClass::Animal, MonsterResistance::NONE, MonsterResistance::RESIST_FIRE, 720), // 115
-    mdat!("Fell Twin", 8, 10, 16, 64, 96, MonsterAIID::Mega, 3, 60, 16, 24, 0, 0, 0, 50,
-          MonsterClass::Demon, MonsterResistance::RESIST_MAGIC, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0), 1000), // 116
-    mdat!("Hork Spawn", 7, 9, 14, 56, 84, MonsterAIID::Fallen, 3, 55, 14, 22, 0, 0, 0, 45,
-          MonsterClass::Demon, MonsterResistance::RESIST_FIRE, MonsterResistance::IMMUNE_FIRE, 850), // 117
-    mdat!("Venom Tail", 8, 10, 16, 64, 96, MonsterAIID::Snake, 3, 60, 16, 24, 55, 16, 22, 50,
-          MonsterClass::Animal, MonsterResistance::RESIST_FIRE, MonsterResistance(MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), 1000), // 118
-    mdat!("Necromorb", 11, 13, 22, 88, 132, MonsterAIID::Necromorb, 3, 75, 22, 30, 70, 22, 28, 65,
-          MonsterClass::Undead, MonsterResistance::IMMUNE_MAGIC, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_FIRE.0), 1540), // 119
-    mdat!("Spider Lord", 9, 11, 18, 72, 108, MonsterAIID::Sneak, 3, 65, 18, 26, 0, 0, 0, 55,
-          MonsterClass::Animal, MonsterResistance::RESIST_FIRE, MonsterResistance::IMMUNE_FIRE, 1170), // 120
-    mdat!("Lash Worm", 10, 12, 20, 80, 120, MonsterAIID::Snake, 3, 70, 20, 28, 65, 20, 26, 60,
-          MonsterClass::Animal, MonsterResistance::RESIST_FIRE, MonsterResistance(MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), 1350), // 121
-    mdat!("Torchant", 8, 10, 16, 64, 96, MonsterAIID::Torchant, 3, 60, 16, 24, 55, 16, 22, 50,
-          MonsterClass::Animal, MonsterResistance::IMMUNE_FIRE, MonsterResistance::IMMUNE_FIRE, 1000), // 122
-    mdat!("Hork Demon", 11, 13, 22, 88, 132, MonsterAIID::HorkDemon, 3, 75, 22, 30, 0, 0, 0, 65,
-          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0),
-          MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 1540), // 123
-    mdat!("Defiler", 12, 14, 24, 96, 144, MonsterAIID::Acid, 3, 80, 24, 32, 0, 0, 0, 70,
-          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0),
-          MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 1740), // 124
-    mdat!("Gravedigger", 7, 9, 14, 56, 84, MonsterAIID::SkeletonMelee, 3, 55, 14, 22, 0, 0, 0, 45,
-          MonsterClass::Undead, MonsterResistance::IMMUNE_MAGIC, MonsterResistance::IMMUNE_MAGIC, 850), // 125
-    mdat!("Tomb Rat", 5, 7, 10, 40, 60, MonsterAIID::Scavenger, 3, 45, 10, 16, 0, 0, 0, 25,
-          MonsterClass::Animal, MonsterResistance::NONE, MonsterResistance::RESIST_LIGHTNING, 600), // 126
-    mdat!("Firebat", 8, 10, 16, 64, 96, MonsterAIID::FireBat, 3, 60, 16, 24, 55, 16, 22, 50,
-          MonsterClass::Demon, MonsterResistance::IMMUNE_FIRE, MonsterResistance::IMMUNE_FIRE, 1000), // 127
-    mdat!("Skullwing", 9, 11, 18, 72, 108, MonsterAIID::Bat, 3, 65, 18, 26, 60, 18, 24, 55,
-          MonsterClass::Undead, MonsterResistance::IMMUNE_MAGIC, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_FIRE.0), 1170), // 128
-    mdat!("Lich", 12, 14, 24, 96, 144, MonsterAIID::Lich, 3, 80, 24, 32, 75, 24, 30, 70,
-          MonsterClass::Undead, MonsterResistance::IMMUNE_MAGIC, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_FIRE.0), 1740), // 129
-    mdat!("Crypt Demon", 13, 15, 26, 104, 156, MonsterAIID::Mega, 3, 85, 26, 34, 0, 0, 0, 75,
-          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0),
-          MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 1950), // 130
-    mdat!("Hellbat", 10, 12, 20, 80, 120, MonsterAIID::Bat, 3, 70, 20, 28, 65, 20, 26, 60,
-          MonsterClass::Demon, MonsterResistance::IMMUNE_FIRE, MonsterResistance::IMMUNE_FIRE, 1350), // 131
-    mdat!("Bone Demon", 14, 16, 28, 112, 168, MonsterAIID::BoneDemon, 3, 90, 28, 36, 85, 28, 34, 80,
-          MonsterClass::Undead, MonsterResistance::IMMUNE_MAGIC, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_FIRE.0), 2170), // 132
-    mdat!("Arch Lich", 13, 15, 26, 104, 156, MonsterAIID::ArchLich, 3, 85, 26, 34, 80, 26, 32, 75,
-          MonsterClass::Undead, MonsterResistance::IMMUNE_MAGIC, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 1950), // 133
-    mdat!("Biclops", 12, 14, 24, 96, 144, MonsterAIID::Mega, 3, 80, 24, 32, 0, 0, 0, 70,
-          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0),
-          MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 1740), // 134
-    mdat!("Flesh Thing", 13, 15, 26, 104, 156, MonsterAIID::Mega, 3, 85, 26, 34, 0, 0, 0, 75,
-          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0),
-          MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 1950), // 136
-    mdat!("Reaper", 14, 16, 28, 112, 168, MonsterAIID::Mega, 3, 90, 28, 36, 0, 0, 0, 80,
-          MonsterClass::Undead, MonsterResistance::IMMUNE_MAGIC, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0), 2170), // 136
-    mdat!("Na-Krul", 16, 16, 50, 2000, 2000, MonsterAIID::SkeletonKing, 3, 170, 35, 70, 0, 0, 0, 160,
-          MonsterClass::Demon, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::IMMUNE_LIGHTNING.0),
-          MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::IMMUNE_LIGHTNING.0), 40000), // 137
+    mdat!("The Dark Lord", 26, 26, 30, 1666, 1666, MonsterAIID::Diablo, 3, 220, 30, 60, 0, 0, 0, 90,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), 31666),
+    // 111: MT_DARKMAGE
+    mdat!("The Arch-Litch Malignus", 21, 21, 30, 160, 160, MonsterAIID::Counselor, 3, 120, 20, 40, 0, 0, 0, 70,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::IMMUNE_LIGHTNING.0), 4968),
+    // 112: MT_HELLBOAR
+    mdat!("Hellboar", 17, 18, 23, 80, 100, MonsterAIID::SkeletonMelee, 2, 70, 16, 24, 0, 0, 0, 60,
+          MonsterClass::Demon, MonsterResistance::NONE, MonsterResistance(MonsterResistance::RESIST_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), 750),
+    // 113: MT_STINGER
+    mdat!("Stinger", 17, 18, 22, 30, 40, MonsterAIID::SkeletonMelee, 3, 85, 1, 20, 0, 0, 0, 50,
+          MonsterClass::Animal, MonsterResistance::NONE, MonsterResistance::RESIST_LIGHTNING, 500),
+    // 114: MT_PSYCHORB
+    mdat!("Psychorb", 17, 18, 22, 20, 30, MonsterAIID::Psychorb, 3, 80, 10, 10, 0, 0, 0, 40,
+          MonsterClass::Animal, MonsterResistance::NONE, MonsterResistance::RESIST_FIRE, 450),
+    // 115: MT_ARACHNON
+    mdat!("Arachnon", 17, 18, 22, 60, 80, MonsterAIID::SkeletonMelee, 3, 50, 5, 15, 0, 0, 0, 50,
+          MonsterClass::Animal, MonsterResistance::NONE, MonsterResistance::RESIST_LIGHTNING, 500),
+    // 116: MT_FELLTWIN
+    mdat!("Felltwin", 17, 18, 22, 50, 70, MonsterAIID::SkeletonMelee, 3, 70, 10, 18, 0, 0, 0, 50,
+          MonsterClass::Demon, MonsterResistance::NONE, MonsterResistance(MonsterResistance::RESIST_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), 600),
+    // 117: MT_HORKSPWN
+    mdat!("Hork Spawn", 18, 19, 22, 30, 30, MonsterAIID::SkeletonMelee, 3, 60, 10, 25, 0, 0, 0, 25,
+          MonsterClass::Demon, MonsterResistance::RESIST_MAGIC, MonsterResistance::RESIST_MAGIC, 250),
+    // 118: MT_VENMTAIL
+    mdat!("Venomtail", 19, 20, 24, 40, 50, MonsterAIID::SkeletonMelee, 3, 85, 1, 30, 0, 0, 0, 60,
+          MonsterClass::Animal, MonsterResistance::RESIST_LIGHTNING, MonsterResistance::IMMUNE_LIGHTNING, 1000),
+    // 119: MT_NECRMORB
+    mdat!("Necromorb", 19, 20, 24, 30, 40, MonsterAIID::Necromorb, 3, 80, 20, 20, 0, 0, 0, 50,
+          MonsterClass::Animal, MonsterResistance::RESIST_FIRE, MonsterResistance(MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), 1100),
+    // 120: MT_SPIDLORD
+    mdat!("Spider Lord", 19, 20, 24, 80, 100, MonsterAIID::Acid, 3, 60, 8, 20, 75, 10, 10, 60,
+          MonsterClass::Animal, MonsterResistance::RESIST_LIGHTNING, MonsterResistance(MonsterResistance::RESIST_FIRE.0 | MonsterResistance::IMMUNE_LIGHTNING.0), 1250),
+    // 121: MT_LASHWORM
+    mdat!("Lashworm", 19, 20, 20, 30, 30, MonsterAIID::SkeletonMelee, 3, 90, 12, 20, 0, 0, 0, 50,
+          MonsterClass::Animal, MonsterResistance::NONE, MonsterResistance::RESIST_FIRE, 600),
+    // 122: MT_TORCHANT
+    mdat!("Torchant", 19, 20, 22, 60, 80, MonsterAIID::Torchant, 3, 75, 20, 30, 0, 0, 0, 70,
+          MonsterClass::Animal, MonsterResistance::IMMUNE_FIRE, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), 1250),
+    // 123: MT_HORKDMN
+    mdat!("Hork Demon", 19, 19, 27, 120, 160, MonsterAIID::SkeletonMelee, 3, 60, 20, 35, 80, 0, 0, 80,
+          MonsterClass::Demon, MonsterResistance::RESIST_LIGHTNING, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::IMMUNE_LIGHTNING.0), 2000),
+    // 124: MT_DEFILER
+    mdat!("Hell Bug", 20, 20, 30, 240, 240, MonsterAIID::SkeletonMelee, 3, 110, 20, 30, 90, 50, 60, 80,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0 | MonsterResistance::IMMUNE_LIGHTNING.0), MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::IMMUNE_LIGHTNING.0), 5000),
+    // 125: MT_GRAVEDIG
+    mdat!("Gravedigger", 21, 21, 26, 120, 240, MonsterAIID::Scavenger, 3, 80, 2, 12, 0, 0, 0, 20,
+          MonsterClass::Undead, MonsterResistance::IMMUNE_LIGHTNING, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0 | MonsterResistance::IMMUNE_LIGHTNING.0), 2000),
+    // 126: MT_TOMBRAT
+    mdat!("Tomb Rat", 21, 22, 24, 80, 120, MonsterAIID::SkeletonMelee, 3, 120, 12, 25, 0, 0, 0, 30,
+          MonsterClass::Animal, MonsterResistance::NONE, MonsterResistance(MonsterResistance::RESIST_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), 1800),
+    // 127: MT_FIREBAT
+    mdat!("Firebat", 21, 22, 24, 60, 80, MonsterAIID::FireBat, 3, 100, 15, 20, 0, 0, 0, 70,
+          MonsterClass::Animal, MonsterResistance::IMMUNE_FIRE, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), 2400),
+    // 128: MT_SKLWING
+    mdat!("Skullwing", 21, 22, 27, 70, 70, MonsterAIID::SkeletonMelee, 0, 75, 15, 20, 75, 15, 20, 80,
+          MonsterClass::Undead, MonsterResistance(MonsterResistance::RESIST_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), MonsterResistance(MonsterResistance::RESIST_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), 3000),
+    // 129: MT_LICH
+    mdat!("Lich", 21, 22, 25, 80, 100, MonsterAIID::Lich, 3, 100, 15, 20, 0, 0, 0, 60,
+          MonsterClass::Undead, MonsterResistance::RESIST_LIGHTNING, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0 | MonsterResistance::IMMUNE_LIGHTNING.0), 3000),
+    // 130: MT_CRYPTDMN
+    mdat!("Crypt Demon", 22, 23, 28, 200, 240, MonsterAIID::SkeletonMelee, 3, 100, 20, 40, 0, 0, 0, 85,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::RESIST_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), 3200),
+    // 131: MT_HELLBAT
+    mdat!("Hellbat", 23, 24, 29, 100, 140, MonsterAIID::Torchant, 3, 110, 30, 30, 0, 0, 0, 80,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::IMMUNE_LIGHTNING.0), 3600),
+    // 132: MT_BONEDEMN
+    mdat!("Bone Demon", 23, 24, 30, 240, 280, MonsterAIID::BoneDemon, 0, 100, 40, 50, 160, 50, 50, 50,
+          MonsterClass::Undead, MonsterResistance(MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::IMMUNE_LIGHTNING.0), MonsterResistance(MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::IMMUNE_LIGHTNING.0), 5000),
+    // 133: MT_ARCHLICH
+    mdat!("Arch Lich", 23, 24, 30, 180, 200, MonsterAIID::ArchLich, 3, 120, 30, 30, 0, 0, 0, 75,
+          MonsterClass::Undead, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0 | MonsterResistance::IMMUNE_LIGHTNING.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::IMMUNE_LIGHTNING.0), 4000),
+    // 134: MT_BICLOPS
+    mdat!("Biclops", 23, 24, 30, 200, 240, MonsterAIID::SkeletonMelee, 3, 90, 40, 50, 0, 0, 0, 80,
+          MonsterClass::Demon, MonsterResistance::RESIST_LIGHTNING, MonsterResistance(MonsterResistance::RESIST_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), 4000),
+    // 135: MT_FLESTHNG
+    mdat!("Flesh Thing", 23, 24, 28, 300, 400, MonsterAIID::SkeletonMelee, 3, 150, 12, 18, 0, 0, 0, 70,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), MonsterResistance(MonsterResistance::RESIST_MAGIC.0 | MonsterResistance::RESIST_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), 4000),
+    // 136: MT_REAPER
+    mdat!("Reaper", 23, 24, 30, 260, 300, MonsterAIID::SkeletonMelee, 3, 120, 30, 35, 0, 0, 0, 90,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::IMMUNE_LIGHTNING.0), 6000),
+    // 137: MT_NAKRUL
+    mdat!("Na-Krul", 31, 31, 40, 1332, 1332, MonsterAIID::SkeletonMelee, 3, 150, 40, 50, 150, 40, 50, 125,
+          MonsterClass::Demon, MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::RESIST_LIGHTNING.0), MonsterResistance(MonsterResistance::IMMUNE_MAGIC.0 | MonsterResistance::IMMUNE_FIRE.0 | MonsterResistance::IMMUNE_LIGHTNING.0), 13333),
 ];
 
 /// Get monster data by ID using const array lookup
@@ -886,12 +959,13 @@ mod tests {
     fn test_skeleton_king_data() {
         let sk = get_monster_data(MonsterId::SkeletonKing);
         assert_eq!(sk.name, "Skeleton King");
-        assert_eq!(sk.level, 7);
-        assert_eq!(sk.hp_min, 240);
-        assert_eq!(sk.hp_max, 240);
+        // monstdat.tsv row 50 (MT_SKING).
+        assert_eq!(sk.level, 9);
+        assert_eq!(sk.hp_min, 140);
+        assert_eq!(sk.hp_max, 140);
         assert_eq!(sk.ai, MonsterAIID::SkeletonKing);
-        assert_eq!(sk.armor_class, 35);
-        assert_eq!(sk.experience, 2100);
+        assert_eq!(sk.armor_class, 70);
+        assert_eq!(sk.experience, 570);
         assert!(sk.resistance.immune_magic());
     }
 
@@ -899,35 +973,40 @@ mod tests {
     fn test_butcher_data() {
         let butcher = get_monster_data(MonsterId::Butcher);
         assert_eq!(butcher.name, "The Butcher");
-        assert_eq!(butcher.level, 7);
-        assert_eq!(butcher.hp_min, 110);
-        assert_eq!(butcher.hp_max, 110);
+        // monstdat.tsv row 51 (MT_CLEAVER).
+        assert_eq!(butcher.level, 1);
+        assert_eq!(butcher.hp_min, 320);
+        assert_eq!(butcher.hp_max, 320);
         assert_eq!(butcher.ai, MonsterAIID::Butcher);
-        assert_eq!(butcher.armor_class, 30);
+        assert_eq!(butcher.armor_class, 50);
         assert_eq!(butcher.monster_class, MonsterClass::Demon);
-        assert_eq!(butcher.experience, 900);
+        assert_eq!(butcher.experience, 710);
     }
 
     #[test]
     fn test_diablo_data() {
         let diablo = get_monster_data(MonsterId::Diablo);
-        assert_eq!(diablo.name, "Diablo");
-        assert_eq!(diablo.level, 45);
+        // monstdat.tsv row 110 (MT_DIABLO "The Dark Lord").
+        assert_eq!(diablo.name, "The Dark Lord");
+        assert_eq!(diablo.level, 30);
         assert_eq!(diablo.hp_min, 1666);
         assert_eq!(diablo.hp_max, 1666);
         assert_eq!(diablo.ai, MonsterAIID::Diablo);
-        assert_eq!(diablo.armor_class, 145);
-        assert_eq!(diablo.experience, 33300);
+        assert_eq!(diablo.armor_class, 90);
+        assert_eq!(diablo.experience, 31666);
         assert!(diablo.resistance.immune_magic());
-        assert!(diablo.resistance.immune_fire());
-        assert!(diablo.resistance.immune_lightning());
+        assert!(diablo.resistance.resists_fire());
+        assert!(diablo.resistance.resists_lightning());
     }
 
     #[test]
     fn test_golem_data() {
         let golem = get_monster_data(MonsterId::Golem);
         assert_eq!(golem.name, "Golem");
-        assert_eq!(golem.level, 0);
+        // monstdat.tsv row 109 (MT_GOLEM): level 12, 1 hp, no XP.
+        assert_eq!(golem.level, 12);
+        assert_eq!(golem.hp_min, 1);
+        assert_eq!(golem.hp_max, 1);
         assert_eq!(golem.ai, MonsterAIID::Golem);
         assert_eq!(golem.monster_class, MonsterClass::Demon);
         // Golem doesn't give XP
@@ -980,38 +1059,44 @@ mod tests {
         let familiar = get_monster_data(MonsterId::Familiar);
 
         // All use Succubus AI
-        assert_eq!(fiend.ai, MonsterAIID::Succubus);
-        assert_eq!(blink.ai, MonsterAIID::Succubus);
-        assert_eq!(gloom.ai, MonsterAIID::Succubus);
-        assert_eq!(familiar.ai, MonsterAIID::Succubus);
+        // monstdat.tsv rows 38-41: Fiend/Blink/Gloom/Familiar are Bats (Animal),
+        // not Succubi; Familiar is a Demon.
+        assert_eq!(fiend.ai, MonsterAIID::Bat);
+        assert_eq!(blink.ai, MonsterAIID::Bat);
+        assert_eq!(gloom.ai, MonsterAIID::Bat);
+        assert_eq!(familiar.ai, MonsterAIID::Bat);
 
         // All are Demons
-        assert_eq!(fiend.monster_class, MonsterClass::Demon);
+        assert_eq!(fiend.monster_class, MonsterClass::Animal);
+        assert_eq!(familiar.monster_class, MonsterClass::Demon);
 
         // Levels increase
-        assert_eq!(fiend.level, 9);
-        assert_eq!(blink.level, 11);
-        assert_eq!(gloom.level, 13);
-        assert_eq!(familiar.level, 15);
+        assert_eq!(fiend.level, 3);
+        assert_eq!(blink.level, 7);
+        assert_eq!(gloom.level, 9);
+        assert_eq!(familiar.level, 13);
 
         // All have special attacks
-        assert!(fiend.to_hit_special > 0);
-        assert!(blink.min_damage_special > 0);
+        // Current monstdat.tsv gives bats no special attacks.
+        assert_eq!(fiend.to_hit_special, 0);
+        assert_eq!(blink.min_damage_special, 0);
     }
 
     #[test]
     fn test_hellfire_monsters() {
         let nakrul = get_monster_data(MonsterId::NaKrul);
+        // monstdat.tsv row 137 (MT_NAKRUL).
         assert_eq!(nakrul.name, "Na-Krul");
-        assert_eq!(nakrul.level, 50);
-        assert_eq!(nakrul.hp_min, 2000);
-        assert_eq!(nakrul.experience, 40000);
+        assert_eq!(nakrul.level, 40);
+        assert_eq!(nakrul.hp_min, 1332);
+        assert_eq!(nakrul.experience, 13333);
         assert!(nakrul.resistance.immune_magic());
         assert!(nakrul.resistance.immune_fire());
-        assert!(nakrul.resistance.immune_lightning());
+        assert!(nakrul.resistance.resists_lightning());
 
         let hork = get_monster_data(MonsterId::HorkDemon);
-        assert_eq!(hork.ai, MonsterAIID::HorkDemon);
+        // monstdat.tsv row 123 (MT_HORKDMN) uses the SkeletonMelee AI.
+        assert_eq!(hork.ai, MonsterAIID::SkeletonMelee);
         assert_eq!(hork.monster_class, MonsterClass::Demon);
     }
 
@@ -1028,8 +1113,8 @@ mod tests {
         // Multiple immunities
         let diablo = get_monster_data(MonsterId::Diablo);
         assert!(diablo.resistance.immune_magic());
-        assert!(diablo.resistance.immune_fire());
-        assert!(diablo.resistance.immune_lightning());
+        assert!(diablo.resistance.resists_fire());
+        assert!(diablo.resistance.resists_lightning());
     }
 
     #[test]
