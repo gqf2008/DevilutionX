@@ -159,15 +159,22 @@ fn decodes_real_cpp_save_game_entry() {
         assert!(save.has_entry("game"), "{name} save has a game entry");
         let raw = save.read_entry("game").expect("read game entry");
         let decoded = codec_decode(&raw, PASSWORD_SPAWN_SINGLE);
-        assert!(decoded.len() >= 17, "{name} game entry decodes to a header");
+        assert!(decoded.len() >= 43, "{name} game entry decodes to a header");
+        let header = devilutionx_rs::game::loadsave::CppGameHeader::parse(&decoded)
+            .expect("C++ SaveGameData header parses");
         assert_eq!(
-            &decoded[0..4],
+            &header.magic,
             b"SHAR",
             "{name} game magic must be SHAR (spawn, non-Hellfire)"
         );
-        assert_eq!(decoded[4], 0, "{name} setlevel must be 0");
-        let currlevel = u32::from_be_bytes([decoded[9], decoded[10], decoded[11], decoded[12]]);
-        assert_eq!(currlevel, 1, "{name} fixture starts at level 1");
+        assert_eq!(header.setlevel, 0, "{name} setlevel must be 0");
+        assert_eq!(header.currlevel, 1, "{name} fixture starts at level 1");
+        assert_eq!(
+            header.leveltype, 1,
+            "{name} level 1 is DTYPE_CATHEDRAL (=1) via getHellfireLevelType"
+        );
+        assert!(header.active_monster_count >= 0, "{name} monster count sane");
+        assert!(header.active_item_count >= 0, "{name} item count sane");
         // A non-spawn password must fail the checksum (proves the password gate).
         let wrong = codec_decode(&raw, "xrgyrkj1");
         assert!(wrong.is_empty(), "wrong password must be rejected by checksum");

@@ -1653,6 +1653,70 @@ pub fn format_save_date(timestamp: u64) -> String {
 }
 
 // ============================================================================
+// C++ `SaveGameData` header (Source/loadsave.cpp:2762-2806)
+// ============================================================================
+
+/// The fixed header of a decoded save-archive `game` entry, read with the C++
+/// field order/endianness: magic LE u32, setlevel LE u8, then BE u32s and LE
+/// u8 flags. Covers the fields through `ActiveObjectCount`; the remainder of
+/// the entry (level seeds, player, quests, monsters, ...) follows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CppGameHeader {
+    /// First four decoded bytes ("SHAR"/"SHLF"/"RETL"/"HELF").
+    pub magic: [u8; 4],
+    /// `setlevel ? 1 : 0` (LE u8).
+    pub setlevel: u8,
+    /// `setlvlnum` (BE u32).
+    pub setlvlnum: u32,
+    /// `currlevel` (BE u32).
+    pub currlevel: u32,
+    /// `getHellfireLevelType(leveltype)` (BE u32).
+    pub leveltype: u32,
+    /// `ViewPosition.x` (BE i32).
+    pub view_position_x: i32,
+    /// `ViewPosition.y` (BE i32).
+    pub view_position_y: i32,
+    /// `invflag` (LE u8 bool).
+    pub invflag: bool,
+    /// `CharFlag` (LE u8 bool).
+    pub char_flag: bool,
+    /// `ActiveMonsterCount` (BE i32).
+    pub active_monster_count: i32,
+    /// `ActiveItemCount` (BE i32).
+    pub active_item_count: i32,
+    /// `ActiveMissileCount` (BE u32).
+    pub active_missile_count: u32,
+    /// `ActiveObjectCount` (BE i32).
+    pub active_object_count: i32,
+}
+
+impl CppGameHeader {
+    /// Parse the fixed header from a decoded `game` entry (43 bytes).
+    pub fn parse(decoded: &[u8]) -> Option<Self> {
+        if decoded.len() < 43 {
+            return None;
+        }
+        let be_u32 = |i: usize| u32::from_be_bytes([decoded[i], decoded[i + 1], decoded[i + 2], decoded[i + 3]]);
+        let be_i32 = |i: usize| i32::from_be_bytes([decoded[i], decoded[i + 1], decoded[i + 2], decoded[i + 3]]);
+        Some(Self {
+            magic: [decoded[0], decoded[1], decoded[2], decoded[3]],
+            setlevel: decoded[4],
+            setlvlnum: be_u32(5),
+            currlevel: be_u32(9),
+            leveltype: be_u32(13),
+            view_position_x: be_i32(17),
+            view_position_y: be_i32(21),
+            invflag: decoded[25] != 0,
+            char_flag: decoded[26] != 0,
+            active_monster_count: be_i32(27),
+            active_item_count: be_i32(31),
+            active_missile_count: be_u32(35),
+            active_object_count: be_i32(39),
+        })
+    }
+}
+
+// ============================================================================
 // SaveLevel / LoadLevel — full per-level persistence
 //
 // Mirrors C++ `SaveLevel`/`LoadLevel` from Source/loadsave.cpp (lines
