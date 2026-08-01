@@ -536,8 +536,9 @@ impl CavesGenerator {
     /// Fill a rectangular room with floor tiles
     /// C++ equivalent: FillRoom
     fn fill_room(&mut self, x1: usize, y1: usize, x2: usize, y2: usize) -> bool {
-        // Check boundaries
-        if x1 <= 1 || x2 >= DMAXX - 2 || y1 <= 1 || y2 >= DMAXY - 2 {
+        // C++ `FillRoom`: `x2 >= 34` (a hardcoded 34, NOT DMAXX-2) and
+        // `y2 >= 38`. Kept verbatim for byte fidelity.
+        if x1 <= 1 || x2 >= 34 || y1 <= 1 || y2 >= 38 {
             return false;
         }
 
@@ -560,21 +561,22 @@ impl CavesGenerator {
             }
         }
 
-        // Randomly fill borders
+        // C++ `FillRoom` borders use `if (!FlipCoin())` — the same draw
+        // probability but the opposite RNG-value mapping; match it exactly.
         for j in y1..=y2 {
-            if self.flip_coin() {
+            if !self.flip_coin() {
                 self.predungeon[x1][j] = 1;
             }
-            if self.flip_coin() {
+            if !self.flip_coin() {
                 self.predungeon[x2][j] = 1;
             }
         }
 
         for i in x1..=x2 {
-            if self.flip_coin() {
+            if !self.flip_coin() {
                 self.predungeon[i][y1] = 1;
             }
-            if self.flip_coin() {
+            if !self.flip_coin() {
                 self.predungeon[i][y2] = 1;
             }
         }
@@ -711,37 +713,100 @@ impl CavesGenerator {
         }
     }
 
-    /// Fill straight connections
-    /// C++ equivalent: FillStraights
+    /// Fill straight connections (run-based, matching C++ FillStraights).
+    ///
+    /// C++ scans runs of cells where `dungeon[i][j]==0 && dungeon[i][j+1]==1`
+    /// (and the mirrored orientations); runs longer than 3 cells are, with
+    /// 1-in-2 chance, filled with `GenerateRnd(2)` per cell. This consumes RNG
+    /// draws, so a faithful port is required for stream alignment. The loops
+    /// use `i < 37` exactly as the C++ source (the last two columns are not
+    /// processed — a C++ quirk kept for byte fidelity).
     fn fill_straights(&mut self) {
-        for j in 1..(DMAXY - 1) {
-            for i in 1..(DMAXX - 1) {
-                if self.predungeon[i][j] == 0 {
-                    let horiz = self.predungeon[i - 1][j] + self.predungeon[i + 1][j];
-                    let vert = self.predungeon[i][j - 1] + self.predungeon[i][j + 1];
-
-                    if horiz == 2 && vert == 0 {
-                        self.predungeon[i][j] = 1;
+        for j in 0..(DMAXY - 1) {
+            let mut xs = 0usize;
+            let mut xc = 0usize;
+            for i in 0..37 {
+                if self.predungeon[i][j] == 0 && self.predungeon[i][j + 1] == 1 {
+                    if xs == 0 {
+                        xc = i;
                     }
-                    if horiz == 0 && vert == 2 {
-                        self.predungeon[i][j] = 1;
+                    xs += 1;
+                } else {
+                    if xs > 3 && !self.flip_coin() {
+                        for k in xc..i {
+                            self.predungeon[k][j] = self.rng.random_less_than(2) as u8;
+                        }
                     }
+                    xs = 0;
+                }
+            }
+        }
+        for j in 0..(DMAXY - 1) {
+            let mut xs = 0usize;
+            let mut xc = 0usize;
+            for i in 0..37 {
+                if self.predungeon[i][j] == 1 && self.predungeon[i][j + 1] == 0 {
+                    if xs == 0 {
+                        xc = i;
+                    }
+                    xs += 1;
+                } else {
+                    if xs > 3 && !self.flip_coin() {
+                        for k in xc..i {
+                            self.predungeon[k][j + 1] = self.rng.random_less_than(2) as u8;
+                        }
+                    }
+                    xs = 0;
+                }
+            }
+        }
+        for i in 0..(DMAXX - 1) {
+            let mut ys = 0usize;
+            let mut yc = 0usize;
+            for j in 0..37 {
+                if self.predungeon[i][j] == 0 && self.predungeon[i + 1][j] == 1 {
+                    if ys == 0 {
+                        yc = j;
+                    }
+                    ys += 1;
+                } else {
+                    if ys > 3 && !self.flip_coin() {
+                        for k in yc..j {
+                            self.predungeon[i][k] = self.rng.random_less_than(2) as u8;
+                        }
+                    }
+                    ys = 0;
+                }
+            }
+        }
+        for i in 0..(DMAXX - 1) {
+            let mut ys = 0usize;
+            let mut yc = 0usize;
+            for j in 0..37 {
+                if self.predungeon[i][j] == 1 && self.predungeon[i + 1][j] == 0 {
+                    if ys == 0 {
+                        yc = j;
+                    }
+                    ys += 1;
+                } else {
+                    if ys > 3 && !self.flip_coin() {
+                        for k in yc..j {
+                            self.predungeon[i + 1][k] = self.rng.random_less_than(2) as u8;
+                        }
+                    }
+                    ys = 0;
                 }
             }
         }
     }
 
-    /// Process edges of the dungeon
-    /// C++ equivalent: Edges
+    /// Process edges of the dungeon (C++ `Edges`: right and bottom only).
     fn edges(&mut self) {
-        // Set all edges to wall
-        for i in 0..DMAXX {
-            self.predungeon[i][0] = 0;
-            self.predungeon[i][DMAXY - 1] = 0;
-        }
         for j in 0..DMAXY {
-            self.predungeon[0][j] = 0;
             self.predungeon[DMAXX - 1][j] = 0;
+        }
+        for i in 0..DMAXX {
+            self.predungeon[i][DMAXY - 1] = 0;
         }
     }
 
@@ -1579,14 +1644,20 @@ mod tests {
 
     #[test]
     fn test_edges() {
+        // C++ `Edges` zeroes only the right (DMAXX-1) column and the bottom
+        // (DMAXY-1) row; the top/left edges are left untouched.
         let mut generator = CavesGenerator::new();
         generator.predungeon[0][0] = 1;
-        generator.predungeon[DMAXX-1][DMAXY-1] = 1;
+        generator.predungeon[DMAXX - 1][5] = 1;
+        generator.predungeon[5][DMAXY - 1] = 1;
+        generator.predungeon[DMAXX - 1][DMAXY - 1] = 1;
 
         generator.edges();
 
-        assert_eq!(generator.predungeon[0][0], 0);
-        assert_eq!(generator.predungeon[DMAXX-1][DMAXY-1], 0);
+        assert_eq!(generator.predungeon[0][0], 1, "top-left is not an edge in C++ Edges");
+        assert_eq!(generator.predungeon[DMAXX - 1][5], 0);
+        assert_eq!(generator.predungeon[5][DMAXY - 1], 0);
+        assert_eq!(generator.predungeon[DMAXX - 1][DMAXY - 1], 0);
     }
 
     #[test]
