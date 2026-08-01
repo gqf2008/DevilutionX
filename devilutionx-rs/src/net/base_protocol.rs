@@ -111,6 +111,14 @@ impl BaseProtocol {
         Some((pkt.source, pkt.message))
     }
 
+    /// C++ `SNetReceiveTurns`: empty turn per player on loopback.
+    pub fn receive_turns(&self) -> Vec<Vec<u8>> {
+        self.transport.receive_turns()
+    }
+
+    /// C++ `SNetSendTurn`: no-op on loopback.
+    pub fn send_turn(&mut self) {}
+
     /// C++ `SNetGetProviderCaps` (via the transport).
     pub fn provider_caps(&self) -> crate::net::transport::ProviderCaps {
         self.transport.provider_caps()
