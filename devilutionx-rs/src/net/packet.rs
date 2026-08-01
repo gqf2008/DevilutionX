@@ -194,6 +194,21 @@ mod tests {
         assert_eq!(decoded, p);
     }
 
+    /// C++ `packet_proc::process_data` (dvlnet/packet.h:240-242):
+    /// PT_JOIN_REQUEST = [type][src][dest][cookie u32 LE][info].
+    #[test]
+    fn test_join_request_bytes_match_cpp_layout() {
+        let p = Packet {
+            packet_type: packet_type::PT_JOIN_REQUEST,
+            source: 3,
+            destination: PLR_MASTER,
+            cookie: 0xDEADBEEF,
+            info: vec![1, 2, 3],
+            ..Packet::default()
+        };
+        assert_eq!(p.encode(), vec![0x11, 3, 0xFE, 0xEF, 0xBE, 0xAD, 0xDE, 1, 2, 3]);
+    }
+
     #[test]
     fn test_join_request_round_trip() {
         let p = Packet {
