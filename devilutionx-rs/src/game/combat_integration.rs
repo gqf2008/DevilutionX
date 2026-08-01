@@ -108,15 +108,14 @@ pub fn monster_attack_player(
         return AttackResult::Block;
     }
 
-    // 4. Calculate damage (C++ line 1223-1224)
+    // 4. Calculate damage (C++ monster.cpp:1219-1220):
+    // `dam = RandomIntBetween(minDam << 6, maxDam << 6)`, then
+    // `dam = max(dam + (player._pIGetHit << 6), 64)` — no AC reduction in
+    // MonsterAttackPlayer itself.
     let min_dam_64x = (monster.min_damage as i32) << 6;
     let max_dam_64x = (monster.max_damage as i32) << 6;
     let raw_damage_64x = rng.random_range(min_dam_64x..=max_dam_64x);
-
-    // 5. Apply armor reduction (simplified - C++ has complex AC system)
-    let armor_class = player._p_armor_class as i32;
-    let armor_reduction = (armor_class / 2) << 6;
-    let final_damage_64x = raw_damage_64x.saturating_sub(armor_reduction).max(64); // Min 1 damage
+    let final_damage_64x = (raw_damage_64x + player._p_i_get_hit * 64).max(64); // Min 1 damage
 
     // 6. Apply damage to player (C++ line 1228).
     // `final_damage_64x` is in 64x fixed-point, but `modify_hp` takes a
@@ -424,6 +423,36 @@ mod tests {
     /// Exact C++ `PlrHitMonst` to-hit (player.cpp:548-549): Warrior
     /// baseMeleeToHit=70, so hper = level + dex/2 + iBonusToHit + 70 +
     /// _pIEnAc - monster armor, clamped to 5-95.
+    /// C++ `MonsterAttackPlayer` damage (monster.cpp:1219-1220):
+    /// RandomIntBetween(min<<6, max<<6) + _pIGetHit<<6, floored at 64 —
+    /// no AC reduction inside MonsterAttackPlayer.
+    #[test]
+    fn test_monster_attack_player_damage_matches_cpp() {
+        let mut monster = Monster::new(1, MonsterType::Zombie, 10, 10, 0);
+        monster.level = 1;
+        monster.to_hit = 100; // always hits
+        monster.min_damage = 5;
+        monster.max_damage = 5; // fixed damage
+
+        let mut player = Player::new();
+        player._p_level = 1;
+        player._p_dexterity = 50;
+        player._p_i_get_hit = 2;
+        player._p_hit_points = 100 * 64;
+        player._p_max_hp = 100 * 64; // modify_hp clamps to _p_max_hp
+        player.position = Point::new(11, 10);
+
+        // raw = 5<<6 = 320; final = 320 + 2*64 = 448 (7 display HP).
+        let mut rng = StdRng::seed_from_u64(7);
+        let result = monster_attack_player(&monster, &mut player, &mut rng, 1);
+        match result {
+            AttackResult::Hit { damage } => assert_eq!(damage, 7, "display damage"),
+            other => panic!("expected a hit, got {:?}", other),
+        }
+        // HP starts at 6400 (100*64), loses 7*64 = 448.
+        assert_eq!(player._p_hit_points, 100 * 64 - 448);
+    }
+
     #[test]
     fn test_calculate_player_to_hit_matches_cpp() {
         let mut monster = Monster::new(1, MonsterType::Zombie, 10, 10, 0);
