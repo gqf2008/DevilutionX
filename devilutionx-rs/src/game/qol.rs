@@ -152,13 +152,19 @@ pub fn can_fit_item(
 }
 
 /// C++ `AutoPickup(player)` decision for a single item, wired to the
-/// inventory/belt state.
+/// inventory/belt state. `in_town` gates the whole feature: C++ skips
+/// autopickup on town levels unless `autoPickupInTown` is enabled
+/// (autopickup.cpp `AutoPickup`).
 pub fn try_autopickup(
     item: &Item,
     inventory: &crate::game::inventory::Inventory,
     belt: &crate::game::inventory::Belt,
     options: &AutoPickupOptions,
+    in_town: bool,
 ) -> bool {
+    if in_town && !options.auto_pickup_in_town {
+        return false;
+    }
     should_autopickup(
         item,
         options,
@@ -202,6 +208,24 @@ mod tests {
         let mut off = opts;
         off.auto_gold_pickup = false;
         assert!(!should_autopickup(&gold_item(100), &off, true, false, |_| 0));
+    }
+
+    /// C++ `AutoPickup` town gate: in town, autopickup only runs when the
+    /// `autoPickupInTown` option is on (autopickup.cpp).
+    #[test]
+    fn test_town_gate_matches_cpp() {
+        let inv = crate::game::inventory::Inventory::default();
+        let belt = crate::game::inventory::Belt::default();
+        let mut opts = AutoPickupOptions::default();
+        opts.auto_pickup_in_town = false;
+        // In town with autoPickupInTown off → nothing is picked up.
+        assert!(!try_autopickup(&gold_item(100), &inv, &belt, &opts, true));
+        assert!(!try_autopickup(&misc_item(ItemMiscId::Heal), &inv, &belt, &opts, true));
+        // Same state in the dungeon → pickup proceeds.
+        assert!(try_autopickup(&gold_item(100), &inv, &belt, &opts, false));
+        // In town with autoPickupInTown on → pickup proceeds.
+        opts.auto_pickup_in_town = true;
+        assert!(try_autopickup(&gold_item(100), &inv, &belt, &opts, true));
     }
 
     #[test]
@@ -280,7 +304,7 @@ mod tests {
         // Empty inventory -> gold picked.
         let inv2 = Inventory::new();
         let belt = Belt::new();
-        assert!(try_autopickup(&gold_item(50), &inv2, &belt, &opts));
+        assert!(try_autopickup(&gold_item(50), &inv2, &belt, &opts, false));
         // Potion threshold wired through inventory counts.
         let mut inv3 = Inventory::new();
         inv3.items.push(Some(misc_item(ItemMiscId::Heal)));
@@ -288,7 +312,7 @@ mod tests {
         let mut belt3 = Belt::new();
         belt3.items[0] = Some(misc_item(ItemMiscId::Heal));
         // Carrying 2 with threshold 1 -> no pickup.
-        assert!(!try_autopickup(&misc_item(ItemMiscId::Heal), &inv3, &belt3, &opts));
+        assert!(!try_autopickup(&misc_item(ItemMiscId::Heal), &inv3, &belt3, &opts, false));
     }
 
 
