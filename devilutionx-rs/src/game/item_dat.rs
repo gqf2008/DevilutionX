@@ -770,550 +770,678 @@ macro_rules! idat {
 
 /// Base items data table (expanded - contains common items)
 /// Covers major weapon/armor types for gameplay
-pub const ITEMS_DATA: [ItemData; 167] = [
-    // Gold (0)
-    idat!(0, ItemClass::Gold, ItemEquipType::None, 4, ItemType::Gold,
-          UniqueBaseItem::None, "Gold", "gold", 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 1),
-
-    // Potions (1-5)
-    idat!(50, ItemClass::Misc, ItemEquipType::Unequipable, 32, ItemType::Misc,
-          UniqueBaseItem::None, "Potion of Healing", "heal", 1, 0, 0, 0, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::Heal, SpellID::Healing, true, 50),
-    idat!(50, ItemClass::Misc, ItemEquipType::Unequipable, 39, ItemType::Misc,
-          UniqueBaseItem::None, "Potion of Mana", "mana", 1, 0, 0, 0, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::Mana, SpellID::Null, true, 50),
-    idat!(25, ItemClass::Misc, ItemEquipType::Unequipable, 35, ItemType::Misc,
-          UniqueBaseItem::None, "Potion of Full Healing", "fheal", 1, 0, 0, 0, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::FullHeal, SpellID::Healing, true, 150),
-    idat!(25, ItemClass::Misc, ItemEquipType::Unequipable, 0, ItemType::Misc,
-          UniqueBaseItem::None, "Potion of Full Mana", "fmana", 1, 0, 0, 0, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::FullMana, SpellID::Null, true, 150),
-    idat!(20, ItemClass::Misc, ItemEquipType::Unequipable, 37, ItemType::Misc,
-          UniqueBaseItem::None, "Potion of Rejuvenation", "rejuv", 1, 0, 0, 0, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::Rejuv, SpellID::Healing, true, 120),
-
-    // Scrolls (6-7)
-    idat!(40, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
-          UniqueBaseItem::None, "Scroll of Identify", "id", 1, 0, 0, 0, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::Scroll, SpellID::Identify, true, 100),
-    idat!(40, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
-          UniqueBaseItem::None, "Scroll of Town Portal", "tp", 1, 0, 0, 0, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::ScrollT, SpellID::TownPortal, true, 200),
-
-    // Weapons - Swords (8-12)
-    idat!(10, ItemClass::Weapon, ItemEquipType::OneHand, 51, ItemType::Sword,
-          UniqueBaseItem::Dagger, "Dagger", "dag", 1, 16, 1, 4, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 60),
-    idat!(10, ItemClass::Weapon, ItemEquipType::OneHand, 64, ItemType::Sword,
-          UniqueBaseItem::LongSword, "Short Sword", "ssw", 2, 24, 2, 6, 0, 0, 18, 0, 0,
+pub const ITEMS_DATA: [ItemData; 168] = [
+    //   0 IDI_GOLD
+    idat!(1, ItemClass::Gold, ItemEquipType::Unequipable, 4, ItemType::Gold,
+          UniqueBaseItem::None, "Gold", "", 1, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, true, 0),
+    //   1 IDI_WARRIOR
+    idat!(0, ItemClass::Weapon, ItemEquipType::OneHand, 64, ItemType::Sword,
+          UniqueBaseItem::None, "Short Sword", "", 2, 24, 2, 6, 0, 0, 18, 0, 0,
           ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 120),
-    idat!(10, ItemClass::Weapon, ItemEquipType::OneHand, 67, ItemType::Sword,
-          UniqueBaseItem::Sabre, "Sabre", "sab", 5, 32, 1, 8, 0, 0, 17, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 150),
-    idat!(10, ItemClass::Weapon, ItemEquipType::OneHand, 61, ItemType::Sword,
-          UniqueBaseItem::BroadSword, "Broad Sword", "bsw", 8, 50, 4, 12, 0, 0, 30, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 400),
-    idat!(8, ItemClass::Weapon, ItemEquipType::TwoHand, 110, ItemType::Sword,
-          UniqueBaseItem::TwoHandSword, "Two-Handed Sword", "2sw", 14, 75, 8, 16, 0, 0, 45, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 1200),
-
-    // Weapons - Axes (13-15)
-    idat!(10, ItemClass::Weapon, ItemEquipType::OneHand, 144, ItemType::Axe,
-          UniqueBaseItem::SmallAxe, "Axe", "axe", 2, 24, 2, 6, 0, 0, 22, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 150),
-    idat!(10, ItemClass::Weapon, ItemEquipType::OneHand, 101, ItemType::Axe,
-          UniqueBaseItem::BattleAxe, "Battle Axe", "bax", 10, 50, 4, 12, 0, 0, 40, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 650),
-    idat!(8, ItemClass::Weapon, ItemEquipType::TwoHand, 143, ItemType::Axe,
-          UniqueBaseItem::GreatAxe, "Great Axe", "gax", 17, 75, 10, 20, 0, 0, 65, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 1750),
-
-    // Weapons - Bows (16-18)
-    idat!(10, ItemClass::Weapon, ItemEquipType::TwoHand, 118, ItemType::Bow,
-          UniqueBaseItem::ShortBow, "Short Bow", "sbo", 1, 30, 1, 4, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 100),
-    idat!(10, ItemClass::Weapon, ItemEquipType::TwoHand, 102, ItemType::Bow,
-          UniqueBaseItem::HunterBow, "Hunter's Bow", "hbo", 5, 40, 2, 5, 0, 0, 0, 0, 20,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 350),
-    idat!(8, ItemClass::Weapon, ItemEquipType::TwoHand, 119, ItemType::Bow,
-          UniqueBaseItem::LongBow, "Long War Bow", "lbo", 15, 60, 1, 14, 0, 0, 0, 0, 60,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 2000),
-
-    // Armor (19-22)
-    idat!(8, ItemClass::Armor, ItemEquipType::Armor, 149, ItemType::LightArmor,
-          UniqueBaseItem::Cloak, "Cloak", "clk", 1, 12, 0, 0, 1, 5, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 40),
-    idat!(8, ItemClass::Armor, ItemEquipType::Armor, 135, ItemType::LightArmor,
-          UniqueBaseItem::LeatherArmor, "Leather Armor", "lea", 3, 20, 0, 0, 2, 10, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 100),
-    idat!(7, ItemClass::Armor, ItemEquipType::Armor, 111, ItemType::MediumArmor,
-          UniqueBaseItem::ChainMail, "Chain Mail", "chn", 7, 40, 0, 0, 10, 15, 30, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 450),
-    idat!(6, ItemClass::Armor, ItemEquipType::Armor, 151, ItemType::HeavyArmor,
-          UniqueBaseItem::FullPlate, "Full Plate Mail", "fpl", 15, 60, 0, 0, 20, 30, 60, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 2300),
-
-    // Shields (23-25)
-    idat!(8, ItemClass::Armor, ItemEquipType::OneHand, 83, ItemType::Shield,
-          UniqueBaseItem::Buckler, "Buckler", "buc", 1, 16, 0, 0, 1, 5, 25, 0, 0,
+    //   2 IDI_WARRSHLD
+    idat!(0, ItemClass::Armor, ItemEquipType::OneHand, 83, ItemType::Shield,
+          UniqueBaseItem::None, "Buckler", "", 2, 16, 0, 0, 3, 3, 0, 0, 0,
           ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 30),
-    idat!(7, ItemClass::Armor, ItemEquipType::OneHand, 105, ItemType::Shield,
-          UniqueBaseItem::SmallShield, "Small Shield", "sml", 4, 24, 0, 0, 3, 8, 25, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 90),
-    idat!(6, ItemClass::Armor, ItemEquipType::OneHand, 113, ItemType::Shield,
-          UniqueBaseItem::KiteShield, "Kite Shield", "kit", 10, 40, 0, 0, 8, 15, 40, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 850),
-
-    // Helms (26-28)
-    idat!(7, ItemClass::Armor, ItemEquipType::Helm, 91, ItemType::Helm,
-          UniqueBaseItem::Helm, "Cap", "cap", 1, 10, 0, 0, 1, 3, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 15),
-    idat!(6, ItemClass::Armor, ItemEquipType::Helm, 82, ItemType::Helm,
-          UniqueBaseItem::Helm, "Helm", "hlm", 7, 30, 0, 0, 5, 10, 25, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 450),
-    idat!(5, ItemClass::Armor, ItemEquipType::Helm, 95, ItemType::Helm,
-          UniqueBaseItem::Crown, "Crown", "crn", 15, 50, 0, 0, 15, 20, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 4000),
-
-    // Jewelry (29-30)
-    idat!(5, ItemClass::Misc, ItemEquipType::Ring, 12, ItemType::Ring,
-          UniqueBaseItem::Ring, "Ring", "rng", 5, 0, 0, 0, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::Ring, SpellID::Null, false, 100),
-    idat!(5, ItemClass::Misc, ItemEquipType::Amulet, 45, ItemType::Amulet,
-          UniqueBaseItem::Amulet, "Amulet", "amu", 8, 0, 0, 0, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::Amulet, SpellID::Null, false, 100),
-
-    // More Swords (31-36)
-    idat!(10, ItemClass::Weapon, ItemEquipType::OneHand, 62, ItemType::Sword,
-          UniqueBaseItem::Falchion, "Falchion", "fal", 6, 36, 3, 8, 0, 0, 20, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 200),
-    idat!(10, ItemClass::Weapon, ItemEquipType::OneHand, 72, ItemType::Sword,
-          UniqueBaseItem::Scimitar, "Scimitar", "scm", 10, 42, 3, 11, 0, 0, 23, 0, 35,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 500),
-    idat!(10, ItemClass::Weapon, ItemEquipType::OneHand, 60, ItemType::Sword,
-          UniqueBaseItem::LongSword, "Long Sword", "lsw", 11, 48, 2, 10, 0, 0, 30, 0, 30,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 650),
-    idat!(9, ItemClass::Weapon, ItemEquipType::OneHand, 57, ItemType::Sword,
-          UniqueBaseItem::BastardSword, "Bastard Sword", "bsw", 12, 60, 5, 15, 0, 0, 40, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 1000),
-    idat!(8, ItemClass::Weapon, ItemEquipType::TwoHand, 65, ItemType::Sword,
-          UniqueBaseItem::Claymore, "Claymore", "clm", 13, 70, 5, 18, 0, 0, 35, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 1400),
-    idat!(7, ItemClass::Weapon, ItemEquipType::TwoHand, 134, ItemType::Sword,
-          UniqueBaseItem::GreatSword, "Great Sword", "gsw", 19, 100, 10, 20, 0, 0, 75, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 3000),
-
-    // More Axes (37-40)
-    idat!(10, ItemClass::Weapon, ItemEquipType::OneHand, 142, ItemType::Axe,
-          UniqueBaseItem::LargeAxe, "Large Axe", "lax", 8, 40, 4, 10, 0, 0, 35, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 450),
-    idat!(10, ItemClass::Weapon, ItemEquipType::OneHand, 141, ItemType::Axe,
-          UniqueBaseItem::BroadAxe, "Broad Axe", "bax", 11, 55, 6, 14, 0, 0, 48, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 800),
-    idat!(8, ItemClass::Weapon, ItemEquipType::OneHand, 112, ItemType::Axe,
-          UniqueBaseItem::SmallAxe, "Small Axe", "sax", 5, 28, 3, 7, 0, 0, 25, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 200),
-    idat!(7, ItemClass::Weapon, ItemEquipType::OneHand, 106, ItemType::Axe,
-          UniqueBaseItem::Cleaver, "Cleaver", "clv", 2, 22, 2, 8, 0, 0, 17, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 140),
-
-    // More Bows (41-44)
-    idat!(10, ItemClass::Weapon, ItemEquipType::TwoHand, 133, ItemType::Bow,
-          UniqueBaseItem::CompositeBow, "Composite Bow", "cbo", 8, 45, 3, 6, 0, 0, 0, 0, 25,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 600),
-    idat!(9, ItemClass::Weapon, ItemEquipType::TwoHand, 120, ItemType::Bow,
-          UniqueBaseItem::WarBow, "War Bow", "wbo", 11, 55, 2, 8, 0, 0, 0, 0, 45,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 1250),
-    idat!(8, ItemClass::Weapon, ItemEquipType::TwoHand, 167, ItemType::Bow,
-          UniqueBaseItem::BattleBow, "Battle Bow", "bbo", 14, 65, 1, 15, 0, 0, 0, 0, 60,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 2800),
-    idat!(9, ItemClass::Weapon, ItemEquipType::TwoHand, 165, ItemType::Bow,
-          UniqueBaseItem::ShortBow, "Short War Bow", "swb", 7, 35, 2, 5, 0, 0, 0, 0, 15,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 300),
-
-    // Maces/Hammers (45-50)
-    idat!(10, ItemClass::Weapon, ItemEquipType::OneHand, 59, ItemType::Mace,
-          UniqueBaseItem::Mace, "Mace", "mac", 3, 32, 1, 8, 0, 0, 16, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 200),
-    idat!(10, ItemClass::Weapon, ItemEquipType::OneHand, 63, ItemType::Mace,
-          UniqueBaseItem::MorningStar, "Morning Star", "mst", 9, 48, 1, 10, 0, 0, 26, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 500),
-    idat!(9, ItemClass::Weapon, ItemEquipType::OneHand, 70, ItemType::Mace,
-          UniqueBaseItem::SpikedClub, "Spiked Club", "spc", 5, 36, 3, 6, 0, 0, 18, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 225),
-    idat!(8, ItemClass::Weapon, ItemEquipType::OneHand, 122, ItemType::Mace,
-          UniqueBaseItem::Maul, "Maul", "mau", 15, 70, 6, 20, 0, 0, 55, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 1850),
-    idat!(9, ItemClass::Weapon, ItemEquipType::OneHand, 121, ItemType::Mace,
-          UniqueBaseItem::WarHammer, "War Hammer", "whm", 12, 60, 5, 9, 0, 0, 50, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 1200),
-    idat!(8, ItemClass::Weapon, ItemEquipType::OneHand, 131, ItemType::Mace,
-          UniqueBaseItem::Flail, "Flail", "fla", 10, 50, 2, 12, 0, 0, 30, 0, 35,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 700),
-
-    // Staves (51-54)
-    idat!(10, ItemClass::Weapon, ItemEquipType::TwoHand, 123, ItemType::Staff,
-          UniqueBaseItem::LongStaff, "Long Staff", "lst", 4, 35, 4, 8, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 100),
-    idat!(9, ItemClass::Weapon, ItemEquipType::TwoHand, 166, ItemType::Staff,
-          UniqueBaseItem::CompositeStaff, "Composite Staff", "cst", 6, 45, 5, 11, 0, 0, 0, 20, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 350),
-    idat!(8, ItemClass::Weapon, ItemEquipType::TwoHand, 124, ItemType::Staff,
-          UniqueBaseItem::QuarterStaff, "Quarter Staff", "qst", 10, 55, 6, 12, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 650),
-    idat!(7, ItemClass::Weapon, ItemEquipType::TwoHand, 124, ItemType::Staff,
-          UniqueBaseItem::WarStaff, "War Staff", "wst", 14, 75, 8, 16, 0, 0, 0, 30, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 1500),
-
-    // More Armor (55-62)
-    idat!(8, ItemClass::Armor, ItemEquipType::Armor, 107, ItemType::LightArmor,
-          UniqueBaseItem::StuddedArmor, "Studded Leather", "stu", 5, 35, 0, 0, 3, 15, 20, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 200),
-    idat!(7, ItemClass::Armor, ItemEquipType::Armor, 137, ItemType::LightArmor,
-          UniqueBaseItem::Robe, "Robe", "rbe", 1, 6, 0, 0, 2, 4, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 25),
-    idat!(8, ItemClass::Armor, ItemEquipType::Armor, 150, ItemType::LightArmor,
-          UniqueBaseItem::Cape, "Cape", "cpe", 7, 24, 0, 0, 3, 7, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 75),
-    idat!(7, ItemClass::Armor, ItemEquipType::Armor, 154, ItemType::MediumArmor,
-          UniqueBaseItem::ChainMail, "Ring Mail", "rng", 5, 35, 0, 0, 7, 12, 24, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 350),
-    idat!(7, ItemClass::Armor, ItemEquipType::Armor, 136, ItemType::MediumArmor,
-          UniqueBaseItem::ChainMail, "Splint Mail", "spl", 10, 45, 0, 0, 11, 18, 35, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 700),
-    idat!(6, ItemClass::Armor, ItemEquipType::Armor, 153, ItemType::HeavyArmor,
-          UniqueBaseItem::BreastPlate, "Breast Plate", "brs", 12, 50, 0, 0, 14, 24, 40, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 1200),
-    idat!(6, ItemClass::Armor, ItemEquipType::Armor, 151, ItemType::HeavyArmor,
-          UniqueBaseItem::PlateMail, "Plate Mail", "plt", 14, 60, 0, 0, 16, 35, 55, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 1800),
-    idat!(5, ItemClass::Armor, ItemEquipType::Armor, 152, ItemType::HeavyArmor,
-          UniqueBaseItem::FullPlate, "Gothic Plate", "gth", 18, 80, 0, 0, 40, 60, 80, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 4400),
-
-    // More Shields (63-67)
-    idat!(7, ItemClass::Armor, ItemEquipType::OneHand, 147, ItemType::Shield,
-          UniqueBaseItem::LargeShield, "Large Shield", "lrg", 7, 32, 0, 0, 5, 10, 35, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 280),
-    idat!(6, ItemClass::Armor, ItemEquipType::OneHand, 148, ItemType::Shield,
-          UniqueBaseItem::GothicShield, "Gothic Shield", "got", 13, 50, 0, 0, 12, 18, 50, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 1400),
-    idat!(5, ItemClass::Armor, ItemEquipType::OneHand, 132, ItemType::Shield,
-          UniqueBaseItem::GothicShield, "Tower Shield", "tow", 16, 60, 0, 0, 16, 25, 60, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 2500),
-    idat!(7, ItemClass::Armor, ItemEquipType::OneHand, 117, ItemType::Shield,
-          UniqueBaseItem::SmallShield, "Dragon's Breach", "drg", 15, 55, 0, 0, 14, 20, 40, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 1600),
-    idat!(8, ItemClass::Armor, ItemEquipType::OneHand, 146, ItemType::Shield,
-          UniqueBaseItem::SmallShield, "Blackoak Shield", "oak", 8, 35, 0, 0, 6, 12, 28, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 450),
-
-    // More Helms (68-72)
-    idat!(6, ItemClass::Armor, ItemEquipType::Helm, 90, ItemType::Helm,
-          UniqueBaseItem::SkullCap, "Skull Cap", "skl", 3, 18, 0, 0, 2, 4, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 35),
-    idat!(6, ItemClass::Armor, ItemEquipType::Helm, 75, ItemType::Helm,
-          UniqueBaseItem::GreatHelm, "Full Helm", "fhl", 10, 35, 0, 0, 6, 12, 35, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 650),
-    idat!(5, ItemClass::Armor, ItemEquipType::Helm, 98, ItemType::Helm,
-          UniqueBaseItem::GreatHelm, "Great Helm", "ght", 14, 40, 0, 0, 10, 15, 50, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 1250),
-    idat!(5, ItemClass::Armor, ItemEquipType::Helm, 79, ItemType::Helm,
-          UniqueBaseItem::Crown, "Royal Circlet", "rcy", 18, 60, 0, 0, 20, 30, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 6000),
-    idat!(7, ItemClass::Armor, ItemEquipType::Helm, 91, ItemType::Helm,
-          UniqueBaseItem::Helm, "War Hat", "wht", 5, 22, 0, 0, 3, 6, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 85),
-
-    // Consumables (73-79)
-    idat!(15, ItemClass::Misc, ItemEquipType::Unequipable, 38, ItemType::Misc,
-          UniqueBaseItem::None, "Elixir of Strength", "estr", 1, 0, 0, 0, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::ElixirStr, SpellID::Null, true, 5000),
-    idat!(15, ItemClass::Misc, ItemEquipType::Unequipable, 34, ItemType::Misc,
-          UniqueBaseItem::None, "Elixir of Magic", "emag", 1, 0, 0, 0, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::ElixirMag, SpellID::Null, true, 5000),
-    idat!(15, ItemClass::Misc, ItemEquipType::Unequipable, 36, ItemType::Misc,
-          UniqueBaseItem::None, "Elixir of Dexterity", "edex", 1, 0, 0, 0, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::ElixirDex, SpellID::Null, true, 5000),
-    idat!(15, ItemClass::Misc, ItemEquipType::Unequipable, 31, ItemType::Misc,
-          UniqueBaseItem::None, "Elixir of Vitality", "evit", 1, 0, 0, 0, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::ElixirVit, SpellID::Null, true, 5000),
-    idat!(20, ItemClass::Misc, ItemEquipType::Unequipable, 33, ItemType::Misc,
-          UniqueBaseItem::None, "Potion of Full Rejuvenation", "frej", 1, 0, 0, 0, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::FullRejuv, SpellID::Healing, true, 300),
-    idat!(30, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
-          UniqueBaseItem::None, "Scroll of Healing", "sheal", 1, 0, 0, 0, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::Scroll, SpellID::Healing, true, 50),
-    idat!(30, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
-          UniqueBaseItem::None, "Scroll of Lightning", "slit", 1, 0, 0, 0, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::Scroll, SpellID::Lightning, true, 100),
-
-    // Item 80-110: Potions, Oils, Elixirs, Scrolls
-    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 29, ItemType::Misc,
-          UniqueBaseItem::None, "Potion of Mana", "pman", 1, 0, 0, 0, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::Mana, SpellID::Null, true, 50),
-    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 30, ItemType::Misc,
-          UniqueBaseItem::None, "Potion of Full Mana", "pfman", 1, 0, 0, 0, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::FullMana, SpellID::Null, true, 150),
-    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 27, ItemType::Misc,
-          UniqueBaseItem::None, "Potion of Rejuvenation", "prej", 3, 0, 0, 0, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::Rejuv, SpellID::Null, true, 120),
-    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 28, ItemType::Misc,
-          UniqueBaseItem::None, "Potion of Full Rejuvenation", "pfrej", 7, 0, 0, 0, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::FullRejuv, SpellID::Null, true, 600),
-    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 40, ItemType::Misc,
-          UniqueBaseItem::None, "Blacksmith Oil", "oilb", 1, 0, 0, 0, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::OilBSmith, SpellID::Null, true, 100),
-    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 40, ItemType::Misc,
-          UniqueBaseItem::None, "Oil of Accuracy", "oilacc", 1, 0, 0, 0, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::OilAcc, SpellID::Null, true, 500),
-    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 40, ItemType::Misc,
-          UniqueBaseItem::None, "Oil of Sharpness", "oilsharp", 1, 0, 0, 0, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::OilSharp, SpellID::Null, true, 500),
-    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 40, ItemType::Misc,
-          UniqueBaseItem::None, "Oil", "oil", 10, 0, 0, 0, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::OilOf, SpellID::Null, true, 0),
-    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 31, ItemType::Misc,
-          UniqueBaseItem::None, "Elixir of Strength", "elixstr", 15, 0, 0, 0, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::ElixirStr, SpellID::Null, true, 5000),
-    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 31, ItemType::Misc,
-          UniqueBaseItem::None, "Elixir of Magic", "elixmag", 15, 0, 0, 0, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::ElixirMag, SpellID::Null, true, 5000),
-    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 31, ItemType::Misc,
-          UniqueBaseItem::None, "Elixir of Dexterity", "elixdex", 15, 0, 0, 0, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::ElixirDex, SpellID::Null, true, 5000),
-    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 31, ItemType::Misc,
-          UniqueBaseItem::None, "Elixir of Vitality", "elixvit", 20, 0, 0, 0, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::ElixirVit, SpellID::Null, true, 5000),
-    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
-          UniqueBaseItem::None, "Scroll of Healing", "sheal2", 1, 0, 0, 0, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::Scroll, SpellID::Healing, true, 50),
-    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
-          UniqueBaseItem::None, "Scroll of Search", "ssearch", 1, 0, 0, 0, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::Scroll, SpellID::Search, true, 50),
-    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
-          UniqueBaseItem::None, "Scroll of Lightning", "slit2", 4, 0, 0, 0, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::ScrollT, SpellID::Lightning, true, 150),
-    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
-          UniqueBaseItem::None, "Scroll of Identify", "sidentify", 1, 0, 0, 0, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::Scroll, SpellID::Identify, true, 100),
-    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
-          UniqueBaseItem::None, "Scroll of Resurrect", "sres", 1, 0, 0, 0, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::ScrollT, SpellID::Resurrect, true, 250),
-    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
-          UniqueBaseItem::None, "Scroll of Fire Wall", "sfwall", 4, 0, 0, 0, 0, 0, 0, 17, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::ScrollT, SpellID::FireWall, true, 400),
-    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
-          UniqueBaseItem::None, "Scroll of Inferno", "sinferno", 1, 0, 0, 0, 0, 0, 0, 19, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::ScrollT, SpellID::Inferno, true, 100),
-    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
-          UniqueBaseItem::None, "Scroll of Town Portal", "sportal", 4, 0, 0, 0, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::Scroll, SpellID::TownPortal, true, 200),
-    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
-          UniqueBaseItem::None, "Scroll of Flash", "sflash", 6, 0, 0, 0, 0, 0, 0, 21, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::ScrollT, SpellID::Flash, true, 500),
-    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
-          UniqueBaseItem::None, "Scroll of Infravision", "sinfrav", 8, 0, 0, 0, 0, 0, 0, 23, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::Scroll, SpellID::Infravision, true, 600),
-    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
-          UniqueBaseItem::None, "Scroll of Phasing", "sphase", 6, 0, 0, 0, 0, 0, 0, 25, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::Scroll, SpellID::Phasing, true, 200),
-    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
-          UniqueBaseItem::None, "Scroll of Mana Shield", "smshield", 8, 0, 0, 0, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::Scroll, SpellID::ManaShield, true, 1200),
-    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
-          UniqueBaseItem::None, "Scroll of Flame Wave", "sfwave", 10, 0, 0, 0, 0, 0, 0, 29, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::ScrollT, SpellID::FlameWave, true, 650),
-    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
-          UniqueBaseItem::None, "Scroll of Fireball", "sfball", 8, 0, 0, 0, 0, 0, 0, 31, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::ScrollT, SpellID::Fireball, true, 300),
-    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
-          UniqueBaseItem::None, "Scroll of Stone Curse", "sstone", 6, 0, 0, 0, 0, 0, 0, 33, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::ScrollT, SpellID::StoneCurse, true, 800),
-    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
-          UniqueBaseItem::None, "Scroll of Chain Lightning", "schain", 10, 0, 0, 0, 0, 0, 0, 35, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::ScrollT, SpellID::ChainLightning, true, 750),
-    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
-          UniqueBaseItem::None, "Scroll of Guardian", "sguard", 12, 0, 0, 0, 0, 0, 0, 47, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::ScrollT, SpellID::Guardian, true, 950),
-    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
-          UniqueBaseItem::None, "Scroll of Nova", "snova", 14, 0, 0, 0, 0, 0, 0, 57, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::Scroll, SpellID::Nova, true, 1300),
-    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
-          UniqueBaseItem::None, "Scroll of Golem", "sgolem", 10, 0, 0, 0, 0, 0, 0, 51, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::ScrollT, SpellID::Golem, true, 1100),
-
-    // Item 111-140: Books and Weapons
-    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 18, ItemType::Misc,
-          UniqueBaseItem::None, "Scroll of Teleport", "stele", 14, 0, 0, 0, 0, 0, 0, 81, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::Scroll, SpellID::Teleport, true, 3000),
-    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 18, ItemType::Misc,
-          UniqueBaseItem::None, "Scroll of Apocalypse", "sapoc", 22, 0, 0, 0, 0, 0, 0, 117, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::Scroll, SpellID::Apocalypse, true, 2000),
-    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 18, ItemType::Misc,
-          UniqueBaseItem::None, "Book of ", "book1", 2, 0, 0, 0, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::Book, SpellID::Null, true, 0),
-    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 18, ItemType::Misc,
-          UniqueBaseItem::None, "Book of ", "book2", 8, 0, 0, 0, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::Book, SpellID::Null, true, 0),
-    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 18, ItemType::Misc,
-          UniqueBaseItem::None, "Book of ", "book3", 14, 0, 0, 0, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::Book, SpellID::Null, true, 0),
-    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 18, ItemType::Misc,
-          UniqueBaseItem::None, "Book of ", "book4", 20, 0, 0, 0, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::Book, SpellID::Null, true, 0),
-    idat!(1, ItemClass::Weapon, ItemEquipType::OneHand, 6, ItemType::Sword,
-          UniqueBaseItem::Dagger, "Dagger", "dag", 1, 16, 1, 4, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 60),
-    idat!(1, ItemClass::Weapon, ItemEquipType::OneHand, 104, ItemType::Sword,
-          UniqueBaseItem::None, "Short Sword", "ssword", 1, 24, 2, 6, 0, 0, 18, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 120),
-    idat!(1, ItemClass::Weapon, ItemEquipType::OneHand, 8, ItemType::Sword,
-          UniqueBaseItem::Falchion, "Falchion", "falch", 2, 20, 4, 8, 0, 0, 30, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 250),
-    idat!(1, ItemClass::Weapon, ItemEquipType::OneHand, 11, ItemType::Sword,
-          UniqueBaseItem::Scimitar, "Scimitar", "scim", 4, 28, 3, 7, 0, 0, 23, 0, 23,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 200),
-    idat!(1, ItemClass::Weapon, ItemEquipType::OneHand, 9, ItemType::Sword,
-          UniqueBaseItem::Claymore, "Claymore", "clay", 5, 36, 1, 12, 0, 0, 35, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 450),
-    idat!(1, ItemClass::Weapon, ItemEquipType::OneHand, 105, ItemType::Sword,
-          UniqueBaseItem::None, "Blade", "blade", 4, 30, 3, 8, 0, 0, 25, 0, 30,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 280),
-    idat!(1, ItemClass::Weapon, ItemEquipType::OneHand, 11, ItemType::Sword,
-          UniqueBaseItem::Sabre, "Sabre", "sabre", 1, 45, 1, 8, 0, 0, 17, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 170),
-    idat!(1, ItemClass::Weapon, ItemEquipType::OneHand, 13, ItemType::Sword,
-          UniqueBaseItem::LongSword, "Long Sword", "lsword", 6, 40, 2, 10, 0, 0, 30, 0, 30,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 350),
-    idat!(1, ItemClass::Weapon, ItemEquipType::OneHand, 10, ItemType::Sword,
-          UniqueBaseItem::BroadSword, "Broad Sword", "bsword", 8, 50, 4, 12, 0, 0, 40, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 750),
-    idat!(1, ItemClass::Weapon, ItemEquipType::OneHand, 14, ItemType::Sword,
-          UniqueBaseItem::BastardSword, "Bastard Sword", "bastard", 10, 60, 6, 15, 0, 0, 50, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 1000),
-    idat!(1, ItemClass::Weapon, ItemEquipType::TwoHand, 15, ItemType::Sword,
-          UniqueBaseItem::TwoHandSword, "Two-Handed Sword", "2hsword", 14, 75, 8, 16, 0, 0, 65, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 1800),
-    idat!(1, ItemClass::Weapon, ItemEquipType::TwoHand, 16, ItemType::Sword,
-          UniqueBaseItem::GreatSword, "Great Sword", "gsword", 17, 100, 10, 20, 0, 0, 75, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 3000),
-    idat!(1, ItemClass::Weapon, ItemEquipType::TwoHand, 20, ItemType::Axe,
-          UniqueBaseItem::SmallAxe, "Small Axe", "saxe", 2, 24, 2, 10, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 150),
-    idat!(1, ItemClass::Weapon, ItemEquipType::TwoHand, 105, ItemType::Axe,
-          UniqueBaseItem::None, "Axe", "axe", 4, 32, 4, 12, 0, 0, 22, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 450),
-    idat!(1, ItemClass::Weapon, ItemEquipType::TwoHand, 18, ItemType::Axe,
-          UniqueBaseItem::LargeAxe, "Large Axe", "laxe", 6, 40, 6, 16, 0, 0, 30, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 750),
-    idat!(1, ItemClass::Weapon, ItemEquipType::TwoHand, 19, ItemType::Axe,
-          UniqueBaseItem::BroadAxe, "Broad Axe", "baxe", 8, 50, 8, 20, 0, 0, 50, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 1000),
-    idat!(1, ItemClass::Weapon, ItemEquipType::TwoHand, 21, ItemType::Axe,
-          UniqueBaseItem::BattleAxe, "Battle Axe", "btaxe", 10, 60, 10, 25, 0, 0, 65, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 1500),
-    idat!(1, ItemClass::Weapon, ItemEquipType::TwoHand, 22, ItemType::Axe,
-          UniqueBaseItem::GreatAxe, "Great Axe", "gaxe", 12, 75, 12, 30, 0, 0, 80, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 2500),
-    idat!(1, ItemClass::Weapon, ItemEquipType::OneHand, 23, ItemType::Mace,
-          UniqueBaseItem::Mace, "Mace", "mace", 2, 32, 1, 8, 0, 0, 16, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 200),
-    idat!(1, ItemClass::Weapon, ItemEquipType::OneHand, 24, ItemType::Mace,
-          UniqueBaseItem::MorningStar, "Morning Star", "mstar", 3, 40, 1, 10, 0, 0, 26, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 300),
-    idat!(1, ItemClass::Weapon, ItemEquipType::OneHand, 27, ItemType::Mace,
-          UniqueBaseItem::WarHammer, "War Hammer", "whammer", 5, 50, 5, 9, 0, 0, 40, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 600),
-    idat!(1, ItemClass::Weapon, ItemEquipType::OneHand, 25, ItemType::Mace,
-          UniqueBaseItem::SpikedClub, "Spiked Club", "sclub", 4, 20, 3, 6, 0, 0, 18, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 225),
-
-    // Item 140-169: More Weapons, Bows, Staves, Jewelry, Runes
-    idat!(1, ItemClass::Weapon, ItemEquipType::OneHand, 25, ItemType::Mace,
-          UniqueBaseItem::SpikedClub, "Club", "club", 1, 20, 1, 6, 0, 0, 0, 0, 0,
+    //   3 IDI_WARRCLUB
+    idat!(0, ItemClass::Weapon, ItemEquipType::OneHand, 66, ItemType::Mace,
+          UniqueBaseItem::SpikedClub, "Club", "", 1, 20, 1, 6, 0, 0, 0, 0, 0,
           ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 20),
-    idat!(1, ItemClass::Weapon, ItemEquipType::OneHand, 28, ItemType::Mace,
-          UniqueBaseItem::Flail, "Flail", "flail", 7, 36, 2, 12, 0, 0, 30, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 500),
-    idat!(1, ItemClass::Weapon, ItemEquipType::TwoHand, 26, ItemType::Mace,
-          UniqueBaseItem::Maul, "Maul", "maul", 10, 50, 6, 20, 0, 0, 55, 0, 0,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 900),
-    idat!(2, ItemClass::Weapon, ItemEquipType::TwoHand, 1, ItemType::Bow,
-          UniqueBaseItem::ShortBow, "Short Bow", "sbow", 1, 30, 1, 4, 0, 0, 0, 0, 0,
+    //   4 IDI_ROGUE
+    idat!(0, ItemClass::Weapon, ItemEquipType::TwoHand, 118, ItemType::Bow,
+          UniqueBaseItem::None, "Short Bow", "", 1, 30, 1, 4, 0, 0, 0, 0, 0,
           ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 100),
-    idat!(2, ItemClass::Weapon, ItemEquipType::TwoHand, 3, ItemType::Bow,
-          UniqueBaseItem::HunterBow, "Hunter's Bow", "hbow", 3, 40, 2, 5, 0, 0, 20, 0, 35,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 350),
-    idat!(2, ItemClass::Weapon, ItemEquipType::TwoHand, 3, ItemType::Bow,
-          UniqueBaseItem::LongBow, "Long Bow", "lbow", 5, 35, 1, 6, 0, 0, 25, 0, 30,
+    //   5 IDI_SORCERER
+    idat!(0, ItemClass::Weapon, ItemEquipType::TwoHand, 109, ItemType::Staff,
+          UniqueBaseItem::None, "Short Staff of Mana", "", 1, 25, 2, 4, 0, 0, 0, 17, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::Staff, SpellID::Mana, false, 210),
+    //   6 IDI_CLEAVER
+    idat!(0, ItemClass::Weapon, ItemEquipType::TwoHand, 106, ItemType::Axe,
+          UniqueBaseItem::Cleaver, "Cleaver", "", 10, 10, 4, 24, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::Unique, SpellID::Null, false, 2000),
+    //   7 IDI_SKCROWN
+    idat!(0, ItemClass::Armor, ItemEquipType::Helm, 78, ItemType::Helm,
+          UniqueBaseItem::SkeletonCrown, "The Undead Crown", "", 0, 50, 0, 0, 15, 15, 0, 0, 0,
+          ItemSpecialEffect::RANDOM_STEAL_LIFE, ItemMiscId::Unique, SpellID::Null, false, 10000),
+    //   8 IDI_INFRARING
+    idat!(0, ItemClass::Misc, ItemEquipType::Ring, 18, ItemType::Ring,
+          UniqueBaseItem::InfraRing, "Empyrean Band", "", 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::Unique, SpellID::Null, false, 8000),
+    //   9 IDI_ROCK
+    idat!(0, ItemClass::Quest, ItemEquipType::Unequipable, 76, ItemType::Misc,
+          UniqueBaseItem::None, "Magic Rock", "", 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 0),
+    //  10 IDI_OPTAMULET
+    idat!(0, ItemClass::Misc, ItemEquipType::Amulet, 44, ItemType::Amulet,
+          UniqueBaseItem::OpticAmulet, "Optic Amulet", "", 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::Unique, SpellID::Null, false, 5000),
+    //  11 IDI_TRING
+    idat!(0, ItemClass::Misc, ItemEquipType::Ring, 10, ItemType::Ring,
+          UniqueBaseItem::TRing, "Ring of Truth", "", 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::Unique, SpellID::Null, false, 1000),
+    //  12 IDI_BANNER
+    idat!(0, ItemClass::Quest, ItemEquipType::Unequipable, 126, ItemType::Misc,
+          UniqueBaseItem::None, "Tavern Sign", "", 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 0),
+    //  13 IDI_HARCREST
+    idat!(0, ItemClass::Armor, ItemEquipType::Helm, 81, ItemType::Helm,
+          UniqueBaseItem::HarlequinCrest, "Harlequin Crest", "", 0, 15, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::Unique, SpellID::Null, false, 15),
+    //  14 IDI_STEELVEIL
+    idat!(0, ItemClass::Armor, ItemEquipType::Helm, 85, ItemType::Helm,
+          UniqueBaseItem::SteelVeil, "Veil of Steel", "", 0, 60, 0, 0, 18, 18, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::Unique, SpellID::Null, false, 0),
+    //  15 IDI_GLDNELIX
+    idat!(0, ItemClass::Misc, ItemEquipType::Unequipable, 17, ItemType::Misc,
+          UniqueBaseItem::Elixir, "Golden Elixir", "", 15, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 0),
+    //  16 IDI_ANVIL
+    idat!(0, ItemClass::Quest, ItemEquipType::Unequipable, 140, ItemType::Misc,
+          UniqueBaseItem::None, "Anvil of Fury", "", 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 0),
+    //  17 IDI_MUSHROOM
+    idat!(0, ItemClass::Quest, ItemEquipType::Unequipable, 89, ItemType::Misc,
+          UniqueBaseItem::None, "Black Mushroom", "", 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 0),
+    //  18 IDI_BRAIN
+    idat!(0, ItemClass::Quest, ItemEquipType::Unequipable, 40, ItemType::Misc,
+          UniqueBaseItem::None, "Brain", "", 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 0),
+    //  19 IDI_FUNGALTM
+    idat!(0, ItemClass::Quest, ItemEquipType::Unequipable, 97, ItemType::Misc,
+          UniqueBaseItem::None, "Fungal Tome", "", 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 0),
+    //  20 IDI_SPECELIX
+    idat!(0, ItemClass::Misc, ItemEquipType::Unequipable, 15, ItemType::Misc,
+          UniqueBaseItem::Elixir, "Spectral Elixir", "", 15, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::SpecElixir, SpellID::Null, true, 0),
+    //  21 IDI_BLDSTONE
+    idat!(0, ItemClass::Quest, ItemEquipType::Unequipable, 25, ItemType::Misc,
+          UniqueBaseItem::None, "Blood Stone", "", 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 0),
+    //  22 IDI_MAPOFDOOM
+    idat!(0, ItemClass::Quest, ItemEquipType::Unequipable, 96, ItemType::Misc,
+          UniqueBaseItem::MapOfDoom, "Cathedral Map", "", 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::MapOfDoom, SpellID::Null, true, 0),
+    //  23 IDI_EAR
+    idat!(0, ItemClass::Misc, ItemEquipType::Unequipable, 255, ItemType::Misc,
+          UniqueBaseItem::None, "Ear", "", 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::Ear, SpellID::Null, false, 0),
+    //  24 IDI_HEAL
+    idat!(0, ItemClass::Misc, ItemEquipType::Unequipable, 32, ItemType::Misc,
+          UniqueBaseItem::None, "Potion of Healing", "", 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::Heal, SpellID::Null, true, 50),
+    //  25 IDI_MANA
+    idat!(0, ItemClass::Misc, ItemEquipType::Unequipable, 39, ItemType::Misc,
+          UniqueBaseItem::None, "Potion of Mana", "", 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::Mana, SpellID::Null, true, 50),
+    //  26 IDI_IDENTIFY
+    idat!(0, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
+          UniqueBaseItem::None, "Scroll of Identify", "", 1, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::Scroll, SpellID::Identify, true, 200),
+    //  27 IDI_PORTAL
+    idat!(0, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
+          UniqueBaseItem::None, "Scroll of Town Portal", "", 4, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::Scroll, SpellID::TownPortal, true, 200),
+    //  28 IDI_ARMOFVAL
+    idat!(0, ItemClass::Armor, ItemEquipType::Armor, 157, ItemType::MediumArmor,
+          UniqueBaseItem::ArmorOfValor, "Arkaine's Valor", "", 0, 40, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::Unique, SpellID::Null, false, 0),
+    //  29 IDI_FULLHEAL
+    idat!(0, ItemClass::Misc, ItemEquipType::Unequipable, 35, ItemType::Misc,
+          UniqueBaseItem::None, "Potion of Full Healing", "", 1, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::FullHeal, SpellID::Null, true, 150),
+    //  30 IDI_FULLMANA
+    idat!(0, ItemClass::Misc, ItemEquipType::Unequipable, 0, ItemType::Misc,
+          UniqueBaseItem::None, "Potion of Full Mana", "", 1, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::FullMana, SpellID::Null, true, 150),
+    //  31 IDI_GRISWOLD
+    idat!(0, ItemClass::Weapon, ItemEquipType::OneHand, 61, ItemType::Sword,
+          UniqueBaseItem::Griswold, "Griswold's Edge", "", 8, 50, 4, 12, 0, 0, 40, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::Unique, SpellID::Null, false, 750),
+    //  32 IDI_LGTFORGE
+    idat!(0, ItemClass::Armor, ItemEquipType::Armor, 226, ItemType::HeavyArmor,
+          UniqueBaseItem::Bovine, "Bovine Plate", "", 0, 40, 0, 0, 0, 0, 50, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::Unique, SpellID::Null, false, 0),
+    //  33 IDI_LAZSTAFF
+    idat!(0, ItemClass::Misc, ItemEquipType::Unequipable, 155, ItemType::Misc,
+          UniqueBaseItem::LazarusStaff, "Staff of Lazarus", "", 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 0),
+    //  34 IDI_RESURRECT
+    idat!(0, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
+          UniqueBaseItem::None, "Scroll of Resurrect", "", 1, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::ScrollT, SpellID::Resurrect, true, 250),
+    //  35 IDI_OIL
+    idat!(0, ItemClass::Misc, ItemEquipType::Unequipable, 30, ItemType::Misc,
+          UniqueBaseItem::None, "Blacksmith Oil", "", 1, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::OilBSmith, SpellID::Null, true, 100),
+    //  36 IDI_SHORTSTAFF
+    idat!(0, ItemClass::Weapon, ItemEquipType::TwoHand, 109, ItemType::Staff,
+          UniqueBaseItem::None, "Short Staff", "", 1, 25, 2, 4, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 20),
+    //  37 IDI_BARDSWORD
+    idat!(0, ItemClass::Weapon, ItemEquipType::OneHand, 64, ItemType::Sword,
+          UniqueBaseItem::None, "Sword", "", 2, 8, 1, 5, 0, 0, 15, 0, 20,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 20),
+    //  38 IDI_BARDDAGGER
+    idat!(0, ItemClass::Weapon, ItemEquipType::OneHand, 51, ItemType::Sword,
+          UniqueBaseItem::None, "Dagger", "", 1, 16, 1, 4, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 20),
+    //  39 IDI_RUNEBOMB
+    idat!(0, ItemClass::Quest, ItemEquipType::Unequipable, 187, ItemType::Misc,
+          UniqueBaseItem::None, "Rune Bomb", "", 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 0),
+    //  40 IDI_THEODORE
+    idat!(0, ItemClass::Quest, ItemEquipType::Unequipable, 188, ItemType::Misc,
+          UniqueBaseItem::None, "Theodore", "", 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 0),
+    //  41 IDI_AURIC
+    idat!(0, ItemClass::Misc, ItemEquipType::Amulet, 180, ItemType::Misc,
+          UniqueBaseItem::None, "Auric Amulet", "", 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::AuricAmulet, SpellID::Null, false, 100),
+    //  42 IDI_NOTE1
+    idat!(0, ItemClass::Quest, ItemEquipType::Unequipable, 189, ItemType::Misc,
+          UniqueBaseItem::None, "Torn Note 1", "", 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 0),
+    //  43 IDI_NOTE2
+    idat!(0, ItemClass::Quest, ItemEquipType::Unequipable, 190, ItemType::Misc,
+          UniqueBaseItem::None, "Torn Note 2", "", 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 0),
+    //  44 IDI_NOTE3
+    idat!(0, ItemClass::Quest, ItemEquipType::Unequipable, 191, ItemType::Misc,
+          UniqueBaseItem::None, "Torn Note 3", "", 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 0),
+    //  45 IDI_FULLNOTE
+    idat!(0, ItemClass::Quest, ItemEquipType::Unequipable, 192, ItemType::Misc,
+          UniqueBaseItem::None, "Reconstructed Note", "", 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::Note, SpellID::Null, true, 0),
+    //  46 IDI_BROWNSUIT
+    idat!(0, ItemClass::Quest, ItemEquipType::Unequipable, 199, ItemType::Misc,
+          UniqueBaseItem::None, "Brown Suit", "", 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 0),
+    //  47 IDI_GREYSUIT
+    idat!(0, ItemClass::Quest, ItemEquipType::Unequipable, 198, ItemType::Misc,
+          UniqueBaseItem::None, "Grey Suit", "", 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 0),
+    //  48 Cap
+    idat!(1, ItemClass::Armor, ItemEquipType::Helm, 91, ItemType::Helm,
+          UniqueBaseItem::None, "Cap", "Cap", 1, 15, 0, 0, 1, 3, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 15),
+    //  49 Skull Cap
+    idat!(1, ItemClass::Armor, ItemEquipType::Helm, 90, ItemType::Helm,
+          UniqueBaseItem::SkullCap, "Skull Cap", "Cap", 4, 20, 0, 0, 2, 4, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 25),
+    //  50 Helm
+    idat!(1, ItemClass::Armor, ItemEquipType::Helm, 82, ItemType::Helm,
+          UniqueBaseItem::Helm, "Helm", "Helm", 8, 30, 0, 0, 4, 6, 25, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 40),
+    //  51 Full Helm
+    idat!(1, ItemClass::Armor, ItemEquipType::Helm, 75, ItemType::Helm,
+          UniqueBaseItem::None, "Full Helm", "Helm", 12, 35, 0, 0, 6, 8, 35, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 90),
+    //  52 Crown
+    idat!(1, ItemClass::Armor, ItemEquipType::Helm, 95, ItemType::Helm,
+          UniqueBaseItem::Crown, "Crown", "Crown", 16, 40, 0, 0, 8, 12, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 200),
+    //  53 Great Helm
+    idat!(1, ItemClass::Armor, ItemEquipType::Helm, 98, ItemType::Helm,
+          UniqueBaseItem::GreatHelm, "Great Helm", "Helm", 20, 60, 0, 0, 10, 15, 50, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 400),
+    //  54 Cape
+    idat!(1, ItemClass::Armor, ItemEquipType::Armor, 150, ItemType::LightArmor,
+          UniqueBaseItem::Cape, "Cape", "Cape", 1, 12, 0, 0, 1, 5, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 10),
+    //  55 Rags
+    idat!(1, ItemClass::Armor, ItemEquipType::Armor, 128, ItemType::LightArmor,
+          UniqueBaseItem::Rags, "Rags", "Rags", 1, 6, 0, 0, 2, 6, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 5),
+    //  56 Cloak
+    idat!(1, ItemClass::Armor, ItemEquipType::Armor, 149, ItemType::LightArmor,
+          UniqueBaseItem::Cloak, "Cloak", "Cloak", 2, 18, 0, 0, 3, 7, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 40),
+    //  57 Robe
+    idat!(1, ItemClass::Armor, ItemEquipType::Armor, 137, ItemType::LightArmor,
+          UniqueBaseItem::Robe, "Robe", "Robe", 3, 24, 0, 0, 4, 7, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 75),
+    //  58 Quilted Armor
+    idat!(1, ItemClass::Armor, ItemEquipType::Armor, 129, ItemType::LightArmor,
+          UniqueBaseItem::None, "Quilted Armor", "Armor", 4, 30, 0, 0, 7, 10, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 200),
+    //  59 Leather Armor
+    idat!(1, ItemClass::Armor, ItemEquipType::Armor, 135, ItemType::LightArmor,
+          UniqueBaseItem::LeatherArmor, "Leather Armor", "Armor", 6, 35, 0, 0, 10, 13, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 300),
+    //  60 Hard Leather Armor
+    idat!(1, ItemClass::Armor, ItemEquipType::Armor, 127, ItemType::LightArmor,
+          UniqueBaseItem::None, "Hard Leather Armor", "Armor", 7, 40, 0, 0, 11, 14, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 450),
+    //  61 Studded Leather Armor
+    idat!(1, ItemClass::Armor, ItemEquipType::Armor, 107, ItemType::LightArmor,
+          UniqueBaseItem::StuddedArmor, "Studded Leather Armor", "Armor", 9, 45, 0, 0, 15, 17, 20, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 700),
+    //  62 Ring Mail
+    idat!(1, ItemClass::Armor, ItemEquipType::Armor, 154, ItemType::MediumArmor,
+          UniqueBaseItem::None, "Ring Mail", "Mail", 11, 50, 0, 0, 17, 20, 25, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 900),
+    //  63 Chain Mail
+    idat!(1, ItemClass::Armor, ItemEquipType::Armor, 111, ItemType::MediumArmor,
+          UniqueBaseItem::ChainMail, "Chain Mail", "Mail", 13, 55, 0, 0, 18, 22, 30, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 1250),
+    //  64 Scale Mail
+    idat!(1, ItemClass::Armor, ItemEquipType::Armor, 114, ItemType::MediumArmor,
+          UniqueBaseItem::None, "Scale Mail", "Mail", 15, 60, 0, 0, 23, 28, 35, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 2300),
+    //  65 Breast Plate
+    idat!(1, ItemClass::Armor, ItemEquipType::Armor, 153, ItemType::HeavyArmor,
+          UniqueBaseItem::BreastPlate, "Breast Plate", "Plate", 16, 80, 0, 0, 20, 24, 40, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 2800),
+    //  66 Splint Mail
+    idat!(1, ItemClass::Armor, ItemEquipType::Armor, 136, ItemType::MediumArmor,
+          UniqueBaseItem::None, "Splint Mail", "Mail", 17, 65, 0, 0, 30, 35, 40, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 3250),
+    //  67 Plate Mail
+    idat!(1, ItemClass::Armor, ItemEquipType::Armor, 103, ItemType::HeavyArmor,
+          UniqueBaseItem::PlateMail, "Plate Mail", "Plate", 19, 75, 0, 0, 42, 50, 60, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 4600),
+    //  68 Field Plate
+    idat!(1, ItemClass::Armor, ItemEquipType::Armor, 103, ItemType::HeavyArmor,
+          UniqueBaseItem::None, "Field Plate", "Plate", 21, 80, 0, 0, 40, 45, 65, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 5800),
+    //  69 Gothic Plate
+    idat!(1, ItemClass::Armor, ItemEquipType::Armor, 152, ItemType::HeavyArmor,
+          UniqueBaseItem::None, "Gothic Plate", "Plate", 23, 100, 0, 0, 50, 60, 80, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 8000),
+    //  70 Full Plate Mail
+    idat!(1, ItemClass::Armor, ItemEquipType::Armor, 151, ItemType::HeavyArmor,
+          UniqueBaseItem::FullPlate, "Full Plate Mail", "Plate", 25, 90, 0, 0, 60, 75, 90, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 6500),
+    //  71 Buckler
+    idat!(1, ItemClass::Armor, ItemEquipType::OneHand, 83, ItemType::Shield,
+          UniqueBaseItem::Buckler, "Buckler", "Shield", 1, 16, 0, 0, 1, 5, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 30),
+    //  72 Small Shield
+    idat!(1, ItemClass::Armor, ItemEquipType::OneHand, 105, ItemType::Shield,
+          UniqueBaseItem::SmallShield, "Small Shield", "Shield", 5, 24, 0, 0, 3, 8, 25, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 90),
+    //  73 Large Shield
+    idat!(1, ItemClass::Armor, ItemEquipType::OneHand, 147, ItemType::Shield,
+          UniqueBaseItem::LargeShield, "Large Shield", "Shield", 9, 32, 0, 0, 5, 10, 40, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 200),
+    //  74 Kite Shield
+    idat!(1, ItemClass::Armor, ItemEquipType::OneHand, 113, ItemType::Shield,
+          UniqueBaseItem::KiteShield, "Kite Shield", "Shield", 14, 40, 0, 0, 8, 15, 50, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 400),
+    //  75 Tower Shield
+    idat!(1, ItemClass::Armor, ItemEquipType::OneHand, 132, ItemType::Shield,
+          UniqueBaseItem::GothicShield, "Tower Shield", "Shield", 20, 50, 0, 0, 12, 20, 60, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 850),
+    //  76 Gothic Shield
+    idat!(1, ItemClass::Armor, ItemEquipType::OneHand, 148, ItemType::Shield,
+          UniqueBaseItem::GothicShield, "Gothic Shield", "Shield", 23, 60, 0, 0, 14, 18, 80, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 2300),
+    //  77 Potion of Healing
+    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 32, ItemType::Misc,
+          UniqueBaseItem::None, "Potion of Healing", "", 1, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::Heal, SpellID::Null, true, 50),
+    //  78 Potion of Full Healing
+    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 35, ItemType::Misc,
+          UniqueBaseItem::None, "Potion of Full Healing", "", 1, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::FullHeal, SpellID::Null, true, 150),
+    //  79 Potion of Mana
+    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 39, ItemType::Misc,
+          UniqueBaseItem::None, "Potion of Mana", "", 1, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::Mana, SpellID::Null, true, 50),
+    //  80 Potion of Full Mana
+    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 0, ItemType::Misc,
+          UniqueBaseItem::None, "Potion of Full Mana", "", 1, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::FullMana, SpellID::Null, true, 150),
+    //  81 Potion of Rejuvenation
+    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 37, ItemType::Misc,
+          UniqueBaseItem::None, "Potion of Rejuvenation", "", 3, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::Rejuv, SpellID::Null, true, 120),
+    //  82 Potion of Full Rejuvenation
+    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 33, ItemType::Misc,
+          UniqueBaseItem::None, "Potion of Full Rejuvenation", "", 7, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::FullRejuv, SpellID::Null, true, 600),
+    //  83 Blacksmith Oil
+    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 30, ItemType::Misc,
+          UniqueBaseItem::None, "Blacksmith Oil", "", 1, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::OilBSmith, SpellID::Null, true, 100),
+    //  84 Oil of Accuracy
+    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 30, ItemType::Misc,
+          UniqueBaseItem::None, "Oil of Accuracy", "", 1, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::OilAcc, SpellID::Null, true, 500),
+    //  85 Oil of Sharpness
+    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 30, ItemType::Misc,
+          UniqueBaseItem::None, "Oil of Sharpness", "", 1, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::OilSharp, SpellID::Null, true, 500),
+    //  86 Oil
+    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 30, ItemType::Misc,
+          UniqueBaseItem::None, "Oil", "", 10, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::OilOf, SpellID::Null, true, 0),
+    //  87 Elixir of Strength
+    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 38, ItemType::Misc,
+          UniqueBaseItem::None, "Elixir of Strength", "", 15, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::ElixirStr, SpellID::Null, true, 5000),
+    //  88 Elixir of Magic
+    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 34, ItemType::Misc,
+          UniqueBaseItem::None, "Elixir of Magic", "", 15, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::ElixirMag, SpellID::Null, true, 5000),
+    //  89 Elixir of Dexterity
+    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 36, ItemType::Misc,
+          UniqueBaseItem::None, "Elixir of Dexterity", "", 15, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::ElixirDex, SpellID::Null, true, 5000),
+    //  90 Elixir of Vitality
+    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 31, ItemType::Misc,
+          UniqueBaseItem::None, "Elixir of Vitality", "", 20, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::ElixirVit, SpellID::Null, true, 5000),
+    //  91 Scroll of Healing
+    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
+          UniqueBaseItem::None, "Scroll of Healing", "", 1, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::Scroll, SpellID::Healing, true, 50),
+    //  92 Scroll of Search
+    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
+          UniqueBaseItem::None, "Scroll of Search", "", 1, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::Scroll, SpellID::Search, true, 50),
+    //  93 Scroll of Lightning
+    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
+          UniqueBaseItem::None, "Scroll of Lightning", "", 4, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::ScrollT, SpellID::Lightning, true, 150),
+    //  94 Scroll of Identify
+    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
+          UniqueBaseItem::None, "Scroll of Identify", "", 1, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::Scroll, SpellID::Identify, true, 100),
+    //  95 Scroll of Resurrect
+    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
+          UniqueBaseItem::None, "Scroll of Resurrect", "", 1, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::ScrollT, SpellID::Resurrect, true, 250),
+    //  96 Scroll of Fire Wall
+    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
+          UniqueBaseItem::None, "Scroll of Fire Wall", "", 4, 0, 0, 0, 0, 0, 0, 17, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::ScrollT, SpellID::FireWall, true, 400),
+    //  97 Scroll of Inferno
+    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
+          UniqueBaseItem::None, "Scroll of Inferno", "", 1, 0, 0, 0, 0, 0, 0, 19, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::ScrollT, SpellID::Inferno, true, 100),
+    //  98 Scroll of Town Portal
+    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
+          UniqueBaseItem::None, "Scroll of Town Portal", "", 4, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::Scroll, SpellID::TownPortal, true, 200),
+    //  99 Scroll of Flash
+    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
+          UniqueBaseItem::None, "Scroll of Flash", "", 6, 0, 0, 0, 0, 0, 0, 21, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::ScrollT, SpellID::Flash, true, 500),
+    // 100 Scroll of Infravision
+    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
+          UniqueBaseItem::None, "Scroll of Infravision", "", 8, 0, 0, 0, 0, 0, 0, 23, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::Scroll, SpellID::Infravision, true, 600),
+    // 101 Scroll of Phasing
+    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
+          UniqueBaseItem::None, "Scroll of Phasing", "", 6, 0, 0, 0, 0, 0, 0, 25, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::Scroll, SpellID::Phasing, true, 200),
+    // 102 Scroll of Mana Shield
+    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
+          UniqueBaseItem::None, "Scroll of Mana Shield", "", 8, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::Scroll, SpellID::ManaShield, true, 1200),
+    // 103 Scroll of Flame Wave
+    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
+          UniqueBaseItem::None, "Scroll of Flame Wave", "", 10, 0, 0, 0, 0, 0, 0, 29, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::ScrollT, SpellID::FlameWave, true, 650),
+    // 104 Scroll of Fireball
+    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
+          UniqueBaseItem::None, "Scroll of Fireball", "", 8, 0, 0, 0, 0, 0, 0, 31, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::ScrollT, SpellID::Fireball, true, 300),
+    // 105 Scroll of Stone Curse
+    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
+          UniqueBaseItem::None, "Scroll of Stone Curse", "", 6, 0, 0, 0, 0, 0, 0, 33, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::ScrollT, SpellID::StoneCurse, true, 800),
+    // 106 Scroll of Chain Lightning
+    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
+          UniqueBaseItem::None, "Scroll of Chain Lightning", "", 10, 0, 0, 0, 0, 0, 0, 35, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::ScrollT, SpellID::ChainLightning, true, 750),
+    // 107 Scroll of Guardian
+    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
+          UniqueBaseItem::None, "Scroll of Guardian", "", 12, 0, 0, 0, 0, 0, 0, 47, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::ScrollT, SpellID::Guardian, true, 950),
+    // 108 
+    idat!(0, ItemClass::Misc, ItemEquipType::Unequipable, 255, ItemType::Misc,
+          UniqueBaseItem::None, "", "", 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 0),
+    // 109 Scroll of Nova
+    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
+          UniqueBaseItem::None, "Scroll of Nova", "", 14, 0, 0, 0, 0, 0, 0, 57, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::Scroll, SpellID::Nova, true, 1300),
+    // 110 Scroll of Golem
+    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
+          UniqueBaseItem::None, "Scroll of Golem", "", 10, 0, 0, 0, 0, 0, 0, 51, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::ScrollT, SpellID::Golem, true, 1100),
+    // 111 
+    idat!(0, ItemClass::Misc, ItemEquipType::Unequipable, 255, ItemType::Misc,
+          UniqueBaseItem::None, "", "", 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 0),
+    // 112 Scroll of Teleport
+    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
+          UniqueBaseItem::None, "Scroll of Teleport", "", 14, 0, 0, 0, 0, 0, 0, 81, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::Scroll, SpellID::Teleport, true, 3000),
+    // 113 Scroll of Apocalypse
+    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 1, ItemType::Misc,
+          UniqueBaseItem::None, "Scroll of Apocalypse", "", 22, 0, 0, 0, 0, 0, 0, 117, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::Scroll, SpellID::Apocalypse, true, 2000),
+    // 114 IDI_BOOK1
+    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 88, ItemType::Misc,
+          UniqueBaseItem::None, "Book of ", "", 2, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::Book, SpellID::Null, true, 0),
+    // 115 IDI_BOOK2
+    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 88, ItemType::Misc,
+          UniqueBaseItem::None, "Book of ", "", 8, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::Book, SpellID::Null, true, 0),
+    // 116 IDI_BOOK3
+    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 88, ItemType::Misc,
+          UniqueBaseItem::None, "Book of ", "", 14, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::Book, SpellID::Null, true, 0),
+    // 117 IDI_BOOK4
+    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 88, ItemType::Misc,
+          UniqueBaseItem::None, "Book of ", "", 20, 0, 0, 0, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::Book, SpellID::Null, true, 0),
+    // 118 Dagger
+    idat!(1, ItemClass::Weapon, ItemEquipType::OneHand, 51, ItemType::Sword,
+          UniqueBaseItem::Dagger, "Dagger", "Dagger", 1, 16, 1, 4, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 60),
+    // 119 Short Sword
+    idat!(1, ItemClass::Weapon, ItemEquipType::OneHand, 64, ItemType::Sword,
+          UniqueBaseItem::None, "Short Sword", "Sword", 1, 24, 2, 6, 0, 0, 18, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 120),
+    // 120 Falchion
+    idat!(1, ItemClass::Weapon, ItemEquipType::OneHand, 62, ItemType::Sword,
+          UniqueBaseItem::Falchion, "Falchion", "Sword", 2, 20, 4, 8, 0, 0, 30, 0, 0,
           ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 250),
-    idat!(2, ItemClass::Weapon, ItemEquipType::TwoHand, 4, ItemType::Bow,
-          UniqueBaseItem::CompositeBow, "Composite Bow", "cbow", 7, 45, 3, 6, 0, 0, 25, 0, 40,
-          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 600),
-    idat!(2, ItemClass::Weapon, ItemEquipType::TwoHand, 105, ItemType::Bow,
-          UniqueBaseItem::None, "Short Battle Bow", "sbbow", 9, 45, 3, 7, 0, 0, 30, 0, 50,
+    // 121 Scimitar
+    idat!(1, ItemClass::Weapon, ItemEquipType::OneHand, 72, ItemType::Sword,
+          UniqueBaseItem::Scimitar, "Scimitar", "Sword", 4, 28, 3, 7, 0, 0, 23, 0, 23,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 200),
+    // 122 Claymore
+    idat!(1, ItemClass::Weapon, ItemEquipType::OneHand, 65, ItemType::Sword,
+          UniqueBaseItem::Claymore, "Claymore", "Sword", 5, 36, 1, 12, 0, 0, 35, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 450),
+    // 123 Blade
+    idat!(1, ItemClass::Weapon, ItemEquipType::OneHand, 56, ItemType::Sword,
+          UniqueBaseItem::None, "Blade", "Blade", 4, 30, 3, 8, 0, 0, 25, 0, 30,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 280),
+    // 124 Sabre
+    idat!(1, ItemClass::Weapon, ItemEquipType::OneHand, 67, ItemType::Sword,
+          UniqueBaseItem::Sabre, "Sabre", "Sabre", 1, 45, 1, 8, 0, 0, 17, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 170),
+    // 125 Long Sword
+    idat!(1, ItemClass::Weapon, ItemEquipType::OneHand, 60, ItemType::Sword,
+          UniqueBaseItem::LongSword, "Long Sword", "Sword", 6, 40, 2, 10, 0, 0, 30, 0, 30,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 350),
+    // 126 Broad Sword
+    idat!(1, ItemClass::Weapon, ItemEquipType::OneHand, 61, ItemType::Sword,
+          UniqueBaseItem::BroadSword, "Broad Sword", "Sword", 8, 50, 4, 12, 0, 0, 40, 0, 0,
           ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 750),
-    idat!(2, ItemClass::Weapon, ItemEquipType::TwoHand, 6, ItemType::Bow,
-          UniqueBaseItem::BattleBow, "Long Battle Bow", "lbbow", 11, 50, 1, 10, 0, 0, 30, 0, 60,
+    // 127 Bastard Sword
+    idat!(1, ItemClass::Weapon, ItemEquipType::OneHand, 57, ItemType::Sword,
+          UniqueBaseItem::BastardSword, "Bastard Sword", "Sword", 10, 60, 6, 15, 0, 0, 50, 0, 0,
           ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 1000),
-    idat!(2, ItemClass::Weapon, ItemEquipType::TwoHand, 105, ItemType::Bow,
-          UniqueBaseItem::None, "Short War Bow", "swbow", 15, 55, 4, 8, 0, 0, 35, 0, 70,
+    // 128 Two-Handed Sword
+    idat!(1, ItemClass::Weapon, ItemEquipType::TwoHand, 110, ItemType::Sword,
+          UniqueBaseItem::TwoHandSword, "Two-Handed Sword", "Sword", 14, 75, 8, 16, 0, 0, 65, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 1800),
+    // 129 Great Sword
+    idat!(1, ItemClass::Weapon, ItemEquipType::TwoHand, 134, ItemType::Sword,
+          UniqueBaseItem::GreatSword, "Great Sword", "Sword", 17, 100, 10, 20, 0, 0, 75, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 3000),
+    // 130 Small Axe
+    idat!(1, ItemClass::Weapon, ItemEquipType::TwoHand, 112, ItemType::Axe,
+          UniqueBaseItem::SmallAxe, "Small Axe", "Axe", 2, 24, 2, 10, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 150),
+    // 131 Axe
+    idat!(1, ItemClass::Weapon, ItemEquipType::TwoHand, 144, ItemType::Axe,
+          UniqueBaseItem::None, "Axe", "Axe", 4, 32, 4, 12, 0, 0, 22, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 450),
+    // 132 Large Axe
+    idat!(1, ItemClass::Weapon, ItemEquipType::TwoHand, 142, ItemType::Axe,
+          UniqueBaseItem::LargeAxe, "Large Axe", "Axe", 6, 40, 6, 16, 0, 0, 30, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 750),
+    // 133 Broad Axe
+    idat!(1, ItemClass::Weapon, ItemEquipType::TwoHand, 141, ItemType::Axe,
+          UniqueBaseItem::BroadAxe, "Broad Axe", "Axe", 8, 50, 8, 20, 0, 0, 50, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 1000),
+    // 134 Battle Axe
+    idat!(1, ItemClass::Weapon, ItemEquipType::TwoHand, 101, ItemType::Axe,
+          UniqueBaseItem::BattleAxe, "Battle Axe", "Axe", 10, 60, 10, 25, 0, 0, 65, 0, 0,
           ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 1500),
-    idat!(2, ItemClass::Weapon, ItemEquipType::TwoHand, 5, ItemType::Bow,
-          UniqueBaseItem::WarBow, "Long War Bow", "lwbow", 19, 60, 1, 14, 0, 0, 45, 0, 80,
+    // 135 Great Axe
+    idat!(1, ItemClass::Weapon, ItemEquipType::TwoHand, 143, ItemType::Axe,
+          UniqueBaseItem::GreatAxe, "Great Axe", "Axe", 12, 75, 12, 30, 0, 0, 80, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 2500),
+    // 136 Mace
+    idat!(1, ItemClass::Weapon, ItemEquipType::OneHand, 59, ItemType::Mace,
+          UniqueBaseItem::Mace, "Mace", "Mace", 2, 32, 1, 8, 0, 0, 16, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 200),
+    // 137 Morning Star
+    idat!(1, ItemClass::Weapon, ItemEquipType::OneHand, 63, ItemType::Mace,
+          UniqueBaseItem::MorningStar, "Morning Star", "Mace", 3, 40, 1, 10, 0, 0, 26, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 300),
+    // 138 War Hammer
+    idat!(1, ItemClass::Weapon, ItemEquipType::OneHand, 121, ItemType::Mace,
+          UniqueBaseItem::WarHammer, "War Hammer", "Hammer", 5, 50, 5, 9, 0, 0, 40, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 600),
+    // 139 IDI_BARBARIAN
+    idat!(1, ItemClass::Weapon, ItemEquipType::OneHand, 70, ItemType::Mace,
+          UniqueBaseItem::SpikedClub, "Spiked Club", "Club", 4, 20, 3, 6, 0, 0, 18, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 225),
+    // 140 Club
+    idat!(1, ItemClass::Weapon, ItemEquipType::OneHand, 66, ItemType::Mace,
+          UniqueBaseItem::SpikedClub, "Club", "Club", 1, 20, 1, 6, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 20),
+    // 141 Flail
+    idat!(1, ItemClass::Weapon, ItemEquipType::OneHand, 131, ItemType::Mace,
+          UniqueBaseItem::Flail, "Flail", "Flail", 7, 36, 2, 12, 0, 0, 30, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 500),
+    // 142 Maul
+    idat!(1, ItemClass::Weapon, ItemEquipType::TwoHand, 122, ItemType::Mace,
+          UniqueBaseItem::Maul, "Maul", "Maul", 10, 50, 6, 20, 0, 0, 55, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 900),
+    // 143 Short Bow
+    idat!(2, ItemClass::Weapon, ItemEquipType::TwoHand, 118, ItemType::Bow,
+          UniqueBaseItem::ShortBow, "Short Bow", "Bow", 1, 30, 1, 4, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 100),
+    // 144 Hunter's Bow
+    idat!(2, ItemClass::Weapon, ItemEquipType::TwoHand, 102, ItemType::Bow,
+          UniqueBaseItem::HunterBow, "Hunter's Bow", "Bow", 3, 40, 2, 5, 0, 0, 20, 0, 35,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 350),
+    // 145 Long Bow
+    idat!(2, ItemClass::Weapon, ItemEquipType::TwoHand, 102, ItemType::Bow,
+          UniqueBaseItem::LongBow, "Long Bow", "Bow", 5, 35, 1, 6, 0, 0, 25, 0, 30,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 250),
+    // 146 Composite Bow
+    idat!(2, ItemClass::Weapon, ItemEquipType::TwoHand, 133, ItemType::Bow,
+          UniqueBaseItem::CompositeBow, "Composite Bow", "Bow", 7, 45, 3, 6, 0, 0, 25, 0, 40,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 600),
+    // 147 Short Battle Bow
+    idat!(2, ItemClass::Weapon, ItemEquipType::TwoHand, 167, ItemType::Bow,
+          UniqueBaseItem::None, "Short Battle Bow", "Bow", 9, 45, 3, 7, 0, 0, 30, 0, 50,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 750),
+    // 148 IDI_SHORT_BATTLE_BOW
+    idat!(2, ItemClass::Weapon, ItemEquipType::TwoHand, 119, ItemType::Bow,
+          UniqueBaseItem::BattleBow, "Long Battle Bow", "Bow", 11, 50, 1, 10, 0, 0, 30, 0, 60,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 1000),
+    // 149 Short War Bow
+    idat!(2, ItemClass::Weapon, ItemEquipType::TwoHand, 165, ItemType::Bow,
+          UniqueBaseItem::None, "Short War Bow", "Bow", 15, 55, 4, 8, 0, 0, 35, 0, 70,
+          ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 1500),
+    // 150 Long War Bow
+    idat!(2, ItemClass::Weapon, ItemEquipType::TwoHand, 120, ItemType::Bow,
+          UniqueBaseItem::WarBow, "Long War Bow", "Bow", 19, 60, 1, 14, 0, 0, 45, 0, 80,
           ItemSpecialEffect::NONE, ItemMiscId::None, SpellID::Null, false, 2000),
-    idat!(1, ItemClass::Weapon, ItemEquipType::TwoHand, 30, ItemType::Staff,
-          UniqueBaseItem::ShortStaff, "Short Staff", "sstaff", 1, 25, 2, 4, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::STAFF, ItemMiscId::None, SpellID::Null, false, 30),
-    idat!(1, ItemClass::Weapon, ItemEquipType::TwoHand, 29, ItemType::Staff,
-          UniqueBaseItem::LongStaff, "Long Staff", "lstaff", 4, 35, 4, 8, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::STAFF, ItemMiscId::None, SpellID::Null, false, 100),
-    idat!(1, ItemClass::Weapon, ItemEquipType::TwoHand, 31, ItemType::Staff,
-          UniqueBaseItem::CompositeStaff, "Composite Staff", "cstaff", 6, 45, 5, 10, 0, 0, 0, 0, 0,
-          ItemSpecialEffect::STAFF, ItemMiscId::None, SpellID::Null, false, 500),
-    idat!(1, ItemClass::Weapon, ItemEquipType::TwoHand, 30, ItemType::Staff,
-          UniqueBaseItem::QuarterStaff, "Quarter Staff", "qstaff", 9, 55, 6, 12, 0, 0, 20, 0, 0,
-          ItemSpecialEffect::STAFF, ItemMiscId::None, SpellID::Null, false, 1000),
-    idat!(1, ItemClass::Weapon, ItemEquipType::TwoHand, 33, ItemType::Staff,
-          UniqueBaseItem::WarStaff, "War Staff", "wstaff", 12, 75, 8, 16, 0, 0, 30, 0, 0,
-          ItemSpecialEffect::STAFF, ItemMiscId::None, SpellID::Null, false, 1500),
+    // 151 Short Staff
+    idat!(1, ItemClass::Weapon, ItemEquipType::TwoHand, 109, ItemType::Staff,
+          UniqueBaseItem::ShortStaff, "Short Staff", "Staff", 1, 25, 2, 4, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::Staff, SpellID::Null, false, 30),
+    // 152 Long Staff
+    idat!(1, ItemClass::Weapon, ItemEquipType::TwoHand, 123, ItemType::Staff,
+          UniqueBaseItem::LongStaff, "Long Staff", "Staff", 4, 35, 4, 8, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::Staff, SpellID::Null, false, 100),
+    // 153 Composite Staff
+    idat!(1, ItemClass::Weapon, ItemEquipType::TwoHand, 166, ItemType::Staff,
+          UniqueBaseItem::CompositeStaff, "Composite Staff", "Staff", 6, 45, 5, 10, 0, 0, 0, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::Staff, SpellID::Null, false, 500),
+    // 154 Quarter Staff
+    idat!(1, ItemClass::Weapon, ItemEquipType::TwoHand, 109, ItemType::Staff,
+          UniqueBaseItem::QuarterStaff, "Quarter Staff", "Staff", 9, 55, 6, 12, 0, 0, 20, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::Staff, SpellID::Null, false, 1000),
+    // 155 War Staff
+    idat!(1, ItemClass::Weapon, ItemEquipType::TwoHand, 124, ItemType::Staff,
+          UniqueBaseItem::WarStaff, "War Staff", "Staff", 12, 75, 8, 16, 0, 0, 30, 0, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::Staff, SpellID::Null, false, 1500),
+    // 156 Ring
     idat!(1, ItemClass::Misc, ItemEquipType::Ring, 12, ItemType::Ring,
-          UniqueBaseItem::Ring, "Ring", "ring1", 5, 0, 0, 0, 0, 0, 0, 0, 0,
+          UniqueBaseItem::Ring, "Ring", "Ring", 5, 0, 0, 0, 0, 0, 0, 0, 0,
           ItemSpecialEffect::NONE, ItemMiscId::Ring, SpellID::Null, false, 1000),
+    // 157 Ring
     idat!(1, ItemClass::Misc, ItemEquipType::Ring, 12, ItemType::Ring,
-          UniqueBaseItem::Ring, "Ring", "ring2", 10, 0, 0, 0, 0, 0, 0, 0, 0,
+          UniqueBaseItem::Ring, "Ring", "Ring", 10, 0, 0, 0, 0, 0, 0, 0, 0,
           ItemSpecialEffect::NONE, ItemMiscId::Ring, SpellID::Null, false, 1000),
+    // 158 Ring
     idat!(1, ItemClass::Misc, ItemEquipType::Ring, 12, ItemType::Ring,
-          UniqueBaseItem::Ring, "Ring", "ring3", 15, 0, 0, 0, 0, 0, 0, 0, 0,
+          UniqueBaseItem::Ring, "Ring", "Ring", 15, 0, 0, 0, 0, 0, 0, 0, 0,
           ItemSpecialEffect::NONE, ItemMiscId::Ring, SpellID::Null, false, 1000),
+    // 159 Amulet
     idat!(1, ItemClass::Misc, ItemEquipType::Amulet, 45, ItemType::Amulet,
-          UniqueBaseItem::Amulet, "Amulet", "amulet1", 8, 0, 0, 0, 0, 0, 0, 0, 0,
+          UniqueBaseItem::Amulet, "Amulet", "Amulet", 8, 0, 0, 0, 0, 0, 0, 0, 0,
           ItemSpecialEffect::NONE, ItemMiscId::Amulet, SpellID::Null, false, 1200),
+    // 160 Amulet
     idat!(1, ItemClass::Misc, ItemEquipType::Amulet, 45, ItemType::Amulet,
-          UniqueBaseItem::Amulet, "Amulet", "amulet2", 16, 0, 0, 0, 0, 0, 0, 0, 0,
+          UniqueBaseItem::Amulet, "Amulet", "Amulet", 16, 0, 0, 0, 0, 0, 0, 0, 0,
           ItemSpecialEffect::NONE, ItemMiscId::Amulet, SpellID::Null, false, 1200),
-    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 162, ItemType::Misc,
-          UniqueBaseItem::None, "Rune of Fire", "runef", 1, 0, 0, 0, 0, 0, 0, 0, 0,
+    // 161 Rune of Fire
+    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 193, ItemType::Misc,
+          UniqueBaseItem::None, "Rune of Fire", "Rune", 1, 0, 0, 0, 0, 0, 0, 0, 0,
           ItemSpecialEffect::NONE, ItemMiscId::RuneF, SpellID::Null, true, 100),
-    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 162, ItemType::Misc,
-          UniqueBaseItem::None, "Rune of Lightning", "runel", 3, 0, 0, 0, 0, 0, 0, 13, 0,
+    // 162 Rune of Lightning
+    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 195, ItemType::Misc,
+          UniqueBaseItem::None, "Rune of Lightning", "Rune", 3, 0, 0, 0, 0, 0, 0, 13, 0,
           ItemSpecialEffect::NONE, ItemMiscId::RuneL, SpellID::Null, true, 200),
-    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 162, ItemType::Misc,
-          UniqueBaseItem::None, "Greater Rune of Fire", "grunef", 7, 0, 0, 0, 0, 0, 0, 42, 0,
+    // 163 Greater Rune of Fire
+    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 194, ItemType::Misc,
+          UniqueBaseItem::None, "Greater Rune of Fire", "Rune", 7, 0, 0, 0, 0, 0, 0, 42, 0,
           ItemSpecialEffect::NONE, ItemMiscId::GrRuneF, SpellID::Null, true, 400),
-    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 162, ItemType::Misc,
-          UniqueBaseItem::None, "Greater Rune of Lightning", "grunel", 7, 0, 0, 0, 0, 0, 0, 42, 0,
+    // 164 Greater Rune of Lightning
+    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 196, ItemType::Misc,
+          UniqueBaseItem::None, "Greater Rune of Lightning", "Rune", 7, 0, 0, 0, 0, 0, 0, 42, 0,
           ItemSpecialEffect::NONE, ItemMiscId::GrRuneL, SpellID::Null, true, 500),
-    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 162, ItemType::Misc,
-          UniqueBaseItem::None, "Rune of Stone", "runes", 7, 0, 0, 0, 0, 0, 0, 25, 0,
+    // 165 IDI_RUNEOFSTONE
+    idat!(1, ItemClass::Misc, ItemEquipType::Unequipable, 197, ItemType::Misc,
+          UniqueBaseItem::None, "Rune of Stone", "Rune", 7, 0, 0, 0, 0, 0, 0, 25, 0,
           ItemSpecialEffect::NONE, ItemMiscId::RuneS, SpellID::Null, true, 300),
-    idat!(0, ItemClass::Weapon, ItemEquipType::TwoHand, 30, ItemType::Staff,
-          UniqueBaseItem::None, "Short Staff of Charged Bolt", "sscb", 1, 25, 2, 4, 0, 0, 0, 25, 0,
-          ItemSpecialEffect::STAFF, ItemMiscId::Staff, SpellID::ChargedBolt, false, 470),
-    idat!(0, ItemClass::Misc, ItemEquipType::Unequipable, 43, ItemType::Misc,
-          UniqueBaseItem::None, "Arena Potion", "arenapot", 7, 0, 0, 0, 0, 0, 0, 0, 0,
+    // 166 IDI_SORCERER_DIABLO
+    idat!(0, ItemClass::Weapon, ItemEquipType::TwoHand, 109, ItemType::Staff,
+          UniqueBaseItem::None, "Short Staff of Charged Bolt", "", 1, 25, 2, 4, 0, 0, 0, 25, 0,
+          ItemSpecialEffect::NONE, ItemMiscId::Staff, SpellID::ChargedBolt, false, 470),
+    // 167 IDI_ARENAPOT
+    idat!(0, ItemClass::Misc, ItemEquipType::Unequipable, 16, ItemType::Misc,
+          UniqueBaseItem::None, "Arena Potion", "", 7, 0, 0, 0, 0, 0, 0, 0, 0,
           ItemSpecialEffect::NONE, ItemMiscId::ArenaPot, SpellID::Null, true, 0),
 ];
 
@@ -2058,6 +2186,22 @@ pub fn get_unique_item_data(id: UniqueItemId) -> Option<&'static UniqueItemData>
 mod tests {
     use super::*;
 
+    /// C++ ``_item_indexes`` values equal the itemdat.tsv row indices:
+    /// ``GetItemAttrs(item, IDI_X, lvl)`` does ``AllItemsList[IDI_X]`` (items.cpp:3117)
+    /// and the TSV rows 0..47 are authored in enum order, so
+    /// ``get_item_data(ItemId::X as usize)`` must return the matching row.
+    #[test]
+    fn test_item_id_equals_tsv_row() {
+        assert_eq!(get_item_data(ItemId::Gold as usize).unwrap().name, "Gold");
+        assert_eq!(get_item_data(ItemId::Heal as usize).unwrap().name, "Potion of Healing");
+        assert_eq!(get_item_data(ItemId::Mana as usize).unwrap().name, "Potion of Mana");
+        assert_eq!(get_item_data(ItemId::Mushroom as usize).unwrap().name, "Black Mushroom");
+        assert_eq!(get_item_data(ItemId::Anvil as usize).unwrap().name, "Anvil of Fury");
+        // Row indices beyond the named quest/consumable block are base items:
+        assert_eq!(get_item_data(118).unwrap().name, "Dagger");
+        assert_eq!(get_item_data(71).unwrap().name, "Buckler");
+    }
+
     #[test]
     fn test_item_data_gold() {
         let gold = get_item_data(0).unwrap();
@@ -2068,7 +2212,8 @@ mod tests {
 
     #[test]
     fn test_item_data_healing_potion() {
-        let heal = get_item_data(1).unwrap();
+        // TSV row 77 = Potion of Healing (ItemId::Heal = 24 points at row 24, IDI_HEAL).
+        let heal = get_item_data(77).unwrap();
         assert_eq!(heal.name, "Potion of Healing");
         assert_eq!(heal.misc_id, ItemMiscId::Heal);
         assert_eq!(heal.usable, true);
@@ -2077,13 +2222,13 @@ mod tests {
 
     #[test]
     fn test_item_data_weapons() {
-        let dagger = get_item_data(8).unwrap();
+        let dagger = get_item_data(118).unwrap();
         assert_eq!(dagger.name, "Dagger");
         assert_eq!(dagger.class, ItemClass::Weapon);
         assert_eq!(dagger.min_damage, 1);
         assert_eq!(dagger.max_damage, 4);
 
-        let two_hand = get_item_data(12).unwrap();
+        let two_hand = get_item_data(128).unwrap();
         assert_eq!(two_hand.name, "Two-Handed Sword");
         assert_eq!(two_hand.equip_type, ItemEquipType::TwoHand);
         assert!(two_hand.value > 1000);
@@ -2091,22 +2236,22 @@ mod tests {
 
     #[test]
     fn test_item_data_armor() {
-        let cloak = get_item_data(19).unwrap();
+        let cloak = get_item_data(56).unwrap();
         assert_eq!(cloak.name, "Cloak");
         assert_eq!(cloak.class, ItemClass::Armor);
-        assert_eq!(cloak.min_ac, 1);
-        assert_eq!(cloak.max_ac, 5);
+        assert_eq!(cloak.min_ac, 3);
+        assert_eq!(cloak.max_ac, 7);
 
-        let plate = get_item_data(22).unwrap();
+        let plate = get_item_data(70).unwrap();
         assert_eq!(plate.name, "Full Plate Mail");
-        assert_eq!(plate.min_ac, 20);
-        assert_eq!(plate.max_ac, 30);
-        assert_eq!(plate.min_str, 60);
+        assert_eq!(plate.min_ac, 60);
+        assert_eq!(plate.max_ac, 75);
+        assert_eq!(plate.min_str, 90);
     }
 
     #[test]
     fn test_item_data_shields() {
-        let buckler = get_item_data(23).unwrap();
+        let buckler = get_item_data(71).unwrap();
         assert_eq!(buckler.name, "Buckler");
         assert_eq!(buckler.item_type, ItemType::Shield);
         assert_eq!(buckler.equip_type, ItemEquipType::OneHand);

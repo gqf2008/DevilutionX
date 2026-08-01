@@ -303,13 +303,14 @@ impl CreateInfoFlags2 {
 pub enum ItemIndex {
     #[default]
     None = -1,
+    // Values are itemdat.tsv row indices (C++ `_item_indexes` == `AllItemsList` row).
     // Swords
-    ShortSword = 0,
-    BuckLer,
-    Club,
+    ShortSword = 119,
+    BuckLer = 71,
+    Club = 140,
     // ... many more item types
     // Gold
-    Gold = 68,
+    Gold = 0,
     // ... continue with all item indices
 }
 
