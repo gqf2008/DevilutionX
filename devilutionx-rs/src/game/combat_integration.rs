@@ -74,6 +74,7 @@ pub fn monster_attack_player(
     monster: &Monster,
     player: &mut Player,
     rng: &mut impl Rng,
+    current_level: u8,
 ) -> AttackResult {
     // 1. Distance check (C++ line 1174)
     let distance = walking_distance(monster.position(), player.position);
@@ -82,7 +83,7 @@ pub fn monster_attack_player(
     }
 
     // 2. Calculate hit chance (C++ line 1177-1191)
-    let base_hit = calculate_monster_to_hit(monster, player);
+    let base_hit = calculate_monster_to_hit(monster, player, current_level);
 
     // 3. Roll to hit (C++ line 1176)
     let hit_roll = rng.random_range(0..100);
@@ -112,27 +113,28 @@ pub fn monster_attack_player(
     AttackResult::Hit { damage: final_damage }
 }
 
-/// Calculate monster's chance to hit player
+/// Calculate monster's chance to hit player — exact port of C++
+/// `MonsterAttackPlayer` (monster.cpp:1185-1189):
 ///
-/// **C++ Reference**: `Source/monster.cpp:1177-1191`
-///
-/// # Formula (simplified - Monster has no level field)
-/// ```text
-/// hit = monster_intelligence + 30 - player_ac  // Simplified from C++
-/// hit = clamp(hit, 5, 95)
+/// ```cpp
+/// hit += 2 * (monster.level(difficulty) - player.getCharacterLevel()) + 30 - player.GetArmor();
+/// hit = std::max(hit, GetMinHit());  // 30 (L16), 25 (L15), 20 (L14), 15 otherwise
 /// ```
 ///
-/// **Note**: C++ uses `monster.level()` which queries MonsterData. Since Monster
-/// doesn't store level, we use intelligence as a proxy (typical range 0-15).
-fn calculate_monster_to_hit(monster: &Monster, player: &Player) -> i32 {
-    let monster_power = monster.intelligence as i32;
-    let ac = player._p_armor_class as i32;
-
-    // Simplified formula: int + 30 - ac (instead of C++ 2*level + 30 - ac)
-    let mut hit_chance = monster_power + 30 - ac;    // Clamp to 5%-95% (C++ line 1191)
-    hit_chance = hit_chance.clamp(5, 95);
-
-    hit_chance
+/// `monster.toHit(difficulty)` is the monster's base to-hit stat and
+/// `GetArmor()` = `_pIBonusAC + _pIAc + _pDexterity / 5` (player.h:618).
+fn calculate_monster_to_hit(monster: &Monster, player: &Player, current_level: u8) -> i32 {
+    let monster_level = monster.level as i32;
+    let player_level = player._p_level as i32;
+    let ac = player._p_i_bonus_ac + player._p_i_ac + player._p_dexterity / 5;
+    let hit = monster.to_hit + 2 * (monster_level - player_level) + 30 - ac;
+    let min_hit = match current_level {
+        16 => 30,
+        15 => 25,
+        14 => 20,
+        _ => 15,
+    };
+    hit.max(min_hit)
 }
 
 //━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -308,9 +310,41 @@ mod tests {
         player._p_hit_points = 100 * 64;
 
         let mut rng = StdRng::seed_from_u64(12345);
-        let result = monster_attack_player(&monster, &mut player, &mut rng);
+        let result = monster_attack_player(&monster, &mut player, &mut rng, 1);
 
         assert_eq!(result, AttackResult::Miss, "Should miss due to distance");
+    }
+
+    /// Exact C++ `MonsterAttackPlayer` to-hit (monster.cpp:1185-1189):
+    /// hit = toHit + 2*(mLevel - pLevel) + 30 - GetArmor(), floored by
+    /// GetMinHit() (15/20/25/30 by currlevel).
+    #[test]
+    fn test_calculate_monster_to_hit_matches_cpp() {
+        let mut monster = Monster::new(1, MonsterType::Zombie, 10, 10, 0);
+        monster.level = 5;
+        monster.to_hit = 40;
+
+        let mut player = Player::new();
+        player._p_level = 10;
+        player._p_dexterity = 50;
+        player._p_i_ac = 0;
+        player._p_i_bonus_ac = 0;
+        player._p_armor_class = 0;
+
+        // GetArmor = 0 + 0 + 50/5 = 10; hit = 40 + 2*(5-10) + 30 - 10 = 50.
+        assert_eq!(calculate_monster_to_hit(&monster, &player, 1), 50);
+        // Level 16 floors the result at 30.
+        assert_eq!(calculate_monster_to_hit(&monster, &player, 16), 50);
+
+        // Low hit clamps to GetMinHit (15 on L1, 30 on L16).
+        let mut weak = Monster::new(2, MonsterType::Zombie, 10, 10, 0);
+        weak.level = 1;
+        weak.to_hit = 0;
+        let mut strong = Player::new();
+        strong._p_level = 30;
+        strong._p_dexterity = 100;
+        assert_eq!(calculate_monster_to_hit(&weak, &strong, 1), 15);
+        assert_eq!(calculate_monster_to_hit(&weak, &strong, 16), 30);
     }
 
     #[test]
@@ -324,7 +358,7 @@ mod tests {
         player._p_armor_class = 0;
 
         let mut rng = StdRng::seed_from_u64(12345);
-        let result = monster_attack_player(&monster, &mut player, &mut rng);
+        let result = monster_attack_player(&monster, &mut player, &mut rng, 1);
 
         match result {
             AttackResult::Miss | AttackResult::Hit { .. } => {},

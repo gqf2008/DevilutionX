@@ -1099,7 +1099,7 @@ impl GameState {
         if can_attack {
             // Attack player
             if let Some(monster) = self.monster_manager.get_monster(monster_id) {
-                let _ = monster_attack_player(monster, &mut self.player, rng);
+                let _ = monster_attack_player(monster, &mut self.player, rng, self.current_dungeon_level);
             }
         }
     }
