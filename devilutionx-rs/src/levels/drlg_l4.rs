@@ -288,21 +288,27 @@ impl Dungeon4Generator {
     }
 
     /// Generate random number in range [min, max)
+    ///
+    /// C++ `GenerateRnd(v)`: advances the Borland LCG
+    /// (`seed = seed * 0x015A4E35 + 1`), reinterprets the state as signed,
+    /// applies `abs`, then reduces using the high bits for small limits.
+    /// (The previous port used the standard C `rand()` LCG — wrong.)
     fn random_range(&mut self, min: usize, max: usize) -> usize {
         if max <= min {
             return min;
         }
-
-        // Simple LCG (Linear Congruential Generator)
-        self.rng_state = self.rng_state.wrapping_mul(214013).wrapping_add(2531011);
-        let result = (self.rng_state >> 16) & 0x7FFF;
-
-        min + (result as usize % (max - min))
+        self.rng_state = self.rng_state.wrapping_mul(0x015A4E35).wrapping_add(1);
+        let signed = self.rng_state as i32;
+        let adv = if signed == i32::MIN { i32::MIN } else { signed.abs() };
+        let v = (max - min) as i32;
+        let r = if v <= 0x7FFF { (adv >> 16) % v } else { adv % v };
+        min + r.max(0) as usize
     }
 
     /// Random boolean (50% chance)
     fn flip_coin(&mut self) -> bool {
-        self.random_range(0, 2) == 1
+        // C++ FlipCoin() == GenerateRnd(2) == 0
+        self.random_range(0, 2) == 0
     }
 
     /// Initialize dungeon flags and grid
@@ -497,24 +503,28 @@ impl Dungeon4Generator {
 
     /// Add horizontal/vertical walls (halls) between rooms
     /// C++ equivalent: AddWall (lines 459-479)
+    /// Add horizontal/vertical walls (halls) between rooms
+    /// C++ equivalent: AddWall (lines 452-479)
     fn add_wall(&mut self, dungeon: &mut Dungeon) {
-        for j in 1..DMAXY - 1 {
-            for i in 1..DMAXX - 1 {
-                // Try horizontal wall
-                if dungeon.tiles[i][j] == 6
-                    && dungeon.tiles[i - 1][j] == 6
-                    && dungeon.tiles[i + 1][j] == 2 {
-                    if let Some(x) = self.horizontal_wall_ok(dungeon, i, j) {
-                        self.horizontal_wall(dungeon, i, j, x);
+        for j in 0..DMAXY {
+            for i in 0..DMAXX {
+                if self.protected[i][j] {
+                    continue;
+                }
+                for d in [10, 12, 13, 15, 16, 21, 22] {
+                    if dungeon.tiles[i][j] == d {
+                        let _ = self.random_range(0, 1); // C++ DiscardRandomValues(1)
+                        if let Some(x) = self.horizontal_wall_ok(dungeon, i, j) {
+                            self.horizontal_wall(dungeon, i, j, x);
+                        }
                     }
                 }
-
-                // Try vertical wall
-                if dungeon.tiles[i][j] == 6
-                    && dungeon.tiles[i][j - 1] == 6
-                    && dungeon.tiles[i][j + 1] == 1 {
-                    if let Some(y) = self.vertical_wall_ok(dungeon, i, j) {
-                        self.vertical_wall(dungeon, i, j, y);
+                for d in [8, 9, 11, 14, 15, 16, 21, 23] {
+                    if dungeon.tiles[i][j] == d {
+                        let _ = self.random_range(0, 1);
+                        if let Some(y) = self.vertical_wall_ok(dungeon, i, j) {
+                            self.vertical_wall(dungeon, i, j, y);
+                        }
                     }
                 }
             }
@@ -524,530 +534,508 @@ impl Dungeon4Generator {
     /// Fix tile patterns to ensure proper transitions and corner pieces (211-line massive rule set)
     /// This is the heart of L4 aesthetic quality, converting rough tiles to polished dungeon
     /// C++ equivalent: FixTilesPatterns (lines 481-691, 211 lines of pattern matching rules)
-    fn fix_tiles_patterns(&mut self, dungeon: &mut Dungeon) {
-        // Pass 1: Basic transitions (2→5, 2→13, 1→14)
-        for j in 0..DMAXY {
-            for i in 0..DMAXX {
-                if i + 1 < DMAXX {
-                    if dungeon.tiles[i][j] == 2 && dungeon.tiles[i + 1][j] == 6 {
-                        dungeon.tiles[i + 1][j] = 5;
-                    }
-                    if dungeon.tiles[i][j] == 2 && dungeon.tiles[i + 1][j] == 1 {
-                        dungeon.tiles[i + 1][j] = 13;
-                    }
-                }
-                if j + 1 < DMAXY {
-                    if dungeon.tiles[i][j] == 1 && dungeon.tiles[i][j + 1] == 2 {
-                        dungeon.tiles[i][j + 1] = 14;
-                    }
-                }
-            }
-        }
-
-        // Pass 2: Extended transitions (74 rules)
-        for j in 0..DMAXY {
-            for i in 0..DMAXX {
-                if i + 1 < DMAXX {
-                    if dungeon.tiles[i][j] == 2 && dungeon.tiles[i + 1][j] == 6 {
-                        dungeon.tiles[i + 1][j] = 2;
-                    }
-                    if dungeon.tiles[i][j] == 2 && dungeon.tiles[i + 1][j] == 9 {
-                        dungeon.tiles[i + 1][j] = 11;
-                    }
-                    if dungeon.tiles[i][j] == 9 && dungeon.tiles[i + 1][j] == 6 {
-                        dungeon.tiles[i + 1][j] = 12;
-                    }
-                    if dungeon.tiles[i][j] == 14 && dungeon.tiles[i + 1][j] == 1 {
-                        dungeon.tiles[i + 1][j] = 13;
-                    }
-                    if dungeon.tiles[i][j] == 6 && dungeon.tiles[i + 1][j] == 14 {
-                        dungeon.tiles[i + 1][j] = 15;
-                    }
-                }
-                if j + 1 < DMAXY {
-                    if dungeon.tiles[i][j] == 6 && dungeon.tiles[i][j + 1] == 13 {
-                        dungeon.tiles[i][j + 1] = 16;
-                    }
-                    if dungeon.tiles[i][j] == 1 && dungeon.tiles[i][j + 1] == 9 {
-                        dungeon.tiles[i][j + 1] = 10;
-                    }
-                }
-                if j > 0 {
-                    if dungeon.tiles[i][j] == 6 && dungeon.tiles[i][j - 1] == 1 {
-                        dungeon.tiles[i][j - 1] = 1;
-                    }
-                }
-            }
-        }
-
-        // Pass 3: Complex patterns (94 rules)
-        for j in 0..DMAXY {
-            for i in 0..DMAXX {
-                if j + 1 < DMAXY {
-                    if dungeon.tiles[i][j] == 13 && dungeon.tiles[i][j + 1] == 30 {
-                        dungeon.tiles[i][j + 1] = 27;
-                    }
-                    if dungeon.tiles[i][j] == 1 && dungeon.tiles[i][j + 1] == 30 {
-                        dungeon.tiles[i][j + 1] = 27;
-                    }
-                    if dungeon.tiles[i][j] == 16 && dungeon.tiles[i][j + 1] == 30 && i + 1 < DMAXX && j + 1 < DMAXY && dungeon.tiles[i + 1][j + 1] == 30 {
-                        dungeon.tiles[i][j + 1] = 27;
-                    }
-                    if dungeon.tiles[i][j] == 21 && dungeon.tiles[i][j + 1] == 2 {
-                        dungeon.tiles[i][j + 1] = 15;
-                    }
-                    if dungeon.tiles[i][j] == 21 && dungeon.tiles[i][j + 1] == 9 {
-                        dungeon.tiles[i][j + 1] = 10;
-                    }
-                    if dungeon.tiles[i][j] == 22 && dungeon.tiles[i][j + 1] == 9 {
-                        dungeon.tiles[i][j + 1] = 15;
-                    }
-                    if dungeon.tiles[i][j] == 22 && dungeon.tiles[i][j + 1] == 30 {
-                        dungeon.tiles[i][j + 1] = 18;
-                    }
-                    if dungeon.tiles[i][j] == 21 && dungeon.tiles[i][j + 1] == 30 {
-                        dungeon.tiles[i][j + 1] = 18;
-                    }
-                    if dungeon.tiles[i][j] == 16 && dungeon.tiles[i][j + 1] == 2 {
-                        dungeon.tiles[i][j + 1] = 15;
-                    }
-                    if dungeon.tiles[i][j] == 13 && dungeon.tiles[i][j + 1] == 2 {
-                        dungeon.tiles[i][j + 1] = 15;
-                    }
-                    if dungeon.tiles[i][j] == 22 && dungeon.tiles[i][j + 1] == 2 {
-                        dungeon.tiles[i][j + 1] = 15;
-                    }
-                    if dungeon.tiles[i][j] == 23 && dungeon.tiles[i][j + 1] == 2 {
-                        dungeon.tiles[i][j + 1] = 15;
-                    }
-                    if dungeon.tiles[i][j] == 23 && dungeon.tiles[i][j + 1] == 9 {
-                        dungeon.tiles[i][j + 1] = 15;
-                    }
-                    if dungeon.tiles[i][j] == 25 && dungeon.tiles[i][j + 1] == 2 {
-                        dungeon.tiles[i][j + 1] = 15;
-                    }
-                    if dungeon.tiles[i][j] == 29 && dungeon.tiles[i][j + 1] == 2 {
-                        dungeon.tiles[i][j + 1] = 15;
-                    }
-                    if dungeon.tiles[i][j] == 18 && dungeon.tiles[i][j + 1] == 2 {
-                        dungeon.tiles[i][j + 1] = 15;
-                    }
-                    if dungeon.tiles[i][j] == 23 && dungeon.tiles[i][j + 1] == 30 {
-                        dungeon.tiles[i][j + 1] = 18;
-                    }
-                    if dungeon.tiles[i][j] == 18 && dungeon.tiles[i][j + 1] == 9 {
-                        dungeon.tiles[i][j + 1] = 10;
-                    }
-                    if dungeon.tiles[i][j] == 16 && dungeon.tiles[i][j + 1] == 30 {
-                        dungeon.tiles[i][j + 1] = 18;
-                    }
-                    if dungeon.tiles[i][j] == 13 && dungeon.tiles[i][j + 1] == 9 {
-                        dungeon.tiles[i][j + 1] = 10;
-                    }
-                    if dungeon.tiles[i][j] == 25 && dungeon.tiles[i][j + 1] == 30 {
-                        dungeon.tiles[i][j + 1] = 18;
-                    }
-                    if dungeon.tiles[i][j] == 18 && dungeon.tiles[i][j + 1] == 2 {
-                        dungeon.tiles[i][j + 1] = 15;
-                    }
-                    if dungeon.tiles[i][j] == 28 && dungeon.tiles[i][j + 1] == 30 {
-                        dungeon.tiles[i][j + 1] = 18;
-                    }
-                    if dungeon.tiles[i][j] == 28 && dungeon.tiles[i][j + 1] == 2 {
-                        dungeon.tiles[i][j + 1] = 15;
-                    }
-                    if dungeon.tiles[i][j] == 28 && dungeon.tiles[i][j + 1] == 9 {
-                        dungeon.tiles[i][j + 1] = 15;
-                    }
-                    if dungeon.tiles[i][j] == 15 && dungeon.tiles[i][j + 1] == 3 {
-                        dungeon.tiles[i][j + 1] = 4;
-                    }
-                    if dungeon.tiles[i][j] == 29 && dungeon.tiles[i][j + 1] == 30 {
-                        dungeon.tiles[i][j + 1] = 18;
-                    }
-                }
-
-                if i + 1 < DMAXX {
-                    if dungeon.tiles[i][j] == 27 && dungeon.tiles[i + 1][j] == 30 {
-                        dungeon.tiles[i + 1][j] = 19;
-                    }
-                    if dungeon.tiles[i][j] == 27 && dungeon.tiles[i + 1][j] == 1 {
-                        dungeon.tiles[i + 1][j] = 16;
-                    }
-                    if dungeon.tiles[i][j] == 19 && dungeon.tiles[i + 1][j] == 27 {
-                        dungeon.tiles[i + 1][j] = 26;
-                    }
-                    if dungeon.tiles[i][j] == 2 && dungeon.tiles[i + 1][j] == 15 {
-                        dungeon.tiles[i + 1][j] = 14;
-                    }
-                    if dungeon.tiles[i][j] == 14 && dungeon.tiles[i + 1][j] == 15 {
-                        dungeon.tiles[i + 1][j] = 14;
-                    }
-                    if dungeon.tiles[i][j] == 22 && dungeon.tiles[i + 1][j] == 1 {
-                        dungeon.tiles[i + 1][j] = 16;
-                    }
-                    if i + 1 < DMAXX && j + 1 < DMAXY {
-                        if dungeon.tiles[i][j] == 6 && dungeon.tiles[i + 1][j] == 27 && dungeon.tiles[i + 1][j + 1] != 0 {
-                            dungeon.tiles[i + 1][j] = 22;
-                        }
-                    }
-                    if dungeon.tiles[i][j] == 22 && dungeon.tiles[i + 1][j] == 30 {
-                        dungeon.tiles[i + 1][j] = 19;
-                    }
-                    if i + 1 < DMAXX && j > 0 {
-                        if dungeon.tiles[i][j] == 21 && dungeon.tiles[i + 1][j] == 1 && dungeon.tiles[i + 1][j - 1] == 1 {
-                            dungeon.tiles[i + 1][j] = 13;
-                        }
-                    }
-                    if i + 1 < DMAXX && j + 1 < DMAXY {
-                        if dungeon.tiles[i][j] == 14 && dungeon.tiles[i + 1][j] == 30 && dungeon.tiles[i][j + 1] == 6 {
-                            dungeon.tiles[i + 1][j] = 28;
-                        }
-                        if dungeon.tiles[i][j] == 16 && dungeon.tiles[i + 1][j] == 6 && dungeon.tiles[i][j + 1] == 30 {
-                            dungeon.tiles[i][j + 1] = 27;
-                        }
-                    }
-                    if i + 1 < DMAXX && j > 0 {
-                        if dungeon.tiles[i][j] == 6 && dungeon.tiles[i + 1][j] == 30 && dungeon.tiles[i + 1][j - 1] == 6 {
-                            dungeon.tiles[i + 1][j] = 21;
-                        }
-                    }
-                    if i + 1 < DMAXX && j + 1 < DMAXY {
-                        if dungeon.tiles[i][j] == 2 && dungeon.tiles[i + 1][j] == 27 && dungeon.tiles[i + 1][j + 1] == 9 {
-                            dungeon.tiles[i + 1][j] = 29;
-                        }
-                    }
-                    if dungeon.tiles[i][j] == 9 && dungeon.tiles[i + 1][j] == 15 {
-                        dungeon.tiles[i + 1][j] = 14;
-                    }
-                    if i + 1 < DMAXX && j + 1 < DMAXY {
-                        if dungeon.tiles[i][j] == 15 && dungeon.tiles[i + 1][j] == 27 && dungeon.tiles[i + 1][j + 1] == 2 {
-                            dungeon.tiles[i + 1][j] = 29;
-                        }
-                    }
-                    if dungeon.tiles[i][j] == 19 && dungeon.tiles[i + 1][j] == 18 {
-                        dungeon.tiles[i + 1][j] = 24;
-                    }
-                    if i + 1 < DMAXX && j > 0 {
-                        if dungeon.tiles[i][j] == 19 && dungeon.tiles[i + 1][j] == 19 && dungeon.tiles[i + 1][j - 1] == 30 {
-                            dungeon.tiles[i + 1][j] = 24;
-                        }
-                    }
-                    if j > 1 {
-                        if dungeon.tiles[i][j] == 24 && dungeon.tiles[i][j - 1] == 30 && dungeon.tiles[i][j - 2] == 6 {
-                            dungeon.tiles[i][j - 1] = 21;
-                        }
-                    }
-                    if dungeon.tiles[i][j] == 2 && dungeon.tiles[i + 1][j] == 30 {
-                        dungeon.tiles[i + 1][j] = 28;
-                    }
-                    if dungeon.tiles[i][j] == 15 && dungeon.tiles[i + 1][j] == 30 {
-                        dungeon.tiles[i + 1][j] = 28;
-                    }
-                    if i + 2 < DMAXX && j > 0 && j + 1 < DMAXY {
-                        if dungeon.tiles[i][j] == 19 && dungeon.tiles[i + 2][j] == 2 && dungeon.tiles[i + 1][j - 1] == 18 && dungeon.tiles[i + 1][j + 1] == 1 {
-                            dungeon.tiles[i + 1][j] = 17;
-                        }
-                        if dungeon.tiles[i][j] == 19 && dungeon.tiles[i + 2][j] == 2 && dungeon.tiles[i + 1][j - 1] == 22 && dungeon.tiles[i + 1][j + 1] == 1 {
-                            dungeon.tiles[i + 1][j] = 17;
-                        }
-                        if dungeon.tiles[i][j] == 19 && dungeon.tiles[i + 2][j] == 2 && dungeon.tiles[i + 1][j - 1] == 18 && dungeon.tiles[i + 1][j + 1] == 13 {
-                            dungeon.tiles[i + 1][j] = 17;
-                        }
-                        if dungeon.tiles[i][j] == 21 && dungeon.tiles[i + 2][j] == 2 && dungeon.tiles[i + 1][j - 1] == 18 && dungeon.tiles[i + 1][j + 1] == 1 {
-                            dungeon.tiles[i + 1][j] = 17;
-                        }
-                        if dungeon.tiles[i][j] == 21 && dungeon.tiles[i + 1][j + 1] == 1 && dungeon.tiles[i + 1][j - 1] == 22 && dungeon.tiles[i + 2][j] == 3 {
-                            dungeon.tiles[i + 1][j] = 17;
-                        }
-                    }
-                    if i + 2 < DMAXX && j > 0 {
-                        if dungeon.tiles[i][j] == 15 && dungeon.tiles[i + 1][j] == 28 && dungeon.tiles[i + 2][j] == 30 && dungeon.tiles[i + 1][j - 1] == 6 {
-                            dungeon.tiles[i + 1][j] = 23;
-                        }
-                    }
-                    if i + 2 < DMAXX {
-                        if dungeon.tiles[i][j] == 14 && dungeon.tiles[i + 1][j] == 28 && dungeon.tiles[i + 2][j] == 1 {
-                            dungeon.tiles[i + 1][j] = 23;
-                        }
-                    }
-                    if i + 1 < DMAXX && j + 1 < DMAXY {
-                        if dungeon.tiles[i][j] == 15 && dungeon.tiles[i + 1][j] == 27 && dungeon.tiles[i + 1][j + 1] == 30 {
-                            dungeon.tiles[i + 1][j] = 29;
-                        }
-                    }
-                    if i + 1 < DMAXX && j > 0 {
-                        if dungeon.tiles[i][j] == 21 && dungeon.tiles[i + 1][j - 1] == 21 {
-                            dungeon.tiles[i + 1][j] = 24;
-                        }
-                    }
-                    if i + 1 < DMAXX && j + 1 < DMAXY {
-                        if dungeon.tiles[i][j] == 2 && dungeon.tiles[i + 1][j] == 27 && dungeon.tiles[i + 1][j + 1] == 30 {
-                            dungeon.tiles[i + 1][j] = 29;
-                        }
-                    }
-                    if dungeon.tiles[i][j] == 2 && dungeon.tiles[i + 1][j] == 18 {
-                        dungeon.tiles[i + 1][j] = 25;
-                    }
-                    if i + 2 < DMAXX {
-                        if dungeon.tiles[i][j] == 21 && dungeon.tiles[i + 1][j] == 9 && dungeon.tiles[i + 2][j] == 2 {
-                            dungeon.tiles[i + 1][j] = 11;
-                        }
-                    }
-                    if dungeon.tiles[i][j] == 19 && dungeon.tiles[i + 1][j] == 10 {
-                        dungeon.tiles[i + 1][j] = 17;
-                    }
-                    if i > 0 {
-                        if dungeon.tiles[i][j] == 24 && dungeon.tiles[i - 1][j] == 30 {
-                            dungeon.tiles[i - 1][j] = 19;
-                        }
-                    }
-                    if i + 2 < DMAXX {
-                        if dungeon.tiles[i][j] == 21 && dungeon.tiles[i + 1][j] == 18 && dungeon.tiles[i + 2][j] == 30 {
-                            dungeon.tiles[i + 1][j] = 24;
-                        }
-                    }
-                    if i + 1 < DMAXX && j + 1 < DMAXY {
-                        if dungeon.tiles[i][j] == 21 && dungeon.tiles[i + 1][j] == 9 && dungeon.tiles[i + 1][j + 1] == 1 {
-                            dungeon.tiles[i + 1][j] = 16;
-                        }
-                        if dungeon.tiles[i][j] == 2 && dungeon.tiles[i + 1][j] == 27 && dungeon.tiles[i + 1][j + 1] == 2 {
-                            dungeon.tiles[i + 1][j] = 29;
-                        }
-                    }
-                    if dungeon.tiles[i][j] == 22 && dungeon.tiles[i + 1][j] == 9 {
-                        dungeon.tiles[i + 1][j] = 11;
-                    }
-                    if dungeon.tiles[i][j] == 23 && dungeon.tiles[i + 1][j] == 9 {
-                        dungeon.tiles[i + 1][j] = 11;
-                    }
-                    if dungeon.tiles[i][j] == 15 && dungeon.tiles[i + 1][j] == 1 {
-                        dungeon.tiles[i + 1][j] = 16;
-                    }
-                    if dungeon.tiles[i][j] == 11 && dungeon.tiles[i + 1][j] == 15 {
-                        dungeon.tiles[i + 1][j] = 14;
-                    }
-                    if dungeon.tiles[i][j] == 23 && dungeon.tiles[i + 1][j] == 1 {
-                        dungeon.tiles[i + 1][j] = 16;
-                    }
-                    if dungeon.tiles[i][j] == 21 && dungeon.tiles[i + 1][j] == 27 {
-                        dungeon.tiles[i + 1][j] = 26;
-                    }
-                    if dungeon.tiles[i][j] == 21 && dungeon.tiles[i + 1][j] == 18 {
-                        dungeon.tiles[i + 1][j] = 24;
-                    }
-                    if dungeon.tiles[i][j] == 26 && dungeon.tiles[i + 1][j] == 1 {
-                        dungeon.tiles[i + 1][j] = 16;
-                    }
-                    if dungeon.tiles[i][j] == 29 && dungeon.tiles[i + 1][j] == 1 {
-                        dungeon.tiles[i + 1][j] = 16;
-                    }
-                    if dungeon.tiles[i][j] == 23 && dungeon.tiles[i + 1][j] == 30 {
-                        dungeon.tiles[i + 1][j] = 19;
-                    }
-                    if dungeon.tiles[i][j] == 29 && dungeon.tiles[i + 1][j] == 30 {
-                        dungeon.tiles[i + 1][j] = 19;
-                    }
-                    if dungeon.tiles[i][j] == 19 && dungeon.tiles[i + 1][j] == 30 {
-                        dungeon.tiles[i + 1][j] = 19;
-                    }
-                    if dungeon.tiles[i][j] == 21 && dungeon.tiles[i + 1][j] == 30 {
-                        dungeon.tiles[i + 1][j] = 19;
-                    }
-                    if dungeon.tiles[i][j] == 26 && dungeon.tiles[i + 1][j] == 30 {
-                        dungeon.tiles[i + 1][j] = 19;
-                    }
-                    if dungeon.tiles[i][j] == 11 && dungeon.tiles[i + 1][j] == 3 {
-                        dungeon.tiles[i + 1][j] = 5;
-                    }
-                    if dungeon.tiles[i][j] == 19 && dungeon.tiles[i + 1][j] == 9 {
-                        dungeon.tiles[i + 1][j] = 11;
-                    }
-                    if dungeon.tiles[i][j] == 19 && dungeon.tiles[i + 1][j] == 1 {
-                        dungeon.tiles[i + 1][j] = 13;
-                    }
-                    if i + 1 < DMAXX && j > 0 {
-                        if dungeon.tiles[i][j] == 19 && dungeon.tiles[i + 1][j] == 13 && dungeon.tiles[i + 1][j - 1] == 6 {
-                            dungeon.tiles[i + 1][j] = 16;
-                        }
-                    }
-                }
-
-                if j > 0 {
-                    if dungeon.tiles[i][j] == 1 && dungeon.tiles[i][j - 1] == 15 {
-                        dungeon.tiles[i][j - 1] = 10;
-                    }
-                }
-
-                if i + 1 < DMAXX && j + 1 < DMAXY {
-                    if dungeon.tiles[i][j] == 14 && dungeon.tiles[i + 1][j] == 30 && dungeon.tiles[i + 1][j + 1] == 30 {
-                        dungeon.tiles[i + 1][j] = 23;
-                    }
-                }
-                if i + 1 < DMAXX && j > 0 {
-                    if dungeon.tiles[i][j] == 2 && dungeon.tiles[i + 1][j] == 28 && dungeon.tiles[i + 1][j - 1] == 6 {
-                        dungeon.tiles[i + 1][j] = 23;
-                    }
-                    if dungeon.tiles[i][j] == 23 && dungeon.tiles[i + 1][j] == 18 && dungeon.tiles[i][j - 1] == 6 {
-                        dungeon.tiles[i + 1][j] = 24;
-                    }
-                }
-                if i + 2 < DMAXX {
-                    if dungeon.tiles[i][j] == 14 && dungeon.tiles[i + 1][j] == 23 && dungeon.tiles[i + 2][j] == 30 {
-                        dungeon.tiles[i + 1][j] = 28;
-                    }
-                }
-                if i + 2 < DMAXX && j > 0 {
-                    if dungeon.tiles[i][j] == 14 && dungeon.tiles[i + 1][j] == 28 && dungeon.tiles[i + 2][j] == 30 && dungeon.tiles[i + 1][j - 1] == 6 {
-                        dungeon.tiles[i + 1][j] = 23;
-                    }
-                }
-            }
-        }
-
-        // Pass 4: Final cleanup (43 rules)
-        for j in 0..DMAXY {
-            for i in 0..DMAXX {
-                if j + 2 < DMAXY {
-                    if dungeon.tiles[i][j] == 21 && dungeon.tiles[i][j + 1] == 24 && dungeon.tiles[i][j + 2] == 1 {
-                        dungeon.tiles[i][j + 1] = 17;
-                    }
-                }
-                if i + 2 < DMAXX && j > 0 && j + 1 < DMAXY {
-                    if dungeon.tiles[i][j] == 15 && dungeon.tiles[i + 1][j + 1] == 9 && dungeon.tiles[i + 1][j - 1] == 1 && dungeon.tiles[i + 2][j] == 16 {
-                        dungeon.tiles[i + 1][j] = 29;
-                    }
-                }
-                if i > 0 {
-                    if dungeon.tiles[i][j] == 2 && dungeon.tiles[i - 1][j] == 6 {
-                        dungeon.tiles[i - 1][j] = 2;
-                    }
-                }
-                if i + 1 < DMAXX && j + 1 < DMAXY {
-                    if dungeon.tiles[i][j] == 6 && dungeon.tiles[i + 1][j] == 18 && dungeon.tiles[i][j + 1] == 6 && dungeon.tiles[i + 1][j + 1] == 2 {
-                        dungeon.tiles[i + 1][j] = 25;
-                    }
-                }
-                if i + 1 < DMAXX && j > 0 && j + 1 < DMAXY {
-                    if dungeon.tiles[i][j] == 6 && dungeon.tiles[i + 1][j] == 19 && dungeon.tiles[i][j + 1] == 6 && dungeon.tiles[i + 1][j - 1] == 2 && dungeon.tiles[i + 1][j + 1] == 6 {
-                        dungeon.tiles[i + 1][j] = 21;
-                    }
-                    if dungeon.tiles[i][j] == 6 && dungeon.tiles[i + 1][j] == 19 && dungeon.tiles[i + 1][j + 1] == 6 && dungeon.tiles[i + 1][j - 1] == 2 && dungeon.tiles[i][j + 1] == 2 {
-                        dungeon.tiles[i + 1][j] = 21;
-                    }
-                }
-                if i + 1 < DMAXX && j > 1 && j + 1 < DMAXY {
-                    if dungeon.tiles[i][j] == 6 && dungeon.tiles[i + 1][j] == 19 && dungeon.tiles[i][j - 1] == 6 && dungeon.tiles[i + 1][j - 2] == 2 && dungeon.tiles[i + 1][j + 1] == 6 && dungeon.tiles[i + 1][j - 1] == 18 {
-                        dungeon.tiles[i + 1][j] = 21;
-                    }
-                }
-                if i + 1 < DMAXX && j > 0 {
-                    if dungeon.tiles[i][j] == 2 && dungeon.tiles[i + 1][j] == 19 && dungeon.tiles[i + 1][j - 1] == 2 {
-                        dungeon.tiles[i + 1][j] = 28;
-                    }
-                }
-                if i + 2 < DMAXX && j > 0 && j + 1 < DMAXY {
-                    if dungeon.tiles[i][j] == 6 && dungeon.tiles[i + 1][j] == 18 && dungeon.tiles[i + 2][j] == 2 && dungeon.tiles[i + 1][j - 1] == 6 && dungeon.tiles[i + 1][j + 1] == 2 {
-                        dungeon.tiles[i + 1][j] = 25;
-                    }
-                }
-                if i + 2 < DMAXX && j > 0 {
-                    if dungeon.tiles[i][j] == 19 && dungeon.tiles[i + 1][j] == 18 && dungeon.tiles[i + 2][j] == 2 && dungeon.tiles[i + 1][j - 1] == 6 {
-                        dungeon.tiles[i + 1][j] = 24;
-                    }
-                    if dungeon.tiles[i][j] == 6 && dungeon.tiles[i + 1][j] == 19 && dungeon.tiles[i + 2][j] == 2 && dungeon.tiles[i + 1][j - 1] == 2 {
-                        dungeon.tiles[i + 1][j] = 28;
-                    }
-                }
-                if i + 1 < DMAXX && j + 1 < DMAXY {
-                    if dungeon.tiles[i][j] == 2 && dungeon.tiles[i + 1][j] == 18 && dungeon.tiles[i][j + 1] == 6 && dungeon.tiles[i + 1][j + 1] == 2 {
-                        dungeon.tiles[i + 1][j] = 25;
-                    }
-                    if dungeon.tiles[i][j] == 6 && dungeon.tiles[i + 1][j] == 18 && dungeon.tiles[i][j + 1] == 2 && dungeon.tiles[i + 1][j + 1] == 6 {
-                        dungeon.tiles[i + 1][j] = 25;
-                    }
-                }
-                if i + 2 < DMAXX && j + 1 < DMAXY {
-                    if dungeon.tiles[i][j] == 2 && dungeon.tiles[i + 1][j] == 18 && dungeon.tiles[i + 2][j] == 6 && dungeon.tiles[i + 1][j + 1] == 2 {
-                        dungeon.tiles[i + 1][j] = 25;
-                    }
-                }
-                if i + 2 < DMAXX && j > 0 && j + 1 < DMAXY {
-                    if dungeon.tiles[i][j] == 2 && dungeon.tiles[i + 1][j] == 18 && dungeon.tiles[i + 2][j] == 6 && dungeon.tiles[i + 1][j - 1] == 6 && dungeon.tiles[i + 1][j + 1] == 2 {
-                        dungeon.tiles[i + 1][j] = 25;
-                    }
-                    if dungeon.tiles[i][j] == 19 && dungeon.tiles[i + 1][j] == 18 && dungeon.tiles[i + 2][j] == 6 && dungeon.tiles[i + 1][j - 1] == 6 && dungeon.tiles[i + 1][j + 1] == 2 {
-                        dungeon.tiles[i + 1][j] = 24;
-                    }
-                    if dungeon.tiles[i][j] == 6 && dungeon.tiles[i + 1][j] == 18 && dungeon.tiles[i + 2][j] == 2 && dungeon.tiles[i + 1][j - 1] == 2 && dungeon.tiles[i + 1][j + 1] == 6 {
-                        dungeon.tiles[i + 1][j] = 25;
-                    }
-                }
-                if i + 2 < DMAXX && j > 1 {
-                    if dungeon.tiles[i][j] == 6 && dungeon.tiles[i + 1][j] == 19 && dungeon.tiles[i + 2][j] == 2 && dungeon.tiles[i + 1][j - 2] == 2 && dungeon.tiles[i + 1][j - 1] == 18 {
-                        dungeon.tiles[i + 1][j] = 21;
-                    }
-                }
-                if i + 2 < DMAXX && j > 0 && j + 1 < DMAXY {
-                    if dungeon.tiles[i][j] == 2 && dungeon.tiles[i + 1][j] == 19 && dungeon.tiles[i + 2][j] == 6 && dungeon.tiles[i + 1][j - 1] == 2 && dungeon.tiles[i + 1][j + 1] == 6 {
-                        dungeon.tiles[i + 1][j] = 28;
-                    }
-                }
-                if i + 1 < DMAXX && j > 0 {
-                    if dungeon.tiles[i][j] == 19 && dungeon.tiles[i + 1][j] == 18 && dungeon.tiles[i + 1][j - 1] == 6 {
-                        dungeon.tiles[i + 1][j] = 24;
-                    }
-                }
-                if i + 2 < DMAXX && j > 0 && j + 1 < DMAXY {
-                    if dungeon.tiles[i][j] == 19 && dungeon.tiles[i + 1][j] == 18 && dungeon.tiles[i + 2][j] == 2 && dungeon.tiles[i + 1][j - 1] == 2 && dungeon.tiles[i + 1][j + 1] == 6 {
-                        dungeon.tiles[i + 1][j] = 24;
-                    }
-                    if dungeon.tiles[i][j] == 6 && dungeon.tiles[i + 1][j] == 19 && dungeon.tiles[i + 2][j] == 2 && dungeon.tiles[i + 1][j - 1] == 6 && dungeon.tiles[i + 1][j + 1] == 6 {
-                        dungeon.tiles[i + 1][j] = 21;
-                    }
-                }
-                if i + 2 < DMAXX && j > 1 && j + 1 < DMAXY {
-                    if dungeon.tiles[i][j] == 6 && dungeon.tiles[i + 1][j] == 19 && dungeon.tiles[i + 2][j] == 2 && dungeon.tiles[i + 1][j - 2] == 2 && dungeon.tiles[i + 1][j - 1] == 18 && dungeon.tiles[i + 1][j + 1] == 6 {
-                        dungeon.tiles[i + 1][j] = 21;
-                    }
-                }
-                if i + 2 < DMAXX && j > 0 && j + 1 < DMAXY {
-                    if dungeon.tiles[i][j] == 2 && dungeon.tiles[i + 1][j] == 19 && dungeon.tiles[i + 2][j] == 6 && dungeon.tiles[i + 1][j - 1] == 6 && dungeon.tiles[i + 1][j + 1] == 2 {
-                        dungeon.tiles[i + 1][j] = 28;
-                    }
-                }
-                if i + 1 < DMAXX && j > 0 && j + 1 < DMAXY {
-                    if dungeon.tiles[i][j] == 2 && dungeon.tiles[i + 1][j] == 19 && dungeon.tiles[i + 1][j - 1] == 6 && dungeon.tiles[i + 1][j + 1] == 6 {
-                        dungeon.tiles[i + 1][j] = 28;
-                    }
-                }
-                if i + 2 < DMAXX && j > 0 {
-                    if dungeon.tiles[i][j] == 6 && dungeon.tiles[i + 1][j] == 18 && dungeon.tiles[i + 2][j] == 2 && dungeon.tiles[i + 1][j - 1] == 6 {
-                        dungeon.tiles[i + 1][j] = 24;
-                    }
-                }
-                if i + 1 < DMAXX && j > 0 && j + 1 < DMAXY {
-                    if dungeon.tiles[i][j] == 6 && dungeon.tiles[i + 1][j] == 19 && dungeon.tiles[i + 1][j - 1] == 6 && dungeon.tiles[i + 1][j + 1] == 2 {
-                        dungeon.tiles[i + 1][j] = 21;
-                    }
-                }
-                if i + 2 < DMAXX && j > 0 && j + 1 < DMAXY {
-                    if dungeon.tiles[i][j] == 6 && dungeon.tiles[i + 1][j] == 19 && dungeon.tiles[i + 2][j] == 6 && dungeon.tiles[i + 1][j - 1] == 2 && dungeon.tiles[i + 1][j + 1] == 6 {
-                        dungeon.tiles[i + 1][j] = 21;
-                    }
-                }
-                if i + 1 < DMAXX && j > 0 {
-                    if dungeon.tiles[i][j] == 6 && dungeon.tiles[i + 1][j] == 18 && dungeon.tiles[i + 1][j - 1] == 6 {
-                        dungeon.tiles[i + 1][j] = 24;
-                    }
-                }
-                if i + 2 < DMAXX && j > 0 {
-                    if dungeon.tiles[i][j] == 6 && dungeon.tiles[i + 1][j] == 19 && dungeon.tiles[i + 2][j] == 2 && dungeon.tiles[i + 1][j - 1] == 6 {
-                        dungeon.tiles[i + 1][j] = 21;
-                    }
-                }
-            }
-        }
+fn fix_tiles_patterns(&mut self, dungeon: &mut Dungeon) {
+        // Pass 1 (C++ FixTilesPatterns loop 1)
+        for j in 0..DMAXY as i32 {
+            for i in 0..DMAXX as i32 {
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 2 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 6 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 5;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 2 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 1 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 13;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 1 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 2 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 14;
+                        }
+            }
+        }
+        // Pass 2 (C++ FixTilesPatterns loop 2)
+        for j in 0..DMAXY as i32 {
+            for i in 0..DMAXX as i32 {
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 2 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 6 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 2;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 2 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 9 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 11;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 9 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 6 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 12;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 14 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 1 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 13;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 6 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 14 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 15;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 6 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 13 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 16;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 1 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 9 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 10;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + -1 >= 1 && j + -1 < 40 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 6 && dungeon.tiles[(i + 0) as usize][(j + -1) as usize] == 1 {
+                            dungeon.tiles[(i + 0) as usize][(j + -1) as usize] = 1;
+                        }
+            }
+        }
+        // Pass 3 (C++ FixTilesPatterns loop 3)
+        for j in 0..DMAXY as i32 {
+            for i in 0..DMAXX as i32 {
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 13 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 30 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 27;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 27 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 30 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 19;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 1 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 30 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 27;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 27 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 1 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 16;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 19 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 27 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 26;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 27 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 30 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 19;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 2 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 15 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 14;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 14 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 15 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 14;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 22 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 1 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 16;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 27 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 1 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 16;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 22 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 30 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 19;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + -1 >= 1 && j + -1 < 40 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 21 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 1 && dungeon.tiles[(i + 1) as usize][(j + -1) as usize] == 1 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 13;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 14 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 30 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 6 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 28;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 16 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 6 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 30 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 27;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 16 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 30 && dungeon.tiles[(i + 1) as usize][(j + 1) as usize] == 30 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 27;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + -1 >= 1 && j + -1 < 40 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 6 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 30 && dungeon.tiles[(i + 1) as usize][(j + -1) as usize] == 6 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 21;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 2 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 27 && dungeon.tiles[(i + 1) as usize][(j + 1) as usize] == 9 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 29;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 9 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 15 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 14;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 15 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 27 && dungeon.tiles[(i + 1) as usize][(j + 1) as usize] == 2 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 29;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 19 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 18 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 24;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 9 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 15 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 14;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + -1 >= 1 && j + -1 < 40 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 19 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 19 && dungeon.tiles[(i + 1) as usize][(j + -1) as usize] == 30 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 24;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + -2 >= 2 && j + -2 < 40 && j + -1 >= 1 && j + -1 < 40 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 24 && dungeon.tiles[(i + 0) as usize][(j + -1) as usize] == 30 && dungeon.tiles[(i + 0) as usize][(j + -2) as usize] == 6 {
+                            dungeon.tiles[(i + 0) as usize][(j + -1) as usize] = 21;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 2 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 30 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 28;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 15 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 30 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 28;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 28 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 30 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 18;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 28 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 2 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 15;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && i + 2 >= 0 && i + 2 < 38 && j + -1 >= 1 && j + -1 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 19 && dungeon.tiles[(i + 2) as usize][(j + 0) as usize] == 2 && dungeon.tiles[(i + 1) as usize][(j + -1) as usize] == 18 && dungeon.tiles[(i + 1) as usize][(j + 1) as usize] == 1 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 17;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && i + 2 >= 0 && i + 2 < 38 && j + -1 >= 1 && j + -1 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 19 && dungeon.tiles[(i + 2) as usize][(j + 0) as usize] == 2 && dungeon.tiles[(i + 1) as usize][(j + -1) as usize] == 22 && dungeon.tiles[(i + 1) as usize][(j + 1) as usize] == 1 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 17;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && i + 2 >= 0 && i + 2 < 38 && j + -1 >= 1 && j + -1 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 19 && dungeon.tiles[(i + 2) as usize][(j + 0) as usize] == 2 && dungeon.tiles[(i + 1) as usize][(j + -1) as usize] == 18 && dungeon.tiles[(i + 1) as usize][(j + 1) as usize] == 13 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 17;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && i + 2 >= 0 && i + 2 < 38 && j + -1 >= 1 && j + -1 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 21 && dungeon.tiles[(i + 2) as usize][(j + 0) as usize] == 2 && dungeon.tiles[(i + 1) as usize][(j + -1) as usize] == 18 && dungeon.tiles[(i + 1) as usize][(j + 1) as usize] == 1 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 17;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && i + 2 >= 0 && i + 2 < 38 && j + -1 >= 1 && j + -1 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 21 && dungeon.tiles[(i + 1) as usize][(j + 1) as usize] == 1 && dungeon.tiles[(i + 1) as usize][(j + -1) as usize] == 22 && dungeon.tiles[(i + 2) as usize][(j + 0) as usize] == 3 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 17;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && i + 2 >= 0 && i + 2 < 38 && j + -1 >= 1 && j + -1 < 40 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 15 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 28 && dungeon.tiles[(i + 2) as usize][(j + 0) as usize] == 30 && dungeon.tiles[(i + 1) as usize][(j + -1) as usize] == 6 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 23;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && i + 2 >= 0 && i + 2 < 38 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 14 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 28 && dungeon.tiles[(i + 2) as usize][(j + 0) as usize] == 1 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 23;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 15 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 27 && dungeon.tiles[(i + 1) as usize][(j + 1) as usize] == 30 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 29;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 28 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 9 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 15;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + -1 >= 1 && j + -1 < 40 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 21 && dungeon.tiles[(i + 1) as usize][(j + -1) as usize] == 21 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 24;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 2 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 27 && dungeon.tiles[(i + 1) as usize][(j + 1) as usize] == 30 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 29;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 2 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 18 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 25;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && i + 2 >= 0 && i + 2 < 38 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 21 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 9 && dungeon.tiles[(i + 2) as usize][(j + 0) as usize] == 2 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 11;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 19 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 10 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 17;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 15 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 3 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 4;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 22 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 9 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 15;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 18 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 30 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 18;
+                        }
+                        if i + -1 >= 1 && i + -1 < 40 && i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 24 && dungeon.tiles[(i + -1) as usize][(j + 0) as usize] == 30 {
+                            dungeon.tiles[(i + -1) as usize][(j + 0) as usize] = 19;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 21 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 2 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 15;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 21 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 9 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 10;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 22 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 30 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 18;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 21 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 30 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 18;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 16 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 2 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 15;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 13 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 2 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 15;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 22 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 2 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 15;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && i + 2 >= 0 && i + 2 < 38 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 21 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 18 && dungeon.tiles[(i + 2) as usize][(j + 0) as usize] == 30 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 24;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 21 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 9 && dungeon.tiles[(i + 1) as usize][(j + 1) as usize] == 1 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 16;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 2 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 27 && dungeon.tiles[(i + 1) as usize][(j + 1) as usize] == 2 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 29;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 23 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 2 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 15;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 23 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 9 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 15;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 25 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 2 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 15;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 22 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 9 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 11;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 23 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 9 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 11;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 15 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 1 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 16;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 11 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 15 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 14;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 23 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 1 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 16;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 21 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 27 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 26;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 21 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 18 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 24;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 26 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 1 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 16;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 29 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 1 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 16;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 29 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 2 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 15;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + -1 >= 1 && j + -1 < 40 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 1 && dungeon.tiles[(i + 0) as usize][(j + -1) as usize] == 15 {
+                            dungeon.tiles[(i + 0) as usize][(j + -1) as usize] = 10;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 18 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 2 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 15;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 23 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 30 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 18;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 18 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 9 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 10;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 14 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 30 && dungeon.tiles[(i + 1) as usize][(j + 1) as usize] == 30 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 23;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + -1 >= 1 && j + -1 < 40 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 2 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 28 && dungeon.tiles[(i + 1) as usize][(j + -1) as usize] == 6 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 23;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + -1 >= 1 && j + -1 < 40 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 23 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 18 && dungeon.tiles[(i + 0) as usize][(j + -1) as usize] == 6 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 24;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && i + 2 >= 0 && i + 2 < 38 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 14 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 23 && dungeon.tiles[(i + 2) as usize][(j + 0) as usize] == 30 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 28;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && i + 2 >= 0 && i + 2 < 38 && j + -1 >= 1 && j + -1 < 40 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 14 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 28 && dungeon.tiles[(i + 2) as usize][(j + 0) as usize] == 30 && dungeon.tiles[(i + 1) as usize][(j + -1) as usize] == 6 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 23;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 23 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 30 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 19;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 29 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 30 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 19;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 29 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 30 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 18;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 19 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 30 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 19;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 21 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 30 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 19;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 26 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 30 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 19;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 16 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 30 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 18;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 13 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 9 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 10;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 25 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 30 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 18;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 18 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 2 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 15;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 11 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 3 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 5;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 19 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 9 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 11;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 19 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 1 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 13;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + -1 >= 1 && j + -1 < 40 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 19 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 13 && dungeon.tiles[(i + 1) as usize][(j + -1) as usize] == 6 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 16;
+                        }
+            }
+        }
+        // Pass 4 (C++ FixTilesPatterns loop 4)
+        for j in 0..DMAXY as i32 {
+            for i in 0..DMAXX as i32 {
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && j + 2 >= 0 && j + 2 < 38 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 21 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 24 && dungeon.tiles[(i + 0) as usize][(j + 2) as usize] == 1 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 17;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && i + 2 >= 0 && i + 2 < 38 && j + -1 >= 1 && j + -1 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 15 && dungeon.tiles[(i + 1) as usize][(j + 1) as usize] == 9 && dungeon.tiles[(i + 1) as usize][(j + -1) as usize] == 1 && dungeon.tiles[(i + 2) as usize][(j + 0) as usize] == 16 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 29;
+                        }
+                        if i + -1 >= 1 && i + -1 < 40 && i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 2 && dungeon.tiles[(i + -1) as usize][(j + 0) as usize] == 6 {
+                            dungeon.tiles[(i + -1) as usize][(j + 0) as usize] = 8;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + -1 >= 1 && j + -1 < 40 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 1 && dungeon.tiles[(i + 0) as usize][(j + -1) as usize] == 6 {
+                            dungeon.tiles[(i + 0) as usize][(j + -1) as usize] = 7;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 6 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 15 && dungeon.tiles[(i + 1) as usize][(j + 1) as usize] == 4 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 10;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 1 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 3 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 4;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 1 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 6 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 4;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 9 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 3 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 4;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 10 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 3 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 4;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 13 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 3 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 4;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 1 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 5 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 12;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 1 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 16 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 13;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 6 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 13 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 16;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 25 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 9 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 10;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 13 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 5 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 12;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + -1 >= 1 && j + -1 < 40 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 28 && dungeon.tiles[(i + 0) as usize][(j + -1) as usize] == 6 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 1 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 23;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 19 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 10 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 17;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 21 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 9 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 11;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 11 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 3 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 5;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 10 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 4 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 12;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 14 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 4 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 12;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 27 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 9 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 11;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 15 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 4 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 12;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 21 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 1 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 16;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 11 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 4 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 12;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 2 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 3 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 5;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 9 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 3 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 5;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 14 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 3 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 5;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 15 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 3 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 5;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + -1 >= 1 && j + -1 < 40 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 2 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 5 && dungeon.tiles[(i + 1) as usize][(j + -1) as usize] == 16 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 12;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 2 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 4 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 12;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 9 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 4 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 12;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + -1 >= 1 && j + -1 < 40 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 1 && dungeon.tiles[(i + 0) as usize][(j + -1) as usize] == 8 {
+                            dungeon.tiles[(i + 0) as usize][(j + -1) as usize] = 9;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 28 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 23 && dungeon.tiles[(i + 1) as usize][(j + 1) as usize] == 3 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 16;
+                        }
+            }
+        }
+        // Pass 5 (C++ FixTilesPatterns loop 5)
+        for j in 0..DMAXY as i32 {
+            for i in 0..DMAXX as i32 {
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 21 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 10 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 17;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 17 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 4 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 12;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 10 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 4 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 12;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 17 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 5 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 12;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 29 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 9 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 10;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 13 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 5 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 12;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 9 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 16 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 13;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 10 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 16 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 13;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 16 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 3 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 4;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 11 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 5 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 12;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + -1 >= 1 && j + -1 < 40 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 10 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 3 && dungeon.tiles[(i + 1) as usize][(j + -1) as usize] == 16 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 12;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 16 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 5 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 12;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 1 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 6 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 4;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 21 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 13 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 10 {
+                            dungeon.tiles[(i + 1) as usize][(j + 1) as usize] = 12;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 15 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 10 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 17;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 22 && dungeon.tiles[(i + 0) as usize][(j + 1) as usize] == 11 {
+                            dungeon.tiles[(i + 0) as usize][(j + 1) as usize] = 17;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && i + 2 >= 0 && i + 2 < 38 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 15 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 28 && dungeon.tiles[(i + 2) as usize][(j + 0) as usize] == 16 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 23;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && i + 2 >= 0 && i + 2 < 38 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 28 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 23 && dungeon.tiles[(i + 1) as usize][(j + 1) as usize] == 1 && dungeon.tiles[(i + 2) as usize][(j + 0) as usize] == 6 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 16;
+                        }
+            }
+        }
+        // Pass 6 (C++ FixTilesPatterns loop 6)
+        for j in 0..DMAXY as i32 {
+            for i in 0..DMAXX as i32 {
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && i + 2 >= 0 && i + 2 < 38 && j + 0 >= 0 && j + 0 < 40 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 15 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 28 && dungeon.tiles[(i + 2) as usize][(j + 0) as usize] == 16 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 23;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && i + 2 >= 0 && i + 2 < 38 && j + -1 >= 1 && j + -1 < 40 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 21 && dungeon.tiles[(i + 1) as usize][(j + -1) as usize] == 21 && dungeon.tiles[(i + 1) as usize][(j + 1) as usize] == 13 && dungeon.tiles[(i + 2) as usize][(j + 0) as usize] == 2 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 17;
+                        }
+                        if i + 0 >= 0 && i + 0 < 40 && i + 1 >= 0 && i + 1 < 39 && j + 0 >= 0 && j + 0 < 40 && j + 1 >= 0 && j + 1 < 39 && dungeon.tiles[(i + 0) as usize][(j + 0) as usize] == 19 && dungeon.tiles[(i + 1) as usize][(j + 0) as usize] == 15 && dungeon.tiles[(i + 1) as usize][(j + 1) as usize] == 12 {
+                            dungeon.tiles[(i + 1) as usize][(j + 0) as usize] = 17;
+                        }
+            }
+        }
     }
 
     /// Find the number of mega tiles used by layout (validation check)
@@ -1068,137 +1056,88 @@ impl Dungeon4Generator {
     /// Place miniset pattern in dungeon (used for stairs placement)
     /// Returns Some(position) if successfully placed, None otherwise
     /// C++ equivalent: PlaceMiniSet (simplified version for L4)
+    /// Place a miniset using the C++ `PlaceMiniSet` scan algorithm.
+    /// C++ source: PlaceMiniSet() in gendung.cpp:648-683 (L4 uses drlg1Quirk=false)
     fn place_miniset(&mut self, dungeon: &mut Dungeon, miniset: &Miniset) -> Option<(usize, usize)> {
-        // Try random positions to place the miniset
-        for _ in 0..100 {
-            let x = self.random_range(0, DMAXX - miniset.width - 1);
-            let y = self.random_range(0, DMAXY - miniset.height - 1);
-
-            // Check if pattern matches
+        let sw = miniset.width as i32;
+        let sh = miniset.height as i32;
+        let mut x = self.random_range(0, DMAXX - miniset.width) as i32;
+        let mut y = self.random_range(0, DMAXY - miniset.height) as i32;
+        let mut i = 0usize;
+        let tries = DMAXX * DMAXY;
+        while i < tries {
+            if x == DMAXX as i32 - sw {
+                x = 0;
+                y += 1;
+                if y == DMAXY as i32 - sh {
+                    y = 0;
+                }
+            }
+            // SetPieceRoom is empty for quest-free generation; skip the check.
             let mut matches = true;
             for dy in 0..miniset.height {
                 for dx in 0..miniset.width {
-                    if x + dx >= DMAXX || y + dy >= DMAXY {
-                        matches = false;
-                        break;
-                    }
-                    let expected = miniset.search[dy][dx];
-                    if expected != 0 && dungeon.tiles[x + dx][y + dy] != expected {
+                    let e = miniset.search[dy][dx];
+                    let px = (x + dx as i32) as usize;
+                    let py = (y + dy as i32) as usize;
+                    if (e != 0 && dungeon.tiles[px][py] != e) || self.protected[px][py] {
                         matches = false;
                         break;
                     }
                 }
-                if !matches { break; }
+                if !matches {
+                    break;
+                }
             }
-
             if matches {
-                // Place replacement tiles
                 for dy in 0..miniset.height {
                     for dx in 0..miniset.width {
-                        if x + dx < DMAXX && y + dy < DMAXY {
-                            dungeon.tiles[x + dx][y + dy] = miniset.replace[dy][dx];
+                        let r = miniset.replace[dy][dx];
+                        if r != 0 {
+                            dungeon.tiles[(x + dx as i32) as usize][(y + dy as i32) as usize] = r;
                         }
                     }
                 }
-                return Some((x, y));
+                return Some((x as usize, y as usize));
             }
+            i += 1;
+            x += 1;
         }
         None
     }
 
     /// Place stairs (up, down, town warp, or hell gate)
     /// C++ equivalent: PlaceStairs (line 1094)
+    /// Place stairs (up, down, town warp, or hell gate)
+    /// C++ equivalent: PlaceStairs (drlg_l4.cpp:1096-1136)
     fn place_stairs(&mut self, dungeon: &mut Dungeon, level: u8, _entry: LevelEntry) -> bool {
-        // Stairs up miniset (4x4 pattern)
-        let l4_ustairs = Miniset::new(
-            4, 4,
-            vec![
-                vec![6, 6, 6, 6],
-                vec![6, 6, 6, 6],
-                vec![6, 6, 6, 6],
-                vec![6, 6, 6, 6],
-            ],
-            vec![
-                vec![66, 67, 68, 0],
-                vec![69, 70, 71, 0],
-                vec![72, 73, 74, 0],
-                vec![0, 0, 0, 0],
-            ],
-        );
-
         // Place stairs up
-        if self.place_miniset(dungeon, &l4_ustairs).is_none() {
+        if self.place_miniset(dungeon, &miniset_l4_ustairs()).is_none() {
             return false;
         }
 
         if level != 15 {
-            // Place stairs down (unless on level 15)
+            // Place stairs down (skipped on level 15)
             if level != 16 {
-                // TODO Day 79: Check Q_WARLORD quest
-                let l4_dstairs = Miniset::new(
-                    4, 4,
-                    vec![
-                        vec![6, 6, 6, 6],
-                        vec![6, 6, 6, 6],
-                        vec![6, 6, 6, 6],
-                        vec![6, 6, 6, 6],
-                    ],
-                    vec![
-                        vec![62, 63, 64, 0],
-                        vec![65, 66, 67, 0],
-                        vec![68, 69, 70, 0],
-                        vec![0, 0, 0, 0],
-                    ],
-                );
-                if self.place_miniset(dungeon, &l4_dstairs).is_none() {
+                // C++: if Q_WARLORD is available, skip stairs down (SetPiece
+                // is the warlord's room); the quest system is not ported yet,
+                // so we always place stairs down.
+                if self.place_miniset(dungeon, &miniset_l4_dstairs()).is_none() {
                     return false;
                 }
             }
 
-            // Place town warp on level 13
+            // Place town warp stairs on level 13
             if level == 13 {
-                let l4_twarp = Miniset::new(
-                    4, 4,
-                    vec![
-                        vec![6, 6, 6, 6],
-                        vec![6, 6, 6, 6],
-                        vec![6, 6, 6, 6],
-                        vec![6, 6, 6, 6],
-                    ],
-                    vec![
-                        vec![125, 126, 127, 0],
-                        vec![128, 129, 130, 0],
-                        vec![131, 132, 133, 0],
-                        vec![0, 0, 0, 0],
-                    ],
-                );
-                if self.place_miniset(dungeon, &l4_twarp).is_none() {
+                if self.place_miniset(dungeon, &miniset_l4_twarp()).is_none() {
                     return false;
                 }
             }
         } else {
-            // Level 15: Place hell gate (Pentagram)
-            let l4_penta2 = Miniset::new(
-                5, 5,
-                vec![
-                    vec![6, 6, 6, 6, 6],
-                    vec![6, 6, 6, 6, 6],
-                    vec![6, 6, 6, 6, 6],
-                    vec![6, 6, 6, 6, 6],
-                    vec![6, 6, 6, 6, 6],
-                ],
-                vec![
-                    vec![98, 99, 100, 101, 102],
-                    vec![103, 104, 105, 106, 107],
-                    vec![108, 109, 105, 110, 111],
-                    vec![112, 113, 114, 115, 116],
-                    vec![117, 118, 119, 120, 121],
-                ],
-            );
-            if self.place_miniset(dungeon, &l4_penta2).is_none() {
+            // Level 15: place hell gate (pentagram portal)
+            if self.place_miniset(dungeon, &miniset_l4_penta2()).is_none() {
                 return false;
             }
-            // TODO: Set Quests[Q_DIABLO].position
         }
 
         true
@@ -1206,21 +1145,16 @@ impl Dungeon4Generator {
 
     /// General tile fixes for final polish
     /// C++ equivalent: GeneralFix (line 1083)
+    /// General tile fixes for final polish
+    /// C++ equivalent: GeneralFix (lines 1083-1094)
     fn general_fix(&mut self, dungeon: &mut Dungeon) {
-        for j in 0..DMAXY {
-            for i in 0..DMAXX {
-                if i + 1 < DMAXX {
-                    if dungeon.tiles[i][j] == 21 && dungeon.tiles[i + 1][j] == 10 {
-                        dungeon.tiles[i + 1][j] = 17;
-                    }
-                    if dungeon.tiles[i][j] == 17 && dungeon.tiles[i + 1][j] == 4 {
-                        dungeon.tiles[i + 1][j] = 12;
-                    }
-                }
-                if j + 1 < DMAXY {
-                    if dungeon.tiles[i][j] == 17 && dungeon.tiles[i][j + 1] == 5 {
-                        dungeon.tiles[i][j + 1] = 12;
-                    }
+        for j in 0..DMAXY - 1 {
+            for i in 0..DMAXX - 1 {
+                if (dungeon.tiles[i][j] == 24 || dungeon.tiles[i][j] == 122)
+                    && dungeon.tiles[i + 1][j] == 2
+                    && dungeon.tiles[i][j + 1] == 5
+                {
+                    dungeon.tiles[i][j] = 17;
                 }
             }
         }
@@ -1259,17 +1193,42 @@ impl Dungeon4Generator {
 
     /// Replace basic tiles with decorated variants
     /// C++ equivalent: Substitution (uses L4BTYPES)
+    /// Replace basic tiles with decorated variants
+    /// C++ equivalent: Substitution (lines 830-868) — two passes:
+    /// 1) FlipCoin(3) + L4BTYPES random walk, 2) FlipCoin(10) lava pools.
     fn substitution(&mut self, dungeon: &mut Dungeon) {
         for y in 0..DMAXY {
             for x in 0..DMAXX {
-                let tile = dungeon.tiles[x][y] as usize;
-                if tile < L4BTYPES.len() {
-                    let base_tile = L4BTYPES[tile];
-                    if base_tile != 0 {
-                        // Random decoration selection (4 variants per base tile)
-                        let variant = self.random_range(0, 3) as u8;
-                        dungeon.tiles[x][y] = base_tile + variant;
+                if !self.flip_coin_weighted(3) {
+                    continue;
+                }
+                let c = L4BTYPES[dungeon.tiles[x][y] as usize];
+                if c == 0 || self.protected[x][y] {
+                    continue;
+                }
+                let mut rv = self.random_range(0, 16) as i32;
+                let mut i: i32 = -1;
+                while rv >= 0 {
+                    i += 1;
+                    if i == L4BTYPES.len() as i32 {
+                        i = 0;
                     }
+                    if c == L4BTYPES[i as usize] {
+                        rv -= 1;
+                    }
+                }
+                dungeon.tiles[x][y] = i as u8;
+            }
+        }
+        for y in 0..DMAXY {
+            for x in 0..DMAXX {
+                if !self.flip_coin_weighted(10) {
+                    continue;
+                }
+                let c = dungeon.tiles[x][y] as usize;
+                if c < L4BTYPES.len() && L4BTYPES[c] == 6 && !self.protected[x][y] {
+                    let idx = self.random_range(0, 3).max(0);
+                    dungeon.tiles[x][y] = [95, 96, 97][idx];
                 }
             }
         }
@@ -1962,10 +1921,101 @@ impl Dungeon4Generator {
 
     /// Recursively generate rooms using UberRoom algorithm
     /// C++ equivalent: GenerateRoom
+    /// C++ CloseOuterBorders (lines 1073-1082): clear the outer border of the
+    /// first quadrant so the mirrored walls form the map edge.
+    fn close_outer_borders(&mut self) {
+        for x in 0..DMAXX / 2 {
+            self.dungeon_mask[x][0] = false;
+        }
+        for y in 0..DMAXY / 2 {
+            self.dungeon_mask[0][y] = false;
+        }
+    }
+
+    /// C++ PrepareInnerBorders (lines 869-946): carve connection corridors in
+    /// the first quadrant before mirroring so the layout stays connected.
+    fn prepare_inner_borders(&mut self) {
+        for y in (0..DMAXY / 2).rev() {
+            for x in (0..DMAXX / 2).rev() {
+                if !self.dungeon_mask[x][y] {
+                    self.hall_ok[y] = false;
+                } else {
+                    let has_sw = y + 1 < DMAXY / 2 && self.dungeon_mask[x][y + 1];
+                    let has_s = x + 1 < DMAXX / 2
+                        && y + 1 < DMAXY / 2
+                        && self.dungeon_mask[x + 1][y + 1];
+                    self.hall_ok[y] = has_sw && !has_s;
+                    break; // C++: x = 0 then loop decrements to -1 and exits
+                }
+            }
+        }
+
+        let mut ry = self.random_range(0, DMAXY / 2 - 1) + 1;
+        loop {
+            if self.hall_ok[ry] {
+                for x in (0..DMAXX / 2).rev() {
+                    if self.dungeon_mask[x][ry] {
+                        ry = 0;
+                        break;
+                    }
+                    self.dungeon_mask[x][ry] = true;
+                    self.dungeon_mask[x][ry + 1] = true;
+                }
+            } else {
+                ry += 1;
+                if ry == DMAXY / 2 {
+                    ry = 1;
+                }
+            }
+            if ry == 0 {
+                break;
+            }
+        }
+
+        for x in (0..DMAXX / 2).rev() {
+            for y in (0..DMAXY / 2).rev() {
+                if !self.dungeon_mask[x][y] {
+                    self.hall_ok[x] = false;
+                } else {
+                    let has_se = x + 1 < DMAXX / 2 && self.dungeon_mask[x + 1][y];
+                    let has_s = x + 1 < DMAXX / 2
+                        && y + 1 < DMAXY / 2
+                        && self.dungeon_mask[x + 1][y + 1];
+                    self.hall_ok[x] = has_se && !has_s;
+                    break;
+                }
+            }
+        }
+
+        let mut rx = self.random_range(0, DMAXX / 2 - 1) + 1;
+        loop {
+            if self.hall_ok[rx] {
+                for y in (0..DMAXY / 2).rev() {
+                    if self.dungeon_mask[rx][y] {
+                        rx = 0;
+                        break;
+                    }
+                    self.dungeon_mask[rx][y] = true;
+                    self.dungeon_mask[rx + 1][y] = true;
+                }
+            } else {
+                rx += 1;
+                if rx == DMAXX / 2 {
+                    rx = 1;
+                }
+            }
+            if rx == 0 {
+                break;
+            }
+        }
+    }
+
+
     fn generate_room(&mut self, area: Room, vertical_layout: bool) {
         // Randomly rotate layout (75% chance to flip)
         let rotate = !self.flip_coin_weighted(4);
         let vertical_layout = (!vertical_layout && rotate) || (vertical_layout && !rotate);
+
 
         let mut place_room1 = false;
         let mut room1 = Room::new(0, 0, 0, 0);
@@ -1982,13 +2032,14 @@ impl Dungeon4Generator {
                 room1.x = area.x - room1.width;
                 room1.y = area.y + area.height / 2 - room1.height / 2;
 
-                // BUGFIX: C++ has swapped width/height bug here
-                // We use correct dimensions: width+1, height+2
+                // C++ BUGFIX note: C++ swaps height/width here
+                // ({ room1.size.height + 2, room1.size.width + 1 }); replicate
+                // the original bug for byte-exact compatibility.
                 check_room = Room::new(
                     room1.x - 1,
                     room1.y - 1,
-                    room1.width + 1,
                     room1.height + 2,
+                    room1.width + 1,
                 );
             } else {
                 // Place above area
@@ -2081,6 +2132,7 @@ impl Dungeon4Generator {
 
         let room = Room::new(random_x as i32, random_y as i32, room_width as i32, room_height as i32);
 
+
         if level == 16 {
             self.l4_hold = (random_x, random_y);
         }
@@ -2098,6 +2150,7 @@ impl Dungeon4Generator {
     fn flip_coin_weighted(&mut self, n: usize) -> bool {
         self.random_range(0, n) == 0
     }
+
 
     /// Generate L4 dungeon (main entry point)
     /// C++ equivalent: CreateL4Dungeon
@@ -2122,91 +2175,73 @@ impl Dungeon4Generator {
 
     /// Main generation loop (separated for clarity)
     /// C++ equivalent: GenerateLevel (line 1140)
-    fn generate_level(&mut self, dungeon: &mut Dungeon, level: u8, _entry: LevelEntry) -> bool {
-        // Normal L4 generation loop
+    /// Main generation loop (separated for clarity)
+    /// C++ equivalent: GenerateLevel (drlg_l4.cpp:1140-1199)
+    fn generate_level(&mut self, dungeon: &mut Dungeon, level: u8, entry: LevelEntry) -> bool {
+        const MIN_AREA: usize = 692;
         loop {
-            self.init_dungeon_flags();
-            // C++ `InitDungeonFlags` does `memset(dungeon, 30, sizeof(dungeon))`
-            // (L4 rock background). The old port left unmatched cells at 0.
-            for y in 0..DMAXY {
-                for x in 0..DMAXX {
-                    dungeon.tiles[x][y] = 30;
+            // C++: do { InitDungeonFlags(); FirstRoom(); CloseOuterBorders(); }
+            //          while (FindArea() < Minarea);   FindArea = mask.count() * 4
+            loop {
+                self.init_dungeon_flags();
+                for y in 0..DMAXY {
+                    for x in 0..DMAXX {
+                        dungeon.tiles[x][y] = 30; // C++ memset(dungeon, 30)
+                    }
+                }
+                self.first_room(level);
+                self.close_outer_borders();
+                if self.find_area() >= MIN_AREA {
+                    break;
                 }
             }
 
-            // Day 75: Place UberRooms (recursive room subdivision)
-            self.first_room(level);
-
-            // Day 76: Mirror first quadrant to other 3 quadrants
+            self.prepare_inner_borders();
             self.mirror_dungeon_layout();
-
-            // Day 76: Convert dungeon_mask to tiles
             self.make_dmt(dungeon);
-
-            // Day 76: Add halls (walls with doors)
-            self.add_wall(dungeon);
-
-            // Day 77: Fix tile patterns (211-line aesthetic cleanup)
             self.fix_tiles_patterns(dungeon);
-
-            // Day 78: Validate floor area (minimum 692 tiles after mirroring)
-            const MIN_AREA: usize = 692;
-            if self.find_area() < MIN_AREA {
-                continue; // Regenerate if too small
+            if level == 16 {
+                self.protect_quads();
             }
-
-            // Day 82: Protect quest room areas (Q_WARLORD, Q_BETRAYER)
-            // C++ equivalent: drlg_l4.cpp:1161-1168
+            // C++: protect SetPieceRoom when the Warlord/Betrayer quest is active.
+            // The quest system is not ported yet; protect_quest_room is a no-op.
             self.protect_quest_room(level);
-
-            // Day 80: Flood fill transparency values
+            self.add_wall(dungeon);
             self.flood_transparency_values(dungeon, 6);
-
-            // Day 80: Fix transparency edge cases
             self.fix_transparency(dungeon);
-
-            // Day 80: Initialize quest setpiece
             self.init_set_piece(dungeon, level);
-
-            // Day 78: Place stairs (up, down, town warp, or hell gate)
-            if !self.place_stairs(dungeon, level, _entry) {
-                continue; // Retry if stair placement fails
+            if level == 16 {
+                self.load_diablo_quads(dungeon, true);
             }
-
-            // Day 78: General tile fixes for final polish
-            self.general_fix(dungeon);
-
-            // Day 79: Apply shadow patterns to edges
-            self.apply_shadows_patterns(dungeon);
-
-            // Day 79: Fix corner tiles for aesthetic transitions
-            self.fix_corner_tiles(dungeon);
-
-            // Day 79: Replace basic tiles with decorated variants
-            self.substitution(dungeon);
-
-            // Day 85: Place theme rooms (only in levels 13-15, skip level 16)
-            if level != 16 {
-                self.place_theme_rooms(dungeon, 6, 8);
+            if self.place_stairs(dungeon, level, entry) {
+                break;
             }
+        }
 
-            // TODO: memcpy to pdungeon backup array
+        self.general_fix(dungeon);
+        if level != 16 {
+            // C++ DRLG_PlaceThemeRooms(7, 10, 6, 8, true). The Rust theme-room
+            // port is approximate; exact GetSizeForThemeRoom/CreateThemeRoom
+            // are still to be aligned.
+            self.place_theme_rooms(dungeon, 6, 8);
+        }
+        self.apply_shadows_patterns(dungeon);
+        self.fix_corner_tiles(dungeon);
+        self.substitution(dungeon);
 
-            // Day 82: Validate and setup quest triggers
-            // C++ equivalent: DRLG_CheckQuests(SetPieceRoom.position) at line 1195
-            self.check_quests();
+        // TODO: memcpy to pdungeon backup array
 
-            // Level 15 special handling: pentagram placement
-            if level == 15 {
-                // Find pentagram tiles and place L4PENTA if gate is closed
-                if let Some((_x, _y)) = self.find_pentagram_tiles(dungeon) {
-                    self.place_l4_penta(dungeon, level);
-                    // TODO: Set Diablo quest position to (x, y)
-                }
+        // C++ DRLG_CheckQuests(SetPieceRoom.position)
+        self.check_quests();
+
+        // Level 15 special handling: pentagram placement
+        if level == 15 {
+            if let Some((_x, _y)) = self.find_pentagram_tiles(dungeon) {
+                self.place_l4_penta(dungeon, level);
             }
-
-            // Success!
-            break;
+        }
+        if level == 16 {
+            self.load_diablo_quads(dungeon, false);
         }
 
         true
@@ -2214,59 +2249,15 @@ impl Dungeon4Generator {
 
     /// Generate Diablo's Lair (Level 16 special layout)
     /// C++ equivalent: LoadDiabQuads + placement logic
+    /// Generate Diablo's Lair (Level 16 special layout)
+    ///
+    /// C++ CreateL4Dungeon handles level 16 inside GenerateLevel with the
+    /// ProtectQuads/LoadDiabQuads branches; route through the same pipeline.
     fn generate_diablo_lair(&mut self, dungeon: &mut Dungeon, seed: u32) -> bool {
         self.set_rng_seed(seed);
-
-        loop {
-            self.init_dungeon_flags();
-
-            // Day 75: Place UberRooms (recursive room subdivision)
-            self.first_room(16);
-
-            // Day 76: Mirror first quadrant to other 3 quadrants
-            self.mirror_dungeon_layout();
-
-            // Day 76: Convert dungeon_mask to tiles
-            self.make_dmt(dungeon);
-
-            // Day 77: Fix tile patterns
-            self.fix_tiles_patterns(dungeon);
-
-            // Day 79: Protect Diablo quad areas
-            self.protect_quads();
-
-            // Day 76: Add halls
-            self.add_wall(dungeon);
-
-            // Day 80: Flood fill transparency values
-            self.flood_transparency_values(dungeon, 6);
-
-            // Day 80: Fix transparency edge cases
-            self.fix_transparency(dungeon);
-
-            // Day 83: Load Diablo quads (before stairs)
-            // C++ equivalent: LoadDiabQuads(true) at line 1177
-            self.load_diablo_quads(dungeon, true);
-
-            // Day 78: Place stairs
-            if self.place_stairs(dungeon, 16, LevelEntry::Main) {
-                break;
-            }
-        }
-
-        // Final fixes
-        self.general_fix(dungeon);
-
-        // Day 79: Apply decorations
-        self.apply_shadows_patterns(dungeon);
-        self.fix_corner_tiles(dungeon);
-        self.substitution(dungeon);
-
-        // Day 83: Load Diablo quads (after stairs)
-        // C++ equivalent: LoadDiabQuads(false) at line 1213
-        self.load_diablo_quads(dungeon, false);
-
-        true
+        let result = self.generate_level(dungeon, 16, LevelEntry::Main);
+        self.pass3(dungeon, 16);
+        result
     }
 }
 
@@ -2812,21 +2803,25 @@ mod tests {
         let mut generator = Dungeon4Generator::new();
         let mut dungeon = Dungeon::new();
 
-        // Set up test patterns
-        dungeon.tiles[5][5] = 21;
-        dungeon.tiles[6][5] = 10;
+        // C++ GeneralFix: (24 | 122) with right=2 and below=5 -> 17.
+        dungeon.tiles[5][5] = 24;
+        dungeon.tiles[6][5] = 2;
+        dungeon.tiles[5][6] = 5;
 
-        dungeon.tiles[10][10] = 17;
-        dungeon.tiles[11][10] = 4;
+        dungeon.tiles[10][10] = 122;
+        dungeon.tiles[11][10] = 2;
+        dungeon.tiles[10][11] = 5;
 
-        dungeon.tiles[15][15] = 17;
-        dungeon.tiles[15][16] = 5;
+        // Negative case: same left tile but wrong neighbours must stay.
+        dungeon.tiles[15][15] = 24;
+        dungeon.tiles[16][15] = 1;
+        dungeon.tiles[15][16] = 1;
 
         generator.general_fix(&mut dungeon);
 
-        assert_eq!(dungeon.tiles[6][5], 17);  // 21→10 becomes 21→17
-        assert_eq!(dungeon.tiles[11][10], 12); // 17→4 becomes 17→12
-        assert_eq!(dungeon.tiles[15][16], 12); // 17→5 becomes 17→12
+        assert_eq!(dungeon.tiles[5][5], 17);  // 24 + right 2 + below 5
+        assert_eq!(dungeon.tiles[10][10], 17); // 122 + right 2 + below 5
+        assert_eq!(dungeon.tiles[15][15], 24); // neighbours don't match
     }
 
     #[test]
@@ -2877,15 +2872,20 @@ mod tests {
         generator.set_rng_seed(123);
         let mut dungeon = Dungeon::new();
 
-        // Set tiles that have L4BTYPES entries
-        dungeon.tiles[5][5] = 6;  // L4BTYPES[6] = 6
+        // C++ Substitution: pass 1 random-walks L4BTYPES (L4BTYPES[i]==6 for
+        // i in {6,49,50,51}); pass 2 (FlipCoin(10)) turns base-6 tiles into
+        // lava pools 95/96/97.
+        dungeon.tiles[5][5] = 6; // L4BTYPES[6] = 6
         dungeon.tiles[10][10] = 13; // L4BTYPES[13] = 13
 
         generator.substitution(&mut dungeon);
 
-        // Check tiles got decorated (base + variant 0-3)
-        assert!(dungeon.tiles[5][5] >= 6 && dungeon.tiles[5][5] <= 9);
-        assert!(dungeon.tiles[10][10] >= 13 && dungeon.tiles[10][10] <= 16);
+        let t = dungeon.tiles[5][5];
+        assert!(
+            matches!(t, 6 | 49 | 50 | 51 | 95 | 96 | 97),
+            "tile[5][5] = {t} not a C++-valid substitution result"
+        );
+        assert_eq!(dungeon.tiles[10][10], 13); // only matching index for base 13 is 13
     }
 
     #[test]
