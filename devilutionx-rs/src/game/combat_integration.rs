@@ -224,20 +224,24 @@ pub fn player_attack_monster(
     let max_dam = player._p_i_max_dam;
     let mut damage = rng.random_range(min_dam..=max_dam);
 
-    // 4. Apply damage bonuses (C++ line 568-569)
+    // 4. Apply damage bonuses (C++ line 568-570)
     damage += damage * player._p_i_bonus_dam / 100;
     damage += player._p_i_bonus_dam_mod;
+    damage += player._p_damage_mod;
 
-    // 5. Critical Strike for Warrior (C++ line 573-577)
-    if player._p_class == HeroClass::Warrior {
-        if rng.random_range(0..100) < (player._p_level as i32) {
-            damage *= 2; // Double damage on crit
-        }
+    // 5. Critical Strike (C++ line 574-579): classes carrying the
+    // `PlayerClassFlag::CriticalStrike` flag (data-driven, per attributes.tsv).
+    let attrs = crate::game::player_dat::get_class_attributes(to_dat_class(player._p_class));
+    if attrs.class_flags & (crate::game::player_dat::PlayerClassFlag::CriticalStrike as u8) != 0
+        && rng.random_range(0..100) < player._p_level as i32
+    {
+        damage *= 2; // Double damage on crit
     }
 
-    // 6. Apply armor reduction (simplified from C++ line 625)
-    let armor_reduction = (monster.armor_class as i32) / 4;
-    damage = damage.saturating_sub(armor_reduction).max(1);
+    // C++ PlrHitMonst applies no AC reduction to the damage (monster armor
+    // only reduces the hit chance via CalculateArmorPierce); the sword/mace
+    // vs Undead/Animal/Demon modifiers need the equipped weapon type, which
+    // player_exact::PlayerItem does not expose yet (follow-up).
 
     // 7. Convert to 64x fixed-point and apply (C++ line 625)
     let damage_64x = damage << 6;
@@ -426,6 +430,41 @@ mod tests {
     /// C++ `MonsterAttackPlayer` damage (monster.cpp:1219-1220):
     /// RandomIntBetween(min<<6, max<<6) + _pIGetHit<<6, floored at 64 —
     /// no AC reduction inside MonsterAttackPlayer.
+    /// C++ `PlrHitMonst` damage (player.cpp:566-570): RandomIntBetween + %
+    /// bonus + _pIBonusDamMod + _pDamageMod; no AC reduction in PlrHitMonst.
+    #[test]
+    fn test_player_attack_monster_damage_matches_cpp() {
+        let mut monster = Monster::new(1, MonsterType::Zombie, 10, 10, 0);
+        monster.level = 1;
+        monster.armor_class = 10;
+        monster.hp = 100 * 64;
+        monster.max_hp = 100 * 64;
+
+        let mut player = Player::new();
+        player._p_class = HeroClass::Warrior; // base_melee_to_hit 70
+        player._p_level = 0; // 0% crit chance
+        player._p_dexterity = 50;
+        player._p_i_min_dam = 5;
+        player._p_i_max_dam = 5;
+        player._p_i_bonus_dam = 0;
+        player._p_i_bonus_dam_mod = 0;
+        player._p_damage_mod = 0;
+        player.position = Point::new(11, 10);
+
+        // hit_chance = 0 + 25 + 70 + 0 - 10 = 85 (roll < 85 hits).
+        let mut rng = StdRng::seed_from_u64(3);
+        let result = player_attack_monster(&player, &mut monster, &mut rng);
+        match result {
+            AttackResult::Hit { damage } | AttackResult::Kill { damage } => {
+                assert_eq!(damage, 5, "display damage = 5");
+            }
+            AttackResult::Miss => panic!("hit roll must succeed"),
+            AttackResult::Block => panic!("monster does not block"),
+        }
+        // damage 5 << 6 = 320 applied to 6400 HP.
+        assert_eq!(monster.hp, 100 * 64 - 320);
+    }
+
     #[test]
     fn test_monster_attack_player_damage_matches_cpp() {
         let mut monster = Monster::new(1, MonsterType::Zombie, 10, 10, 0);
