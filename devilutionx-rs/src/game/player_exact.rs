@@ -321,6 +321,9 @@ pub enum InvBodyLoc {
 pub struct PlayerItem {
     pub item_id: i32,
     pub equipped: bool,
+    /// Equipped weapon type (C++ `Item._itype`), used by the melee damage
+    /// modifiers (sword/mace vs Undead/Animal/Demon in PlrHitMonst).
+    pub _itype: crate::game::item_dat::ItemType,
 }
 
 /// Type alias for backwards compatibility
@@ -331,6 +334,7 @@ impl PlayerItem {
         Self {
             item_id: 0,
             equipped: false,
+            _itype: crate::game::item_dat::ItemType::None,
         }
     }
 

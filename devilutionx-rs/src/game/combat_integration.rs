@@ -239,9 +239,35 @@ pub fn player_attack_monster(
     }
 
     // C++ PlrHitMonst applies no AC reduction to the damage (monster armor
-    // only reduces the hit chance via CalculateArmorPierce); the sword/mace
-    // vs Undead/Animal/Demon modifiers need the equipped weapon type, which
-    // player_exact::PlayerItem does not expose yet (follow-up).
+    // only reduces the hit chance via CalculateArmorPierce).
+    // 6. Weapon vs monster-class modifiers (C++ player.cpp:581-609):
+    //    sword/mace deal +/-50% against Undead/Animal monsters.
+    use crate::game::item_dat::ItemType;
+    // player_exact::INVLOC_HAND_LEFT = 4, INVLOC_HAND_RIGHT = 5.
+    let left = player.inv_body[4]._itype;
+    let right = player.inv_body[5]._itype;
+    let sword = left == ItemType::Sword || right == ItemType::Sword;
+    let mace = left == ItemType::Mace || right == ItemType::Mace;
+    match monster.monster_class() {
+        crate::game::monstdat::MonsterClass::Undead => {
+            if sword {
+                damage -= damage / 2;
+            } else if mace {
+                damage += damage / 2;
+            }
+        }
+        crate::game::monstdat::MonsterClass::Animal => {
+            if mace {
+                damage -= damage / 2;
+            } else if sword {
+                damage += damage / 2;
+            }
+        }
+        crate::game::monstdat::MonsterClass::Demon => {
+            // C++: TripleDemonDamage item effect would triple damage; the
+            // item-special-effect system is not wired into combat yet.
+        }
+    }
 
     // 7. Convert to 64x fixed-point and apply (C++ line 625)
     let damage_64x = damage << 6;
@@ -463,6 +489,51 @@ mod tests {
         }
         // damage 5 << 6 = 320 applied to 6400 HP.
         assert_eq!(monster.hp, 100 * 64 - 320);
+    }
+
+    /// C++ `PlrHitMonst` weapon-vs-monster-class modifiers (player.cpp:581-609):
+    /// a sword halves damage vs Undead, a mace boosts it +50%.
+    #[test]
+    fn test_player_weapon_vs_monster_class_modifiers_match_cpp() {
+        use crate::game::item_dat::ItemType;
+        // Common setup: Warrior, level 0 (no crit), fixed 10 damage.
+        let mut player = Player::new();
+        player._p_class = HeroClass::Warrior;
+        player._p_level = 0;
+        player._p_dexterity = 50;
+        player._p_i_min_dam = 10;
+        player._p_i_max_dam = 10;
+        player.position = Point::new(11, 10);
+
+        // Sword vs Undead Zombie: 10 -> 10 - 10/2 = 5.
+        let mut zombie = Monster::new(1, MonsterType::Zombie, 10, 10, 0);
+        zombie.level = 1;
+        zombie.armor_class = 0;
+        zombie.hp = 100 * 64;
+        zombie.max_hp = 100 * 64;
+        player.inv_body[4]._itype = ItemType::Sword;
+        let mut rng = StdRng::seed_from_u64(11);
+        let result = player_attack_monster(&player, &mut zombie, &mut rng);
+        match result {
+            AttackResult::Hit { damage } | AttackResult::Kill { damage } => assert_eq!(damage, 5),
+            other => panic!("expected a hit, got {:?}", other),
+        }
+        assert_eq!(zombie.hp, 100 * 64 - 5 * 64);
+
+        // Mace vs Undead Zombie: 10 -> 10 + 10/2 = 15.
+        let mut zombie = Monster::new(2, MonsterType::Zombie, 10, 10, 0);
+        zombie.level = 1;
+        zombie.armor_class = 0;
+        zombie.hp = 100 * 64;
+        zombie.max_hp = 100 * 64;
+        player.inv_body[4]._itype = ItemType::Mace;
+        let mut rng = StdRng::seed_from_u64(11);
+        let result = player_attack_monster(&player, &mut zombie, &mut rng);
+        match result {
+            AttackResult::Hit { damage } | AttackResult::Kill { damage } => assert_eq!(damage, 15),
+            other => panic!("expected a hit, got {:?}", other),
+        }
+        assert_eq!(zombie.hp, 100 * 64 - 15 * 64);
     }
 
     #[test]
