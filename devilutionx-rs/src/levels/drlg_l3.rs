@@ -1709,36 +1709,29 @@ impl CavesGenerator {
     }
 
     fn add_fence_doors(&mut self, dungeon: &mut Dungeon) {
+        // C++ AddFenceDoors (drlg_l3.cpp:1578): a floor tile (7) sandwiched
+        // between vertical or horizontal fence tiles (130..152) becomes a
+        // fence door (146 vertical / 147 horizontal). No RNG is consumed.
         for j in 0..DMAXY {
             for i in 0..DMAXX {
-                if dungeon.tiles[i][j] == 130 {
-                    let found = if dungeon.tiles[i][j - 1] == 141 && dungeon.tiles[i][j + 1] == 141 {
-                        1
-                    } else if dungeon.tiles[i - 1][j] == 141 && dungeon.tiles[i + 1][j] == 141 {
-                        2
-                    } else {
-                        0
-                    };
-                    if found != 0 {
-                        let dir = if found == 1 {
-                            if self.flip_coin() { 1 } else { 0 } // South(1,1)/North(-1,-1)
-                        } else if self.flip_coin() {
-                            2 // East
-                        } else {
-                            3 // West
-                        };
-                        if found == 1 {
-                            if dir == 1 {
-                                dungeon.tiles[i][j + 1] = 7;
-                            } else {
-                                dungeon.tiles[i][j - 1] = 7;
-                            }
-                        } else if dir == 2 {
-                            dungeon.tiles[i + 1][j] = 7;
-                        } else {
-                            dungeon.tiles[i - 1][j] = 7;
-                        }
-                        dungeon.tiles[i][j] = 7;
+                if dungeon.tiles[i][j] == 7 {
+                    if i > 0
+                        && i + 1 < DMAXX
+                        && (130..=152).contains(&dungeon.tiles[i - 1][j])
+                        && (130..=152).contains(&dungeon.tiles[i + 1][j])
+                    {
+                        dungeon.tiles[i][j] = 146;
+                        continue;
+                    }
+                }
+                if dungeon.tiles[i][j] == 7 {
+                    if j > 0
+                        && j + 1 < DMAXY
+                        && (130..=152).contains(&dungeon.tiles[i][j - 1])
+                        && (130..=152).contains(&dungeon.tiles[i][j + 1])
+                    {
+                        dungeon.tiles[i][j] = 147;
+                        continue;
                     }
                 }
             }
@@ -1857,7 +1850,7 @@ impl CavesGenerator {
                 }
                 if self.flip_coin() {
                     let mut y1 = j as i32;
-                    while y1 > 0 && self.fence_vertical_up(dungeon, i, y1 as usize) {
+                    while y1 >= 0 && self.fence_vertical_up(dungeon, i, y1 as usize) {
                         y1 -= 1;
                     }
                     y1 += 1;
@@ -1907,7 +1900,7 @@ impl CavesGenerator {
                     }
                 } else {
                     let mut x1 = i as i32;
-                    while x1 > 0 && self.fence_horizontal_left(dungeon, x1 as usize, j) {
+                    while x1 >= 0 && self.fence_horizontal_left(dungeon, x1 as usize, j) {
                         x1 -= 1;
                     }
                     x1 += 1;
@@ -2215,7 +2208,6 @@ impl CavesGenerator {
                 placed = true;
             }
         }
-
         placed
     }
 
