@@ -2832,16 +2832,14 @@ pub fn rnd_u_item(monster_level: Option<i32>, current_level: i32) -> Option<usiz
 }
 
 /// Select random item (75% gold, 25% any item)
-/// Exact port of RndAllItems() from items.cpp lines 1393-1403
-///
-/// TODO: Requires AllItemsList
+/// Exact port of RndAllItems() from items.cpp lines 1392-1403.
 pub fn rnd_all_items(current_level: i32) -> Option<usize> {
     use super::super::engine::random::generate_rnd;
 
-    // 75% chance for gold
+    // C++ RndAllItems: `if (GenerateRnd(100) > 25) return IDI_GOLD;`
+    // (IDI_GOLD = 0 in itemdat.h `_item_indexes`, matching ItemId::Gold).
     if generate_rnd(100) > 25 {
-        // TODO: Return IDI_GOLD index when AllItemsList available
-        return None;  // Placeholder
+        return Some(super::item_dat::ItemId::Gold as usize);
     }
 
     let item_max_level = current_level * 2;
@@ -3194,6 +3192,26 @@ pub fn check_item_stat_requirements(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// C++ `RndAllItems` (items.cpp:1392-1403): a 75% roll returns
+    /// `IDI_GOLD` (= 0). The port must return `Some(0)` for a gold roll
+    /// (previously a placeholder returned `None`).
+    #[test]
+    fn test_rnd_all_items_gold_roll_returns_index_zero() {
+        use crate::engine::random::set_rnd_seed;
+        // Find a seed whose first GenerateRnd(100) > 25 (gold branch).
+        let mut gold_seed = None;
+        for seed in 1..=500u32 {
+            set_rnd_seed(seed);
+            if rnd_all_items(1) == Some(0) {
+                gold_seed = Some(seed);
+                break;
+            }
+        }
+        let seed = gold_seed.expect("some seed must roll the 75% gold branch");
+        set_rnd_seed(seed);
+        assert_eq!(rnd_all_items(1), Some(0), "gold roll maps to IDI_GOLD=0");
+    }
 
     #[test]
     fn test_affix_item_type_flags() {
