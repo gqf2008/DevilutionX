@@ -55,6 +55,11 @@ pub enum DungeonType {
 
 impl DungeonType {
     /// Get the dungeon type for a given level number
+    ///
+    /// Mirrors C++ `GetLevelType` (`Source/levels/gendung.cpp`), including the
+    /// Hellfire ranges (Nest 17-20, Crypt 21-24). Levels >24 are unreachable
+    /// in-game; C++ returns `DTYPE_NONE` there, which this enum cannot
+    /// represent (`#[repr(u8)]`), so the legacy fallback stays `Town`.
     pub fn from_level(level: u8) -> Self {
         match level {
             0 => DungeonType::Town,
@@ -62,6 +67,8 @@ impl DungeonType {
             5..=8 => DungeonType::Catacombs,
             9..=12 => DungeonType::Caves,
             13..=16 => DungeonType::Hell,
+            17..=20 => DungeonType::Nest,
+            21..=24 => DungeonType::Crypt,
             _ => DungeonType::Town,
         }
     }
@@ -264,8 +271,16 @@ mod tests {
         assert_eq!(DungeonType::from_level(1), DungeonType::Cathedral);
         assert_eq!(DungeonType::from_level(4), DungeonType::Cathedral);
         assert_eq!(DungeonType::from_level(5), DungeonType::Catacombs);
+        assert_eq!(DungeonType::from_level(8), DungeonType::Catacombs);
         assert_eq!(DungeonType::from_level(9), DungeonType::Caves);
+        assert_eq!(DungeonType::from_level(12), DungeonType::Caves);
         assert_eq!(DungeonType::from_level(13), DungeonType::Hell);
+        assert_eq!(DungeonType::from_level(16), DungeonType::Hell);
+        // Hellfire ranges (C++ GetLevelType: <=20 Nest, <=24 Crypt).
+        assert_eq!(DungeonType::from_level(17), DungeonType::Nest);
+        assert_eq!(DungeonType::from_level(20), DungeonType::Nest);
+        assert_eq!(DungeonType::from_level(21), DungeonType::Crypt);
+        assert_eq!(DungeonType::from_level(24), DungeonType::Crypt);
     }
 
     #[test]
