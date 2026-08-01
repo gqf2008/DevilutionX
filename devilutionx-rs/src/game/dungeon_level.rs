@@ -159,6 +159,52 @@ fn apply_static_lights(level: &DungeonLevelData, layout: &mut DungeonLayout) {
     }
 }
 
+/// C++ `AddL2Torches` (objects.cpp:452-478) + `AddObjectLight` (objects.cpp:1247):
+/// scan the L2 dPiece grid; at specific wall/floor micro values roll `FlipCoin`
+/// and place a torch, then bake a radius-8 static light into dPreLight.
+///
+/// The RNG stream mirrors C++ `InitObjects`: the gameplay RNG is re-seeded to
+/// `DungeonSeeds[currlevel]` (`SetRndSeedForDungeonLevel`) and InitObjects
+/// discards one value (objects.cpp:3823) before object placement. The Rust
+/// simplified level numbering uses `dungeon_seeds[level]` (level 2) in place of
+/// C++ `DungeonSeeds[5..8]`; quest-gated placements (e.g. the L2-4 storybook)
+/// that consume RNG before the torches are not yet replicated.
+fn add_l2_torch_lights(layout: &mut DungeonLayout, seed: u32) {
+    use crate::engine::lighting::Point;
+    use crate::engine::random::DiabloGenerator;
+    let mut rng = DiabloGenerator::new(seed);
+    rng.discard(1); // C++ InitObjects DiscardRandomValues(1)
+    let mut lm = crate::engine::lighting::LightManager::new();
+    // Objects placed so far this pass (C++ dObject / IsObjectAtPosition).
+    let mut placed: std::collections::HashSet<(i32, i32)> = std::collections::HashSet::new();
+    for y in 0..MAXDUNY {
+        for x in 0..MAXDUNX {
+            let pn = layout.d_piece[y * MAXDUNX + x];
+            let (px, py) = (x as i32, y as i32);
+            if pn == 0 && rng.flip_coin(3) {
+                // OBJ_TORCHL2 at the floor tile itself.
+                placed.insert((px, py));
+                lm.do_lighting(&mut layout.pre_light, MAXDUNX, Point::new(px, py), 8);
+            }
+            if pn == 4 && rng.flip_coin(3) {
+                // OBJ_TORCHR2 at the tile itself.
+                placed.insert((px, py));
+                lm.do_lighting(&mut layout.pre_light, MAXDUNX, Point::new(px, py), 8);
+            }
+            if pn == 36 && rng.flip_coin(10) && !placed.contains(&(px - 1, py)) {
+                // OBJ_TORCHL at Direction::NorthWest = (-1, 0).
+                placed.insert((px - 1, py));
+                lm.do_lighting(&mut layout.pre_light, MAXDUNX, Point::new(px - 1, py), 8);
+            }
+            if pn == 40 && rng.flip_coin(10) && !placed.contains(&(px, py - 1)) {
+                // OBJ_TORCHR at Direction::NorthEast = (0, -1).
+                placed.insert((px, py - 1));
+                lm.do_lighting(&mut layout.pre_light, MAXDUNX, Point::new(px, py - 1), 8);
+            }
+        }
+    }
+}
+
 /// Build a render-ready `DungeonLayout` for an L2 Catacombs level
 /// (C++ `drlg_l2.cpp Pass3()` → `DRLG_LPass3(11)`).
 pub fn build_catacombs_layout(dungeon: &Dungeon, level: &DungeonLevelData) -> DungeonLayout {
@@ -208,7 +254,11 @@ pub fn generate_dungeon_layout(
             gen.generate(&mut dungeon, seed, 5)
                 .then_some(())
                 .ok_or_else(|| "L2 Catacombs generation failed".to_string())?;
-            Ok(build_catacombs_layout(&dungeon, art))
+            let mut layout = build_catacombs_layout(&dungeon, art);
+            // C++ InitObjects (objects.cpp:3854-3860): AddL2Objs then AddL2Torches.
+            // The torch scan bakes static lights into dPreLight via AddObjectLight.
+            add_l2_torch_lights(&mut layout, seed);
+            Ok(layout)
         }
         3 => {
             let mut dungeon = Dungeon::new();
@@ -776,6 +826,45 @@ mod tests {
         dungeon.tiles[20][20] = 60;
         let layout = stamp_dungeon_layout(&dungeon, &level, DUNGEON_BG_TIL_INDEX[2]);
         // L2 has no baked static lights: everything stays fully dark.
+        assert!(layout.pre_light.iter().all(|&v| v == 15));
+    }
+
+    /// C++ `AddL2Torches` (objects.cpp:452-478): dPiece 0/4/36/40 trigger a
+    /// FlipCoin roll; successful rolls place a torch and bake a radius-8 light.
+    /// Seed 0 (verified against the Diablo LCG): after InitObjects'
+    /// DiscardRandomValues(1), the four rolls are F, T, F, T.
+    #[test]
+    fn test_l2_torch_lights_place_and_lit() {
+        let mut layout = DungeonLayout::default();
+        // Fill with a non-trigger micro so only the four probe tiles roll.
+        for v in layout.d_piece.iter_mut() {
+            *v = 60;
+        }
+        layout.d_piece[10 * MAXDUNX + 10] = 0; // pn==0  -> TORCHL2 roll (fails)
+        layout.d_piece[20 * MAXDUNX + 10] = 4; // pn==4  -> TORCHR2 roll (succeeds)
+        layout.d_piece[30 * MAXDUNX + 10] = 36; // pn==36 -> TORCHL at NW (fails)
+        layout.d_piece[40 * MAXDUNX + 10] = 40; // pn==40 -> TORCHR at NE (succeeds)
+        add_l2_torch_lights(&mut layout, 0);
+
+        // Torch placed at (20,10): TORCHR2 lights the tile itself.
+        assert!(layout.pre_light[20 * MAXDUNX + 10] < 15, "TORCHR2 at (20,10) lit");
+        // Torch placed at (40, 10-1) = (40,9): TORCHR at Direction::NorthEast.
+        assert!(layout.pre_light[40 * MAXDUNX + 9] < 15, "TORCHR at (40,9) lit");
+        // Failed rolls leave the tiles fully dark.
+        assert_eq!(layout.pre_light[10 * MAXDUNX + 10], 15, "failed flip(3) stays dark");
+        assert_eq!(layout.pre_light[29 * MAXDUNX + 10], 15, "failed flip(10) stays dark");
+        // A far-away untouched tile keeps the ambient default.
+        assert_eq!(layout.pre_light[80 * MAXDUNX + 80], 15);
+    }
+
+    /// A grid with no trigger micros consumes no RNG and bakes no lights.
+    #[test]
+    fn test_l2_grid_without_triggers_stays_dark() {
+        let mut layout = DungeonLayout::default();
+        for v in layout.d_piece.iter_mut() {
+            *v = 60;
+        }
+        add_l2_torch_lights(&mut layout, 12345);
         assert!(layout.pre_light.iter().all(|&v| v == 15));
     }
 
