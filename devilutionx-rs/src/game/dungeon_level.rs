@@ -105,6 +105,24 @@ pub fn build_dungeon_layout(gen: &CathedralGenerator, level: &DungeonLevelData) 
         yy += 2;
     }
 
+    // 3. Compute dTransVal (C++ `FloodTransparencyValues(13)`) so the renderer
+    //    can make doors/arches see-through. The generator's 40x40 logical Tile
+    //    grid is read with the same [x][y] indexing as the dPiece stamping
+    //    above; Tile::Floor == 13 matches the C++ floor id.
+    let mut tiles = [[0u8; DMAXY]; DMAXX];
+    for y in 0..DMAXY {
+        for x in 0..DMAXX {
+            tiles[x][y] = gen.dungeon[x][y] as u8;
+        }
+    }
+    let mut trans_val = [[0i8; MAXDUNY]; MAXDUNX];
+    crate::levels::gendung::flood_transparency_values(&tiles, Tile::Floor as u8, &mut trans_val);
+    for y in 0..MAXDUNY {
+        for x in 0..MAXDUNX {
+            layout.trans_val[y * MAXDUNX + x] = trans_val[x][y];
+        }
+    }
+
     layout
 }
 
@@ -257,4 +275,36 @@ mod tests {
         assert_eq!(layout.get(-1, 0), 0);
         assert_eq!(layout.get(MAXDUNX as i32, 0), 0);
     }
+    #[test]
+    fn test_generate_l1_populates_trans_val() {
+        use crate::engine::dungeon::{DungeonLevelData, DungeonType, MinData, PaletteData, SolData, TilData, TilEntry};
+        let mut til_tiles = Vec::new();
+        for i in 0..16u16 {
+            til_tiles.push(TilEntry { micro1: i, micro2: i + 1, micro3: i + 2, micro4: i + 3 });
+        }
+        let level = DungeonLevelData {
+            dungeon_type: DungeonType::Cathedral,
+            palette: PaletteData::default(),
+            sol: SolData { properties: vec![] },
+            min: MinData { mega_tiles: vec![], blocks_per_tile: 10 },
+            til: TilData { tiles: til_tiles },
+            level_cel: vec![],
+        };
+        let layout = generate_l1_cathedral(12345, &level);
+
+        // FloodTransparencyValues(13) assigns a TransVal to every connected
+        // floor region, so a Cathedral with at least one room must contain
+        // non-zero trans_val entries (the floor + surrounding walls).
+        let nonzero = layout.trans_val.iter().filter(|&&v| v != 0).count();
+        assert!(nonzero > 0, "expected flood-filled trans_val entries, got {}", nonzero);
+        // The max TransVal equals the number of distinct floor regions.
+        let max_val = layout.trans_val.iter().max().copied().unwrap_or(0);
+        assert!(max_val >= 1, "TransVal starts at 1");
+        // Every collected floor tile must belong to a region (non-zero).
+        for &(x, y) in layout.floor_tiles.iter().take(64) {
+            assert_ne!(layout.trans_val[(y as usize) * MAXDUNX + x as usize], 0, "floor tile ({},{}) has a TransVal", x, y);
+        }
+    }
+
+
 }

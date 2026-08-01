@@ -385,6 +385,11 @@ pub struct DungeonLayout {
     pub d_piece: Vec<u16>,
     pub width: usize,
     pub height: usize,
+    /// Per-micro-tile transparency value (C++ dTransVal). 0 = opaque; a
+    /// non-zero value identifies the connected floor region the tile belongs
+    /// to. Populated by `flood_transparency_values` during generation; the
+    /// renderer looks it up through the per-frame `TransList`.
+    pub trans_val: Vec<i8>,
     /// Micro-tile coordinates of walkable *floor* tiles inside the active
     /// dungeon region, populated by `generate_l1_cathedral`. Used by monster
     /// spawning to pick valid, open spawn positions away from walls. Each entry
@@ -400,6 +405,7 @@ impl Default for DungeonLayout {
             d_piece: vec![0; MAXDUNX * MAXDUNY],
             width: MAXDUNX,
             height: MAXDUNY,
+            trans_val: vec![0; MAXDUNX * MAXDUNY],
             floor_tiles: Vec::new(),
         }
     }

@@ -4198,6 +4198,7 @@ mod tests {
             d_piece: vec![1u16; 112 * 112],
             width: 112,
             height: 112,
+            trans_val: vec![0; 112 * 112],
             floor_tiles: Vec::new(),
         };
 

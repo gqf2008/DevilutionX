@@ -446,6 +446,197 @@ impl Default for TilePropertyManager {
 // Tests
 // ============================================================================
 
+
+// ---------------------------------------------------------------------------
+// Transparency values (C++ dTransVal / DRLG_InitTrans + FloodTransparencyValues)
+// ---------------------------------------------------------------------------
+
+/// C++ `IsFloor()` (gendung.cpp:249). Maps a micro-tile coordinate to the
+/// 40x40 logical tile and tests it against `floor_id`.
+#[inline]
+pub fn is_floor(tiles: &[[u8; DMAXY]; DMAXX], p: Point, floor_id: u8) -> bool {
+    let i = (p.x - 16) / 2;
+    let j = (p.y - 16) / 2;
+    if i < 0 || i >= DMAXX as i32 {
+        return false;
+    }
+    if j < 0 || j >= DMAXY as i32 {
+        return false;
+    }
+    tiles[i as usize][j as usize] == floor_id
+}
+
+/// All eight C++ `Direction`s as (dx, dy).
+const ALL_DIRECTIONS: [(i32, i32); 8] = [
+    (0, -1),  // North
+    (0, 1),   // South
+    (1, 0),   // East
+    (-1, 0),  // West
+    (1, -1),  // NorthEast
+    (-1, -1), // NorthWest
+    (1, 1),   // SouthEast
+    (-1, 1),  // SouthWest
+];
+
+/// C++ `FillTransparencyValues()` (gendung.cpp:262). Marks the floor tile and
+/// every surrounding non-floor tile (walls, doors) with the given `TransVal`.
+fn fill_transparency_values(
+    tiles: &[[u8; DMAXY]; DMAXX],
+    trans_val: &mut [[i8; MAXDUNY]; MAXDUNX],
+    floor: Point,
+    floor_id: u8,
+    value: i8,
+) {
+    for (dx, dy) in ALL_DIRECTIONS {
+        let adjacent = Point::new(floor.x + dx, floor.y + dy);
+        if adjacent.x < 0 || adjacent.y < 0 || adjacent.x >= MAXDUNX as i32 || adjacent.y >= MAXDUNY as i32 {
+            continue;
+        }
+        if !is_floor(tiles, adjacent, floor_id) {
+            trans_val[adjacent.x as usize][adjacent.y as usize] = value;
+        }
+    }
+    trans_val[floor.x as usize][floor.y as usize] = value;
+}
+
+/// C++ `FindTransparencyValues()` (gendung.cpp:286) — the span-filling flood
+/// fill. Assigns `value` to the whole connected floor region reachable from
+/// `seed` plus the surrounding non-floor tiles.
+fn find_transparency_values(
+    tiles: &[[u8; DMAXY]; DMAXX],
+    trans_val: &mut [[i8; MAXDUNY]; MAXDUNX],
+    seed: Point,
+    floor_id: u8,
+    value: i8,
+) {
+    #[derive(Clone, Copy)]
+    struct Seed {
+        scan_start: i32,
+        scan_end: i32,
+        y: i32,
+        dy: i32,
+    }
+
+    let is_inside = |trans_val: &[[i8; MAXDUNY]; MAXDUNX], x: i32, y: i32| -> bool {
+        if x < 0 || y < 0 || x >= MAXDUNX as i32 || y >= MAXDUNY as i32 {
+            return false;
+        }
+        if trans_val[x as usize][y as usize] != 0 {
+            return false;
+        }
+        is_floor(tiles, Point::new(x, y), floor_id)
+    };
+
+    let mut seed_stack: Vec<Seed> = Vec::new();
+    seed_stack.push(Seed { scan_start: seed.x, scan_end: seed.x + 1, y: seed.y, dy: 1 });
+
+    fn check_diagonals(
+        tiles: &[[u8; DMAXY]; DMAXX],
+        trans_val: &[[i8; MAXDUNY]; MAXDUNX],
+        floor_id: u8,
+        p: Point,
+        direction: (i32, i32),
+        seed_stack: &mut Vec<Seed>,
+    ) {
+        let up = Point::new(p.x, p.y - 1);
+        let up_over = Point::new(up.x + direction.0, up.y + direction.1);
+        if !is_floor(tiles, Point::new(up.x, up.y), floor_id)
+            || trans_val[up.x as usize][up.y as usize] != 0
+        {
+            if is_floor(tiles, Point::new(up_over.x, up_over.y), floor_id)
+                && trans_val[up_over.x as usize][up_over.y as usize] == 0
+            {
+                seed_stack.push(Seed { scan_start: up_over.x, scan_end: up_over.x + 1, y: up_over.y, dy: -1 });
+            }
+        }
+        let down = Point::new(p.x, p.y + 1);
+        let down_over = Point::new(down.x + direction.0, down.y + direction.1);
+        if !is_floor(tiles, Point::new(down.x, down.y), floor_id)
+            || trans_val[down.x as usize][down.y as usize] != 0
+        {
+            if is_floor(tiles, Point::new(down_over.x, down_over.y), floor_id)
+                && trans_val[down_over.x as usize][down_over.y as usize] == 0
+            {
+                seed_stack.push(Seed { scan_start: down_over.x, scan_end: down_over.x + 1, y: down_over.y, dy: 1 });
+            }
+        }
+    }
+
+    while let Some(seed) = seed_stack.pop() {
+        let mut scan_start = seed.scan_start;
+        let y = seed.y;
+        let dy = seed.dy;
+
+        let mut scan_left = scan_start;
+        if is_inside(trans_val, scan_left, y) {
+            while is_inside(trans_val, scan_left - 1, y) {
+                fill_transparency_values(tiles, trans_val, Point::new(scan_left - 1, y), floor_id, value);
+                scan_left -= 1;
+            }
+            check_diagonals(tiles, trans_val, floor_id, Point::new(scan_left, y), (-1, 0), &mut seed_stack);
+        }
+        if scan_left < scan_start {
+            seed_stack.push(Seed { scan_start: scan_left, scan_end: scan_start - 1, y: y - dy, dy: -dy });
+        }
+
+        let mut scan_right = scan_start;
+        while scan_right < seed.scan_end {
+            while is_inside(trans_val, scan_right, y) {
+                fill_transparency_values(tiles, trans_val, Point::new(scan_right, y), floor_id, value);
+                scan_right += 1;
+            }
+            seed_stack.push(Seed { scan_start: scan_left, scan_end: scan_right - 1, y: y + dy, dy });
+            if scan_right - 1 > seed.scan_end {
+                seed_stack.push(Seed { scan_start: seed.scan_end + 1, scan_end: scan_right - 1, y: y - dy, dy: -dy });
+            }
+            if scan_left < scan_right {
+                check_diagonals(tiles, trans_val, floor_id, Point::new(scan_right - 1, y), (1, 0), &mut seed_stack);
+            }
+            while scan_right < seed.scan_end && !is_inside(trans_val, scan_right, y) {
+                scan_right += 1;
+            }
+            scan_left = scan_right;
+            if scan_left < seed.scan_end {
+                check_diagonals(tiles, trans_val, floor_id, Point::new(scan_left, y), (-1, 0), &mut seed_stack);
+            }
+        }
+    }
+}
+
+/// C++ `FloodTransparencyValues(floorID)` (gendung.cpp:820). Walks the 40x40
+/// logical grid; every connected floor region whose top-left micro tile is
+/// unmarked gets a fresh `TransVal` via the span fill. After the call,
+/// `trans_val` holds, for each floor region and its surrounding walls/doors,
+/// the region's `TransVal` — the value the renderer consults through
+/// `TransList` to decide per-tile transparency.
+pub fn flood_transparency_values(
+    tiles: &[[u8; DMAXY]; DMAXX],
+    floor_id: u8,
+    trans_val: &mut [[i8; MAXDUNY]; MAXDUNX],
+) {
+    let mut trans_val_counter: i8 = 1;
+    let mut yy = 16i32;
+    for _j in 0..DMAXY {
+        let mut xx = 16i32;
+        for _i in 0..DMAXX {
+            if trans_val[xx as usize][yy as usize] == 0 && is_floor(tiles, Point::new(xx, yy), floor_id) {
+                find_transparency_values(tiles, trans_val, Point::new(xx, yy), floor_id, trans_val_counter);
+                trans_val_counter += 1;
+            }
+            xx += 2;
+        }
+        yy += 2;
+    }
+}
+
+impl Dungeon {
+    /// Wrapper over [`flood_transparency_values`] for the common case where the
+    /// logical tiles live in this `Dungeon`.
+    pub fn flood_transparency_values(&mut self, floor_id: u8) {
+        flood_transparency_values(&self.tiles, floor_id, &mut self.trans_val);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -635,6 +826,52 @@ mod tests {
         cathedral.reset();
         assert_eq!(cathedral.light[10][10], 15);
         assert_eq!(cathedral.trans_val[10][10], 0);
+    }
+
+
+    #[test]
+    fn test_flood_transparency_values_single_region() {
+        // 2x2 logical floor room at (20,20)-(21,21) inside a dirt dungeon.
+        let mut dungeon = Dungeon::new();
+        dungeon.level_type = DungeonType::Cathedral;
+        for y in 20..22 {
+            for x in 20..22 {
+                dungeon.tiles[x][y] = 13; // C++/Rust L1 Floor == 13
+            }
+        }
+        dungeon.flood_transparency_values(13);
+
+        // The top-left micro tile of the room (16 + 20*2, 16 + 20*2) = (56, 56)
+        // and its floor neighbours share one non-zero TransVal.
+        let v = dungeon.trans_val[56][56];
+        assert_ne!(v, 0, "room floor gets a TransVal");
+        assert_eq!(dungeon.trans_val[58][56], v, "connected floor shares TransVal");
+        assert_eq!(dungeon.trans_val[56][58], v);
+        assert_eq!(dungeon.trans_val[58][58], v);
+
+        // A wall tile immediately north of the room inherits the same TransVal
+        // (C++ FillTransparencyValues marks surrounding non-floor tiles).
+        assert_eq!(dungeon.trans_val[56][55], v, "wall above room inherits TransVal");
+        assert_eq!(dungeon.trans_val[55][55], v, "diagonal wall inherits TransVal");
+
+        // A far-away wall (outside the region) stays 0.
+        assert_eq!(dungeon.trans_val[80][80], 0);
+    }
+
+    #[test]
+    fn test_flood_transparency_values_two_regions_get_distinct_values() {
+        let mut dungeon = Dungeon::new();
+        dungeon.level_type = DungeonType::Cathedral;
+        // Two disconnected 1x1 floor rooms.
+        dungeon.tiles[10][10] = 13;
+        dungeon.tiles[25][25] = 13;
+        dungeon.flood_transparency_values(13);
+
+        let v1 = dungeon.trans_val[16 + 10 * 2][16 + 10 * 2];
+        let v2 = dungeon.trans_val[16 + 25 * 2][16 + 25 * 2];
+        assert_ne!(v1, 0);
+        assert_ne!(v2, 0);
+        assert_ne!(v1, v2, "disconnected regions get distinct TransVals");
     }
 
 
