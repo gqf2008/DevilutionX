@@ -402,8 +402,7 @@ impl CavesGenerator {
         // diverges after the L3ISLE draws).
         if level >= 9 && level <= 12 {
             self.pool_fix(dungeon);
-
-            // TODO: Warp (town warp special handling)
+            self.warp(dungeon);
 
             // Place L3 Isle minisets (C++ order, after PoolFix/Warp)
             self.place_miniset_random(dungeon, &miniset_l3_isle1(), 70);
@@ -414,7 +413,8 @@ impl CavesGenerator {
             self.place_miniset_random(dungeon, &miniset_l3_isle2(), 100);
             self.place_miniset_random(dungeon, &miniset_l3_isle5(), 90);
 
-            // TODO: HallOfHeroes; C++ calls River() after it.
+            self.hall_of_heroes(dungeon);
+            // C++ calls River() after HallOfHeroes.
             self.river(dungeon);
 
             // TODO: DRLG_PlaceThemeRooms(5, 10, 7, 0, false) + Fence()
@@ -461,6 +461,76 @@ impl CavesGenerator {
     fn init_dungeon_flags(&mut self) {
         self.predungeon = [[0; MAXDUNY]; MAXDUNX];
         self.lockout_count = 0;
+    }
+
+    /// C++ `Warp()` (drlg_l3.cpp): turns the 2x2 town-warp block (tile 125)
+    /// into the warp graphic (156/155/153/154) and normalizes diagonal
+    /// wall-5 cells against wall-7. No RNG draws.
+    fn warp(&mut self, dungeon: &mut Dungeon) {
+        for j in 0..DMAXY {
+            for i in 0..DMAXX {
+                if i + 1 < DMAXX
+                    && j + 1 < DMAXY
+                    && dungeon.tiles[i][j] == 125
+                    && dungeon.tiles[i + 1][j] == 125
+                    && dungeon.tiles[i][j + 1] == 125
+                    && dungeon.tiles[i + 1][j + 1] == 125
+                {
+                    dungeon.tiles[i][j] = 156;
+                    dungeon.tiles[i + 1][j] = 155;
+                    dungeon.tiles[i][j + 1] = 153;
+                    dungeon.tiles[i + 1][j + 1] = 154;
+                    return;
+                }
+                if i + 1 < DMAXX
+                    && j + 1 < DMAXY
+                    && dungeon.tiles[i][j] == 5
+                    && dungeon.tiles[i + 1][j + 1] == 7
+                {
+                    dungeon.tiles[i][j] = 7;
+                }
+            }
+        }
+    }
+
+    /// C++ `HallOfHeroes()` (drlg_l3.cpp): removes isolated diagonal wall-5
+    /// cells against wall-7 / wall-12 corners. No RNG draws.
+    fn hall_of_heroes(&mut self, dungeon: &mut Dungeon) {
+        for j in 0..DMAXY {
+            for i in 0..DMAXX {
+                if i + 1 < DMAXX
+                    && j + 1 < DMAXY
+                    && dungeon.tiles[i][j] == 5
+                    && dungeon.tiles[i + 1][j + 1] == 7
+                {
+                    dungeon.tiles[i][j] = 7;
+                }
+            }
+        }
+        for j in 0..DMAXY {
+            for i in 0..DMAXX {
+                if i + 1 < DMAXX
+                    && j + 1 < DMAXY
+                    && dungeon.tiles[i][j] == 5
+                    && dungeon.tiles[i + 1][j + 1] == 12
+                    && dungeon.tiles[i + 1][j] == 7
+                {
+                    dungeon.tiles[i][j] = 7;
+                    dungeon.tiles[i][j + 1] = 7;
+                    dungeon.tiles[i + 1][j + 1] = 7;
+                }
+                if i + 1 < DMAXX
+                    && j + 1 < DMAXY
+                    && dungeon.tiles[i][j] == 5
+                    && dungeon.tiles[i + 1][j + 1] == 12
+                    && dungeon.tiles[i][j + 1] == 7
+                {
+                    dungeon.tiles[i][j] = 7;
+                    dungeon.tiles[i + 1][j] = 7;
+                    dungeon.tiles[i + 1][j + 1] = 7;
+                }
+            }
+        }
     }
 
     /// Fill a rectangular room with floor tiles
