@@ -117,28 +117,43 @@ pub fn stamp_dungeon_layout(
     layout
 }
 
-/// C++ `PlaceCaveLights()` (drlg_l3.cpp): every lava dPiece tile (MIN mega
-/// index ranges 55-146, 153-160 and 149/151) casts a radius-7 light, which the
-/// C++ engine snapshots into dPreLight. L1/L2/L4 have no baked static lights.
+/// Bake per-level static lights into `dPreLight`, mirroring the C++ engine's
+/// `PlaceCaveLights()` (drlg_l3.cpp:2150) and the object lights placed by
+/// `AddL1Objs` (objects.cpp:3756) + `AddObjectLight` (objects.cpp:1247).
+///
+/// * Caves: every lava dPiece tile (MIN mega index ranges 55-146, 153-160 and
+///   149/151) casts a radius-7 light.
+/// * Cathedral: dPiece 269 (lava) gets `OBJ_L1LIGHT` in C++, a radius-5 light.
+///
+/// L2/L4 static lights come from placed torches/braziers (object placement),
+/// which the Rust object subsystem does not place during generation yet.
 fn apply_static_lights(level: &DungeonLevelData, layout: &mut DungeonLayout) {
-    if level.dungeon_type != crate::engine::dungeon::DungeonType::Caves {
-        return;
-    }
+    let is_lava = |piece: u16| -> bool {
+        (55..=146).contains(&piece) || (153..=160).contains(&piece) || piece == 149 || piece == 151
+    };
     let mut lm = crate::engine::lighting::LightManager::new();
     for y in 0..MAXDUNY {
         for x in 0..MAXDUNX {
-            let piece = layout.d_piece[y * MAXDUNX + x] as i32;
-            let is_lava = (55..=146).contains(&piece)
-                || (153..=160).contains(&piece)
-                || piece == 149
-                || piece == 151;
-            if is_lava {
-                lm.do_lighting(
-                    &mut layout.pre_light,
-                    MAXDUNX,
-                    crate::engine::lighting::Point::new(x as i32, y as i32),
-                    7,
-                );
+            let piece = layout.d_piece[y * MAXDUNX + x];
+            match level.dungeon_type {
+                crate::engine::dungeon::DungeonType::Caves if is_lava(piece) => {
+                    lm.do_lighting(
+                        &mut layout.pre_light,
+                        MAXDUNX,
+                        crate::engine::lighting::Point::new(x as i32, y as i32),
+                        7,
+                    );
+                }
+                crate::engine::dungeon::DungeonType::Cathedral if piece == 269 => {
+                    // C++ AddL1Objs → OBJ_L1LIGHT → AddObjectLight radius 5.
+                    lm.do_lighting(
+                        &mut layout.pre_light,
+                        MAXDUNX,
+                        crate::engine::lighting::Point::new(x as i32, y as i32),
+                        5,
+                    );
+                }
+                _ => {}
             }
         }
     }
@@ -700,6 +715,41 @@ mod tests {
         // PlaceCaveLights (radius 7): dPreLight drops below the ambient 15.
         let lit = layout.pre_light[56 * MAXDUNX + 56];
         assert!(lit < 15, "lava tile pre_light {} should be < 15", lit);
+        // A far-away tile keeps the fully-dark dungeon default.
+        assert_eq!(layout.pre_light[80 * MAXDUNX + 80], 15);
+    }
+
+    /// Cathedral lava (dPiece 269) gets OBJ_L1LIGHT in C++
+    /// (AddL1Objs objects.cpp:3756 + AddObjectLight radius 5); the Rust must
+    /// bake the same glow into dPreLight.
+    #[test]
+    fn test_cathedral_layout_bakes_lava_pre_light() {
+        use crate::engine::dungeon::{DungeonLevelData, DungeonType, MinData, PaletteData, SolData, TilData, TilEntry};
+        use crate::levels::gendung::Dungeon;
+
+        // Logical tile 255 maps to TIL[254], whose micros are dPiece 269 (lava).
+        let mut til_tiles = Vec::new();
+        for _ in 0..300u16 {
+            til_tiles.push(TilEntry { micro1: 1, micro2: 2, micro3: 3, micro4: 4 });
+        }
+        til_tiles[254] = TilEntry { micro1: 269, micro2: 269, micro3: 269, micro4: 269 };
+        let level = DungeonLevelData {
+            dungeon_type: DungeonType::Cathedral,
+            palette: PaletteData::default(),
+            sol: SolData { properties: vec![] },
+            min: MinData { mega_tiles: vec![], blocks_per_tile: 10 },
+            til: TilData { tiles: til_tiles },
+            level_cel: vec![],
+        };
+
+        let mut dungeon = Dungeon::new();
+        dungeon.level_type = crate::levels::types::DungeonType::Cathedral;
+        dungeon.tiles[20][20] = 255; // logical tile -> TIL[254] -> lava micros 269
+        let layout = stamp_dungeon_layout(&dungeon, &level, DUNGEON_BG_TIL_INDEX[1]);
+
+        // The lava micro tile at (56, 56) is lit by the radius-5 OBJ_L1LIGHT.
+        let lit = layout.pre_light[56 * MAXDUNX + 56];
+        assert!(lit < 15, "L1 lava tile pre_light {} should be < 15", lit);
         // A far-away tile keeps the fully-dark dungeon default.
         assert_eq!(layout.pre_light[80 * MAXDUNX + 80], 15);
     }
