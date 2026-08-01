@@ -618,6 +618,29 @@ pub const NUM_INV_LOC: usize = 7;
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// Class base/max attributes + combat data must match the upstream
+    /// `classes/<class>/attributes.tsv` rows (baseStr/baseMag/baseDex/baseVit,
+    /// maxStr/maxMag/maxDex/maxVit, blockBonus, baseMelee/Ranged/MagicToHit).
+    #[test]
+    fn test_class_attributes_match_tsv() {
+        // Warrior: 30/10/20/25, max 250/50/60/100, block 30, melee 70, ranged 60, magic 50.
+        let w = get_class_attributes(HeroClass::Warrior);
+        assert_eq!((w.base_str, w.base_mag, w.base_dex, w.base_vit), (30, 10, 20, 25));
+        assert_eq!((w.max_str, w.max_mag, w.max_dex, w.max_vit), (250, 50, 60, 100));
+        let wc = get_player_combat_data(HeroClass::Warrior);
+        assert_eq!((wc.base_to_block, wc.base_melee_to_hit, wc.base_ranged_to_hit, wc.base_magic_to_hit), (30, 70, 60, 50));
+        // Barbarian: 40/0/20/25, max 255/0/55/150, block 30, melee/ranged/magic 50.
+        let b = get_class_attributes(HeroClass::Barbarian);
+        assert_eq!((b.base_str, b.base_mag, b.base_dex, b.base_vit), (40, 0, 20, 25));
+        assert_eq!((b.max_str, b.max_mag, b.max_dex, b.max_vit), (255, 0, 55, 150));
+        // Rogue: 20/15/30/20, max 55/70/250/80, block 20, melee 50, ranged 70, magic 50.
+        let r = get_class_attributes(HeroClass::Rogue);
+        assert_eq!((r.base_str, r.base_mag, r.base_dex, r.base_vit), (20, 15, 30, 20));
+        assert_eq!((r.max_str, r.max_mag, r.max_dex, r.max_vit), (55, 70, 250, 80));
+        let rc = get_player_combat_data(HeroClass::Rogue);
+        assert_eq!((rc.base_to_block, rc.base_melee_to_hit, rc.base_ranged_to_hit, rc.base_magic_to_hit), (20, 50, 70, 50));
+    }
+
 
     #[test]
     fn test_fixed6_encoding() {
