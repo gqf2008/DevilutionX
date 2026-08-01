@@ -1,0 +1,45 @@
+name: Rust Alignment
+
+# Continuous alignment regression for the devilutionx-rs port:
+# every push/PR on the port branch runs the full Rust test suite (which
+# includes the fixture generation-fidelity tests, the real-C++-save codec
+# interop tests, and the town<->L1..L4 stair-flow E2E test) plus the
+# standalone C++ repro cross-checks that compile current Source/ code.
+
+on:
+  push:
+    branches: [devilutionx-rs]
+  pull_request:
+
+jobs:
+  cargo-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Run full Rust test suite (fixture fidelity + save interop + level flow)
+        working-directory: devilutionx-rs
+        run: cargo test
+      - name: Report fixture alignment rates
+        working-directory: devilutionx-rs
+        run: cargo test --test dun_fixture_alignment -- --nocapture 2>&1 | grep dun_fixture
+
+  cpp-repros:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install C++ toolchain
+        run: sudo apt-get update && sudo apt-get install -y g++
+      - name: Build L4 standalone repro (current Source/levels/drlg_l4.cpp)
+        run: |
+          g++ -std=c++20 -O2 -I devilutionx-rs/tools/l4repro/stubs \
+              -I devilutionx-rs/tools/l3repro/stubs -I devilutionx-rs/tools/l2repro/stubs \
+              -I Source -I 3rdParty/tl \
+              devilutionx-rs/tools/l4repro/main.cpp devilutionx-rs/tools/l4repro/drlg_l4.cpp \
+              Source/engine/random.cpp -o l4repro
+          ./l4repro 717625719 14 0 0 0 0 > /tmp/l4_grid.txt
+          wc -l /tmp/l4_grid.txt
+      - name: Build L1 transparency cross-check
+        run: |
+          g++ -std=c++20 -O2 devilutionx-rs/tools/l1trans_repro/main.cpp -o l1trans_repro
+          echo "l1trans_repro built"
