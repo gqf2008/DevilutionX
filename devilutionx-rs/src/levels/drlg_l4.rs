@@ -251,6 +251,10 @@ pub struct Dungeon4Generator {
     /// Quest setpiece room rectangle (for quest room protection)
     /// C++ equivalent: SetPieceRoom
     set_piece_room: SetPieceRect,
+
+    /// Theme room rectangles (x, y, width, height) placed by DRLG_PlaceThemeRooms
+    /// C++ equivalent: THEME_LOC themeLoc[MAXTHEMES] / themeCount
+    theme_locations: Vec<(usize, usize, usize, usize)>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -279,6 +283,7 @@ impl Dungeon4Generator {
             l4_hold: (0, 0),
             trans_val_counter: 1,
             set_piece_room: SetPieceRect::default(),
+            theme_locations: Vec::new(),
         }
     }
 
@@ -493,8 +498,8 @@ impl Dungeon4Generator {
                     if dungeon.tiles[i - 1][j + yy] == 6 {
                         dungeon.tiles[i - 1][j + yy] = 54;
                     }
-                    if dungeon.tiles[i - 1][j + yy + 1] == 6 {
-                        dungeon.tiles[i - 1][j + yy + 1] = 55;
+                    if dungeon.tiles[i - 1][j + yy - 1] == 6 {
+                        dungeon.tiles[i - 1][j + yy - 1] = 55;
                     }
                 }
             }
@@ -1604,200 +1609,159 @@ fn fix_tiles_patterns(&mut self, dungeon: &mut Dungeon) {
         self.load_dun_file(quad4_file, dungeon, quad4_x, quad4_y);
     }
 
-    /// Check if location is suitable for theme room
-    ///
-    /// Validates 3x3 floor area surrounded by walls
-    /// C++ equivalent: CheckThemeRoom (themes.cpp:550-578)
-    ///
-    /// # Arguments
-    /// * `dungeon` - Dungeon instance
-    /// * `x` - Top-left X position
-    /// * `y` - Top-left Y position
-    ///
-    /// # Returns
-    /// `true` if valid theme room location
-    fn check_theme_room(&self, dungeon: &Dungeon, x: i32, y: i32) -> bool {
-        // Bounds check
-        if x < 1 || y < 1 || x >= (DMAXX as i32) - 4 || y >= (DMAXY as i32) - 4 {
-            return false;
-        }
-
-        // Check 3x3 area is all floor tiles (tile 6)
-        for yy in y..(y + 3) {
-            for xx in x..(x + 3) {
-                if dungeon.tiles[xx as usize][yy as usize] != 6 {
-                    return false;
-                }
+    /// Check if a position is near an already-placed theme room.
+    /// C++ equivalent: IsNearThemeRoom (gendung.cpp)
+    fn is_near_theme_room(&self, tx: usize, ty: usize) -> bool {
+        for &(x, y, w, h) in &self.theme_locations {
+            let rx = x as isize - 2;
+            let ry = y as isize - 2;
+            let rw = w as isize + 5;
+            let rh = h as isize + 5;
+            if (tx as isize) >= rx
+                && (tx as isize) < rx + rw
+                && (ty as isize) >= ry
+                && (ty as isize) < ry + rh
+            {
+                return true;
             }
         }
-
-        // Check if surrounded by walls (tiles 1 or 2)
-        // Left wall
-        for yy in (y - 1)..(y + 4) {
-            let tile = dungeon.tiles[(x - 1) as usize][yy as usize];
-            if tile != 1 && tile != 2 {
-                return false;
-            }
-        }
-
-        // Right wall
-        for yy in (y - 1)..(y + 4) {
-            let tile = dungeon.tiles[(x + 3) as usize][yy as usize];
-            if tile != 1 && tile != 2 {
-                return false;
-            }
-        }
-
-        // Top wall
-        for xx in (x - 1)..(x + 4) {
-            let tile = dungeon.tiles[xx as usize][(y - 1) as usize];
-            if tile != 1 && tile != 2 {
-                return false;
-            }
-        }
-
-        // Bottom wall
-        for xx in (x - 1)..(x + 4) {
-            let tile = dungeon.tiles[xx as usize][(y + 3) as usize];
-            if tile != 1 && tile != 2 {
-                return false;
-            }
-        }
-
-        true
+        false
     }
 
-    /// Place theme rooms in dungeon (L4 levels 13-15 only)
-    ///
-    /// Scans for valid 3x3 floor areas and randomly selects
-    /// some for theme room placement.
-    ///
-    /// C++ equivalent: DRLG_PlaceThemeRooms (themes.cpp:580-620)
-    ///
-    /// # Arguments
-    /// * `dungeon` - Dungeon instance
-    /// * `floor_tile` - Floor tile ID to search for (6 for L4)
-    /// * `freq` - Frequency (1/freq chance per location)
-    fn place_theme_rooms(&mut self, dungeon: &mut Dungeon, floor_tile: u8, freq: u32) {
-        const MAX_THEMES: usize = 50;
-        let mut theme_locations: Vec<(i32, i32)> = Vec::with_capacity(MAX_THEMES);
-
-        // Scan for potential theme room locations
-        for j in 1..(DMAXY - 1) {
-            for i in 1..(DMAXX - 1) {
-                // Check if floor tile
-                if dungeon.tiles[i][j] == floor_tile {
-                    // Check if valid theme room location
-                    if self.check_theme_room(dungeon, i as i32, j as i32) {
-                        theme_locations.push((i as i32, j as i32));
-
-                        if theme_locations.len() >= MAX_THEMES {
-                            break;
-                        }
+    /// Find the largest available rectangle of `floor` tiles.
+    /// C++ equivalent: GetSizeForThemeRoom (gendung.cpp:118-160)
+    fn get_size_for_theme_room(
+        &self,
+        dungeon: &Dungeon,
+        floor: u8,
+        ox: usize,
+        oy: usize,
+        min_size: usize,
+        max_size: usize,
+    ) -> Option<(usize, usize)> {
+        if ox + max_size > DMAXX && oy + max_size > DMAXY {
+            return None; // C++ broken bounds check (avoids lower-right corner)
+        }
+        if self.is_near_theme_room(ox, oy) {
+            return None;
+        }
+        let max_width = max_size.min(DMAXX - ox);
+        let max_height = max_size.min(DMAXY - oy);
+        let mut room_w = max_width;
+        let mut room_h = max_height;
+        for i in 0..max_size {
+            let mut width = if i < room_h { i } else { 0 };
+            if i < max_height {
+                while width < room_w {
+                    if dungeon.tiles[ox + width][oy + i] != floor {
+                        break;
                     }
+                    width += 1;
                 }
             }
-
-            if theme_locations.len() >= MAX_THEMES {
+            let mut height = if i < room_w { i } else { 0 };
+            if i < max_width {
+                while height < room_h {
+                    if dungeon.tiles[ox + i][oy + height] != floor {
+                        break;
+                    }
+                    height += 1;
+                }
+            }
+            if width < min_size || height < min_size {
+                if i < min_size {
+                    return None;
+                }
                 break;
             }
+            room_w = room_w.min(width);
+            room_h = room_h.min(height);
         }
-
-        // Randomly select and create theme rooms
-        for (x, y) in theme_locations.iter() {
-            // 1/freq chance to create theme room
-            if self.random_range(0, freq as usize) == 0 {
-                // Select random theme type (0-7 for L4)
-                let theme_type = ThemeType::random(self.random_range(0, 8) as u32);
-
-                // Create theme room content (Day 86)
-                self.create_theme_content(dungeon, *x, *y, theme_type);
-            }
-        }
+        Some((room_w - 2, room_h - 2))
     }
 
-    /// Create theme room content based on type
-    /// C++ equivalent: CreateThemeRooms (themes.cpp:914-978)
-    ///
-    /// # Arguments
-    /// * `dungeon` - Dungeon instance
-    /// * `x` - Top-left X coordinate
-    /// * `y` - Top-left Y coordinate
-    /// * `theme_type` - Type of theme room
-    fn create_theme_content(&mut self, dungeon: &mut Dungeon, x: i32, y: i32, theme_type: ThemeType) {
-        match theme_type {
-            ThemeType::Barrel => self.theme_barrel(dungeon, x, y),
-            ThemeType::Shrine => self.theme_shrine(dungeon, x, y),
-            ThemeType::MonsterPit => self.theme_monster_pit(dungeon, x, y),
-            // TODO: Day 87 - SkeletonRoom, Treasure, Library, Torture, BloodFountain
-            _ => {}
-        }
-    }
-
-    /// Theme: Barrel room with random barrel placement
-    /// C++ equivalent: Theme_Barrel (themes.cpp:378-395)
-    ///
-    /// Places barrels randomly in 3x3 room with 1/8 chance per tile
-    fn theme_barrel(&mut self, dungeon: &mut Dungeon, x: i32, y: i32) {
-        const BARREL_CHANCE: usize = 8; // L4 Hell: barrnd[3] = 8
-
-        for dy in 0..3 {
-            for dx in 0..3 {
-                let px = (x + dx) as usize;
-                let py = (y + dy) as usize;
-
-                // 1/8 chance to place barrel
-                if dungeon.tiles[px][py] == 6 && self.random_range(0, BARREL_CHANCE) == 0 {
-                    // TODO: Day 87 - AddObject(OBJ_BARREL or OBJ_BARRELEX)
-                    // For now, just mark as valid (keep floor tile)
+    /// Draw the theme room frame (walls + door).
+    /// C++ equivalent: CreateThemeRoom (gendung.cpp:161-248, DTYPE_HELL branch)
+    fn create_theme_room(&mut self, dungeon: &mut Dungeon, idx: usize) {
+        let (lx, ly, w, h) = self.theme_locations[idx];
+        let hx = lx + w;
+        let hy = ly + h;
+        for yy in ly..hy {
+            for xx in lx..hx {
+                if yy == ly || yy == hy - 1 {
+                    dungeon.tiles[xx][yy] = 2;
+                } else if xx == lx || xx == hx - 1 {
+                    dungeon.tiles[xx][yy] = 1;
+                } else {
+                    dungeon.tiles[xx][yy] = 6;
                 }
             }
         }
-    }
-
-    /// Theme: Shrine with candles
-    /// C++ equivalent: Theme_Shrine (themes.cpp:400-417)
-    ///
-    /// Places shrine at center with 2 candles (horizontal or vertical)
-    fn theme_shrine(&mut self, dungeon: &mut Dungeon, x: i32, y: i32) {
-        let center_x = (x + 1) as usize;
-        let center_y = (y + 1) as usize;
-
-        // Random orientation: 0 = horizontal, 1 = vertical
-        let _orientation = self.random_range(0, 2);
-
-        // TODO: Day 87 - AddObject(OBJ_CANDLE2, OBJ_SHRINER/L)
-        // Mark center as valid shrine location
-        if dungeon.tiles[center_x][center_y] == 6 {
-            // Keep floor tile for shrine
+        dungeon.tiles[lx][ly] = 9;
+        dungeon.tiles[hx - 1][ly] = 16;
+        dungeon.tiles[lx][hy - 1] = 15;
+        dungeon.tiles[hx - 1][hy - 1] = 12;
+        if self.flip_coin() {
+            let yy = (ly + hy) / 2;
+            dungeon.tiles[hx - 1][yy - 1] = 53;
+            dungeon.tiles[hx - 1][yy] = 6;
+            dungeon.tiles[hx - 1][yy + 1] = 52;
+            dungeon.tiles[hx - 2][yy - 1] = 54;
+        } else {
+            let xx = (lx + hx) / 2;
+            dungeon.tiles[xx - 1][hy - 1] = 57;
+            dungeon.tiles[xx][hy - 1] = 6;
+            dungeon.tiles[xx + 1][hy - 1] = 56;
+            dungeon.tiles[xx][hy - 2] = 59;
+            dungeon.tiles[xx - 1][hy - 2] = 58;
         }
     }
 
-    /// Theme: Monster pit with treasure item
-    /// C++ equivalent: Theme_MonstPit (themes.cpp:423-450)
+    /// Place theme room frames (walls/doors only).
+    /// C++ equivalent: DRLG_PlaceThemeRooms (gendung.cpp:706-753)
     ///
-    /// Places random item in room, spawns monsters
-    fn theme_monster_pit(&mut self, dungeon: &mut Dungeon, x: i32, y: i32) {
-        // Find all floor tiles in 3x3 room
-        let mut positions = Vec::with_capacity(9);
-
-        for dy in 0..3 {
-            for dx in 0..3 {
-                let px = (x + dx) as usize;
-                let py = (y + dy) as usize;
-                if dungeon.tiles[px][py] == 6 {
-                    positions.push((px, py));
+    /// The theme *content* (InitThemes/CreateThemeRooms in themes.cpp) only
+    /// places objects/monsters — it writes no tiles and runs after
+    /// Substitution, so it does not affect the exported tile grid.
+    fn place_theme_rooms(
+        &mut self,
+        dungeon: &mut Dungeon,
+        min_size: usize,
+        max_size: usize,
+        floor: u8,
+        freq: usize,
+        rnd_size: bool,
+    ) {
+        self.theme_locations.clear();
+        for j in 0..DMAXY {
+            for i in 0..DMAXX {
+                if dungeon.tiles[i][j] != floor || !self.flip_coin_weighted(freq) {
+                    continue;
                 }
+                let Some((mut rw, mut rh)) =
+                    self.get_size_for_theme_room(dungeon, floor, i, j, min_size, max_size)
+                else {
+                    continue;
+                };
+                if rnd_size {
+                    let min = min_size - 2;
+                    let max = max_size - 2;
+                    let inner_w = self.random_range(0, rw - min + 1);
+                    rw = min + self.random_range(0, inner_w);
+                    if rw < min || rw > max {
+                        rw = min;
+                    }
+                    let inner_h = self.random_range(0, rh - min + 1);
+                    rh = min + self.random_range(0, inner_h);
+                    if rh < min || rh > max {
+                        rh = min;
+                    }
+                }
+                // C++: theme.room.position = { i, j } + Direction::South = {1,1}
+                self.theme_locations.push((i + 1, j + 1, rw, rh));
+                let idx = self.theme_locations.len() - 1;
+                self.create_theme_room(dungeon, idx);
             }
-        }
-
-        // Place item at random floor tile
-        if !positions.is_empty() {
-            let idx = self.random_range(0, positions.len());
-            let (_item_x, _item_y) = positions[idx];
-
-            // TODO: Day 87 - CreateRndItem(item_x, item_y)
-            // TODO: Day 87 - PlaceThemeMonsts(3-9 monsters)
         }
     }
 
@@ -2220,10 +2184,8 @@ fn fix_tiles_patterns(&mut self, dungeon: &mut Dungeon) {
 
         self.general_fix(dungeon);
         if level != 16 {
-            // C++ DRLG_PlaceThemeRooms(7, 10, 6, 8, true). The Rust theme-room
-            // port is approximate; exact GetSizeForThemeRoom/CreateThemeRoom
-            // are still to be aligned.
-            self.place_theme_rooms(dungeon, 6, 8);
+            // C++ DRLG_PlaceThemeRooms(7, 10, 6, 8, true)
+            self.place_theme_rooms(dungeon, 7, 10, 6, 8, true);
         }
         self.apply_shadows_patterns(dungeon);
         self.fix_corner_tiles(dungeon);
@@ -3170,317 +3132,79 @@ mod tests {
         assert_eq!(first_tile, 10);
     }
 
-    // ========== Day 85: Theme Rooms Tests ==========
+    // ========== Theme Room Tests (faithful C++ port) ==========
 
     #[test]
-    fn test_theme_type_random() {
-        // Test all 8 theme types
-        assert_eq!(ThemeType::random(0), ThemeType::Barrel);
-        assert_eq!(ThemeType::random(1), ThemeType::Shrine);
-        assert_eq!(ThemeType::random(2), ThemeType::MonsterPit);
-        assert_eq!(ThemeType::random(3), ThemeType::SkeletonRoom);
-        assert_eq!(ThemeType::random(4), ThemeType::Treasure);
-        assert_eq!(ThemeType::random(5), ThemeType::Library);
-        assert_eq!(ThemeType::random(6), ThemeType::Torture);
-        assert_eq!(ThemeType::random(7), ThemeType::BloodFountain);
-
-        // Test modulo wrapping
-        assert_eq!(ThemeType::random(8), ThemeType::Barrel);
-        assert_eq!(ThemeType::random(15), ThemeType::BloodFountain);
-    }
-
-    #[test]
-    fn test_check_theme_room_valid() {
+    fn test_get_size_for_theme_room() {
         let mut gen = Dungeon4Generator::new();
         let mut dungeon = Dungeon::new();
-
-        // Create valid 3x3 room at (5,5)
-        // Floor tiles
-        for i in 5..8 {
-            for j in 5..8 {
-                dungeon.tiles[i][j] = 6;
+        // 8x8 block of floor (tile 6) starting at (5,5)
+        for y in 5..13 {
+            for x in 5..13 {
+                dungeon.tiles[x][y] = 6;
             }
         }
-
-        // Walls around room
-        for i in 4..9 {
-            dungeon.tiles[i][4] = 1; // Top
-            dungeon.tiles[i][8] = 1; // Bottom
-        }
-        for j in 4..9 {
-            dungeon.tiles[4][j] = 1; // Left
-            dungeon.tiles[8][j] = 1; // Right
-        }
-
-        assert!(gen.check_theme_room(&dungeon, 5, 5));
+        let sz = gen.get_size_for_theme_room(&dungeon, 6, 5, 5, 7, 10);
+        assert!(sz.is_some(), "a large floor area must fit a theme room");
+        let (w, h) = sz.unwrap();
+        assert!(w >= 5 && h >= 5, "size {w}x{h} should be at least 5 (minSize-2)");
     }
 
     #[test]
-    fn test_check_theme_room_invalid_floor() {
-        let mut gen = Dungeon4Generator::new();
-        let mut dungeon = Dungeon::new();
-
-        // Create incomplete floor (one tile not floor)
-        for i in 5..8 {
-            for j in 5..8 {
-                dungeon.tiles[i][j] = 6;
-            }
-        }
-        dungeon.tiles[6][6] = 1; // Middle tile is wall
-
-        // Add walls
-        for i in 4..9 {
-            dungeon.tiles[i][4] = 1;
-            dungeon.tiles[i][8] = 1;
-        }
-        for j in 4..9 {
-            dungeon.tiles[4][j] = 1;
-            dungeon.tiles[8][j] = 1;
-        }
-
-        assert!(!gen.check_theme_room(&dungeon, 5, 5));
-    }
-
-    #[test]
-    fn test_check_theme_room_invalid_walls() {
-        let mut gen = Dungeon4Generator::new();
-        let mut dungeon = Dungeon::new();
-
-        // Create valid floor
-        for i in 5..8 {
-            for j in 5..8 {
-                dungeon.tiles[i][j] = 6;
-            }
-        }
-
-        // Missing left wall
-        for i in 4..9 {
-            dungeon.tiles[i][4] = 1; // Top
-            dungeon.tiles[i][8] = 1; // Bottom
-        }
-        for j in 4..9 {
-            dungeon.tiles[4][j] = 0; // Left - no wall!
-            dungeon.tiles[8][j] = 1; // Right
-        }
-
-        assert!(!gen.check_theme_room(&dungeon, 5, 5));
-    }
-
-    #[test]
-    fn test_check_theme_room_bounds() {
+    fn test_get_size_for_theme_room_too_small() {
         let mut gen = Dungeon4Generator::new();
         let dungeon = Dungeon::new();
-
-        // Test bounds: x < 1
-        assert!(!gen.check_theme_room(&dungeon, 0, 5));
-
-        // Test bounds: y < 1
-        assert!(!gen.check_theme_room(&dungeon, 5, 0));
-
-        // Test bounds: x >= DMAXX - 4
-        assert!(!gen.check_theme_room(&dungeon, DMAXX as i32 - 3, 5));
-
-        // Test bounds: y >= DMAXY - 4
-        assert!(!gen.check_theme_room(&dungeon, 5, DMAXY as i32 - 3));
+        // All rock: no floor
+        assert!(gen.get_size_for_theme_room(&dungeon, 6, 5, 5, 7, 10).is_none());
     }
 
     #[test]
-    fn test_place_theme_rooms() {
+    fn test_create_theme_room_frame() {
         let mut gen = Dungeon4Generator::new();
         let mut dungeon = Dungeon::new();
-
-        // Create 3 valid theme rooms
-        // Room 1 at (10, 10)
-        for i in 10..13 {
-            for j in 10..13 {
-                dungeon.tiles[i][j] = 6;
-            }
-        }
-        for i in 9..14 {
-            dungeon.tiles[i][9] = 1;
-            dungeon.tiles[i][13] = 1;
-        }
-        for j in 9..14 {
-            dungeon.tiles[9][j] = 1;
-            dungeon.tiles[13][j] = 1;
-        }
-
-        // Room 2 at (20, 20)
-        for i in 20..23 {
-            for j in 20..23 {
-                dungeon.tiles[i][j] = 6;
-            }
-        }
-        for i in 19..24 {
-            dungeon.tiles[i][19] = 1;
-            dungeon.tiles[i][23] = 1;
-        }
-        for j in 19..24 {
-            dungeon.tiles[19][j] = 1;
-            dungeon.tiles[23][j] = 1;
-        }
-
-        // Place theme rooms with low frequency (high chance)
-        gen.place_theme_rooms(&mut dungeon, 6, 1);
-
-        // With freq=1, all rooms should be selected (random_range(0,1) always returns 0)
-        // Verify function executes without panic
+        gen.theme_locations.push((10, 10, 5, 5));
+        gen.create_theme_room(&mut dungeon, 0);
+        // Frame corners
+        assert_eq!(dungeon.tiles[10][10], 9);
+        assert_eq!(dungeon.tiles[14][10], 16);
+        assert_eq!(dungeon.tiles[10][14], 15);
+        assert_eq!(dungeon.tiles[14][14], 12);
+        // Top/bottom rows are horizontal wall (2), left col vertical wall (1)
+        assert_eq!(dungeon.tiles[12][10], 2);
+        assert_eq!(dungeon.tiles[10][12], 1);
+        assert_eq!(dungeon.tiles[12][14], 2);
+        // Interior floor (6) — the right wall (14,12) may hold the door
+        assert_eq!(dungeon.tiles[11][11], 6);
+        assert_eq!(dungeon.tiles[12][12], 6);
+        // Either the FlipCoin() door on the right wall (53/6/52/54 around (14,12))
+        // or on the bottom wall (57/6/56/59/58 around (12,14)).
+        assert!(
+            matches!(
+                dungeon.tiles[14][12],
+                1 | 6 | 53 | 52 | 54
+            ),
+            "right wall cell (14,12) = {}",
+            dungeon.tiles[14][12]
+        );
     }
 
     #[test]
-    fn test_place_theme_rooms_no_locations() {
+    fn test_is_near_theme_room() {
         let mut gen = Dungeon4Generator::new();
-        let mut dungeon = Dungeon::new();
-
-        // Empty dungeon - no valid theme rooms
-        gen.place_theme_rooms(&mut dungeon, 6, 8);
-
-        // Should complete without error
+        gen.theme_locations.push((10, 10, 5, 5));
+        // Inside the padded rect (position - 2, size + 5)
+        assert!(gen.is_near_theme_room(10, 10));
+        assert!(gen.is_near_theme_room(8, 8));
+        // Far away
+        assert!(!gen.is_near_theme_room(20, 20));
     }
 
     #[test]
-    fn test_place_theme_rooms_level_16() {
+    fn test_place_theme_rooms_empty() {
         let mut gen = Dungeon4Generator::new();
         let mut dungeon = Dungeon::new();
-
-        // Create valid room
-        for i in 10..13 {
-            for j in 10..13 {
-                dungeon.tiles[i][j] = 6;
-            }
-        }
-        for i in 9..14 {
-            dungeon.tiles[i][9] = 1;
-            dungeon.tiles[i][13] = 1;
-        }
-        for j in 9..14 {
-            dungeon.tiles[9][j] = 1;
-            dungeon.tiles[13][j] = 1;
-        }
-
-        // In level 16, theme rooms should be skipped
-        // This test verifies the function works if called (even though generate_level skips it)
-        gen.place_theme_rooms(&mut dungeon, 6, 8);
-    }
-
-    // ========== Day 86: Theme Content Tests ==========
-
-    #[test]
-    fn test_create_theme_content_barrel() {
-        let mut gen = Dungeon4Generator::new();
-        let mut dungeon = Dungeon::new();
-
-        // Setup 3x3 floor
-        for i in 5..8 {
-            for j in 5..8 {
-                dungeon.tiles[i][j] = 6;
-            }
-        }
-
-        gen.create_theme_content(&mut dungeon, 5, 5, ThemeType::Barrel);
-
-        // Verify floor tiles remain (barrels don't change tiles)
-        for i in 5..8 {
-            for j in 5..8 {
-                assert_eq!(dungeon.tiles[i][j], 6);
-            }
-        }
-    }
-
-    #[test]
-    fn test_theme_barrel() {
-        let mut gen = Dungeon4Generator::new();
-        let mut dungeon = Dungeon::new();
-
-        for i in 10..13 {
-            for j in 10..13 {
-                dungeon.tiles[i][j] = 6;
-            }
-        }
-
-        gen.theme_barrel(&mut dungeon, 10, 10);
-
-        // Tiles should still be floor (6)
-        for i in 10..13 {
-            for j in 10..13 {
-                assert_eq!(dungeon.tiles[i][j], 6);
-            }
-        }
-    }
-
-    #[test]
-    fn test_theme_shrine() {
-        let mut gen = Dungeon4Generator::new();
-        let mut dungeon = Dungeon::new();
-
-        for i in 5..8 {
-            for j in 5..8 {
-                dungeon.tiles[i][j] = 6;
-            }
-        }
-
-        gen.theme_shrine(&mut dungeon, 5, 5);
-
-        // Center should remain floor
-        assert_eq!(dungeon.tiles[6][6], 6);
-    }
-
-    #[test]
-    fn test_theme_monster_pit() {
-        let mut gen = Dungeon4Generator::new();
-        let mut dungeon = Dungeon::new();
-
-        for i in 10..13 {
-            for j in 10..13 {
-                dungeon.tiles[i][j] = 6;
-            }
-        }
-
-        gen.theme_monster_pit(&mut dungeon, 10, 10);
-
-        // Should execute without panic
-        // Verify floor tiles remain
-        for i in 10..13 {
-            for j in 10..13 {
-                assert_eq!(dungeon.tiles[i][j], 6);
-            }
-        }
-    }
-
-    #[test]
-    fn test_place_theme_rooms_with_content() {
-        let mut gen = Dungeon4Generator::new();
-        let mut dungeon = Dungeon::new();
-
-        // Create multiple valid rooms
-        for room_offset in [10, 20, 30] {
-            for i in room_offset..(room_offset + 3) {
-                for j in 10..13 {
-                    dungeon.tiles[i][j] = 6;
-                }
-            }
-            // Add walls
-            for i in (room_offset - 1)..(room_offset + 4) {
-                dungeon.tiles[i][9] = 1;
-                dungeon.tiles[i][13] = 1;
-            }
-            for j in 9..14 {
-                dungeon.tiles[room_offset - 1][j] = 1;
-                dungeon.tiles[room_offset + 3][j] = 1;
-            }
-        }
-
-        // freq=1 means all rooms selected
-        gen.place_theme_rooms(&mut dungeon, 6, 1);
-
-        // Should complete without panic
-        // Verify floor tiles remain (stub implementation keeps tiles)
-        for room_offset in [10, 20, 30] {
-            for i in room_offset..(room_offset + 3) {
-                for j in 10..13 {
-                    assert_eq!(dungeon.tiles[i][j], 6);
-                }
-            }
-        }
+        gen.place_theme_rooms(&mut dungeon, 7, 10, 6, 8, true);
+        // All-rock dungeon: no floor, no theme rooms
+        assert!(gen.theme_locations.is_empty());
     }
 }
