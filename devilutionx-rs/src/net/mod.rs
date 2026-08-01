@@ -6,6 +6,8 @@ pub mod base_protocol;
 #[cfg(feature = "network")]
 pub mod frame_queue;
 #[cfg(feature = "network")]
+pub mod session;
+#[cfg(feature = "network")]
 pub mod storm;
 #[cfg(feature = "network")]
 pub mod tcp;
