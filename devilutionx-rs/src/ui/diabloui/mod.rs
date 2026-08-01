@@ -280,6 +280,45 @@ impl Difficulty {
     }
 }
 
+/// C++ `_mainmenu_selections` (DiabloUI/diabloui.h): the main-menu actions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(u8)]
+pub enum MainMenuAction {
+    #[default]
+    None = 0,
+    SinglePlayer = 1,
+    Multiplayer = 2,
+    ShowSupport = 3,
+    Settings = 4,
+    ShowCredits = 5,
+    ExitDiablo = 6,
+    AttractMode = 7,
+}
+
+/// One main-menu option (C++ `mainmenu.cpp` `vecMenuItems`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MainMenuOption {
+    pub label: &'static str,
+    pub action: MainMenuAction,
+}
+
+/// The main-menu options in display order, mirroring C++ `UiMainMenu`:
+/// Single Player, Multi Player, Settings, Support, Show Credits, Exit.
+pub const MAIN_MENU_OPTIONS: &[MainMenuOption] = &[
+    MainMenuOption { label: "Single Player", action: MainMenuAction::SinglePlayer },
+    MainMenuOption { label: "Multi Player", action: MainMenuAction::Multiplayer },
+    MainMenuOption { label: "Settings", action: MainMenuAction::Settings },
+    MainMenuOption { label: "Support", action: MainMenuAction::ShowSupport },
+    MainMenuOption { label: "Show Credits", action: MainMenuAction::ShowCredits },
+    MainMenuOption { label: "Exit Diablo", action: MainMenuAction::ExitDiablo },
+];
+
+/// The action for a menu index (bounds-safe), `None` when out of range.
+pub fn main_menu_action(index: usize) -> Option<MainMenuAction> {
+    MAIN_MENU_OPTIONS.get(index).map(|o| o.action)
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -370,6 +409,24 @@ mod tests {
         let full = ClassAvailability::default();
         assert!(HeroClass::Rogue.is_selectable(&full));
         assert!(HeroClass::Barbarian.is_selectable(&full));
+    }
+
+
+    #[test]
+    fn test_main_menu_options_match_cpp() {
+        use super::{MainMenuAction, MAIN_MENU_OPTIONS, main_menu_action};
+        // Display order and actions mirror C++ UiMainMenu.
+        assert_eq!(MAIN_MENU_OPTIONS[0].action, MainMenuAction::SinglePlayer);
+        assert_eq!(MAIN_MENU_OPTIONS[1].action, MainMenuAction::Multiplayer);
+        assert_eq!(MAIN_MENU_OPTIONS[2].action, MainMenuAction::Settings);
+        assert_eq!(MAIN_MENU_OPTIONS[3].action, MainMenuAction::ShowSupport);
+        assert_eq!(MAIN_MENU_OPTIONS[4].action, MainMenuAction::ShowCredits);
+        assert_eq!(MAIN_MENU_OPTIONS[5].action, MainMenuAction::ExitDiablo);
+        assert_eq!(main_menu_action(0), Some(MainMenuAction::SinglePlayer));
+        assert_eq!(main_menu_action(99), None);
+        // Enum values match C++ _mainmenu_selections.
+        assert_eq!(MainMenuAction::SinglePlayer as u8, 1);
+        assert_eq!(MainMenuAction::ExitDiablo as u8, 6);
     }
 
 
