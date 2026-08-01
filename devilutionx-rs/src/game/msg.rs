@@ -18,146 +18,117 @@ pub const MAX_PLRS: usize = 4;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum CmdId {
-    /// 玩家站立
+    // Values 0-41 match the C++ `_cmd_id` enum (msg.h) exactly.
     Stand = 0,
-    /// 移动到位置
     WalkXY = 1,
-    /// 确认接收玩家信息
     AckPlrInfo = 2,
-    /// 增加力量
     AddStr = 3,
-    /// 增加魔法
     AddMag = 4,
-    /// 增加敏捷
     AddDex = 5,
-    /// 增加体力
     AddVit = 6,
-    /// 拾取物品到手
     GetItem = 7,
-    /// 拾取物品到背包
     AGetItem = 8,
-    /// 放下物品
     PutItem = 9,
-    /// 生成物品
     SpawnItem = 10,
-    /// 攻击位置
     AttackXY = 11,
-    /// 远程攻击位置
     RAttackXY = 12,
-    /// 施法到位置
     SpellXY = 13,
-    /// 操作对象
     OpObjXY = 14,
-    /// 解除陷阱
     DisarmXY = 15,
-    /// 攻击怪物
     AttackId = 16,
-    /// 攻击玩家
     AttackPid = 17,
-    /// 远程攻击怪物
     RAttackId = 18,
-    /// 远程攻击玩家
     RAttackPid = 19,
-    /// 施法到怪物
     SpellId = 20,
-    /// 施法到玩家
     SpellPid = 21,
-    /// 复活玩家
     Resurrect = 22,
-    /// 心灵传动操作对象
     OpObjT = 23,
-    /// 击退怪物
     Knockback = 24,
-    /// 与NPC交谈
     TalkXY = 25,
-    /// 进入新关卡
     NewLvl = 26,
-    /// 进入传送门
     Warp = 27,
-    /// 作弊：获取经验
     CheatExperience = 28,
-    /// 改变法术等级
     ChangeSpellLevel = 29,
-    /// 调试命令
     Debug = 30,
-    /// 同步数据
     SyncData = 31,
-    /// 怪物死亡
     MonstDeath = 32,
-    /// 怪物受伤
     MonstDamage = 33,
-    /// 玩家死亡
     PlrDead = 34,
-    /// 请求拾取物品
     RequestGItem = 35,
-    /// 请求拾取物品到背包
     RequestAGItem = 36,
-    /// 前往拾取物品
     GotoGetItem = 37,
-    /// 前往拾取物品到背包
     GotoAGetItem = 38,
-    /// 开门
     OpenDoor = 39,
-    /// 关门
     CloseDoor = 40,
-    /// 操作对象
     OperateObj = 41,
-    /// 玩家操作
-    PlrOp = 42,
-    /// 断开连接
-    Disconnect = 43,
-    /// 发送玩家信息
-    SendPlrInfo = 44,
-    /// 设置玩家属性
-    SetPlrAttr = 45,
-    /// 开始游戏
-    StartGame = 46,
-    /// 加入游戏
-    JoinGame = 47,
-    /// 离开游戏
-    LeaveGame = 48,
-    /// 聊天消息
-    Chat = 49,
-    /// 暂停游戏
-    Pause = 50,
-    /// 同步请求
-    SyncReq = 51,
-    /// 丢弃物品
-    DropItem = 52,
-    /// 使用物品
-    UseItem = 53,
-    /// 装备物品
-    EquipItem = 54,
-    /// 卸下物品
-    UnequipItem = 55,
-    /// 购买物品
-    BuyItem = 56,
-    /// 出售物品
-    SellItem = 57,
-    /// 修理物品
-    RepairItem = 58,
-    /// 鉴定物品
-    IdentifyItem = 59,
-    /// 充能物品
-    RechargeItem = 60,
-    /// 设置任务状态
-    SetQuest = 61,
-    /// 同步任务
-    SyncQuest = 62,
-    /// 激活传送门
-    ActivatePortal = 63,
-    /// 关闭传送门
-    DeactivatePortal = 64,
-    /// Ping
-    Ping = 65,
-    /// Pong
-    Pong = 66,
+    // Values 42-80: C++ `_cmd_id` (previously misnumbered in Rust).
+    BreakObj = 42,
+    ChangePlrItems = 43,
+    DelPlrItems = 44,
+    ChangeInvItems = 45,
+    DelInvItems = 46,
+    ChangeBeltItems = 47,
+    DelBeltItems = 48,
+    PlrDamage = 49,
+    PlrLevel = 50,
+    DropItem = 51,
+    PlayerJoinLevel = 52,
+    SendPlrInfo = 53,
+    SAttackXY = 54,
+    ActivatePortal = 55,
+    DeactivatePortal = 56,
+    DLevel = 57,
+    DLevelJunk = 58,
+    DLevelEnd = 59,
+    HealOther = 60,
+    String = 61,
+    FriendlyMode = 62,
+    SetStr = 63,
+    SetMag = 64,
+    SetDex = 65,
+    SetVit = 66,
+    Retown = 67,
+    SpellXYD = 68,
+    ItemExtra = 69,
+    SyncPutItem = 70,
+    SyncQuest = 71,
+    RequestSpawnGolem = 72,
+    SetShield = 73,
+    RemShield = 74,
+    SetReflect = 75,
+    Nakrul = 76,
+    OpenHive = 77,
+    OpenGrave = 78,
+    SpawnMonster = 79,
+    Invalid = 80,
+    // Values 81+: Rust-port-only commands (no C++ `_cmd_id` counterpart;
+    // NOT wire compatible with the original game).
+    PlrOp = 81,
+    Disconnect = 82,
+    SetPlrAttr = 83,
+    StartGame = 84,
+    JoinGame = 85,
+    LeaveGame = 86,
+    Chat = 87,
+    Pause = 88,
+    SyncReq = 89,
+    UseItem = 90,
+    EquipItem = 91,
+    UnequipItem = 92,
+    BuyItem = 93,
+    SellItem = 94,
+    RepairItem = 95,
+    IdentifyItem = 96,
+    RechargeItem = 97,
+    SetQuest = 98,
+    Ping = 99,
+    Pong = 100,
 }
 
 impl CmdId {
     /// 从 u8 转换
     pub fn from_u8(value: u8) -> Option<Self> {
-        if value <= 66 {
+        if value <= 100 {
             Some(unsafe { std::mem::transmute(value) })
         } else {
             None
@@ -2185,6 +2156,28 @@ mod tests {
         assert_eq!(data[0], 61);
         assert_eq!(&data[1..3], b"hi");
         assert_eq!(data[3], 0);
+    }
+
+
+    #[test]
+    fn test_cmd_id_values_match_cpp() {
+        use super::CmdId;
+        // The first 42 values are shared and must equal C++ `_cmd_id` (msg.h).
+        assert_eq!(CmdId::Stand as u8, 0);
+        assert_eq!(CmdId::WalkXY as u8, 1);
+        assert_eq!(CmdId::AckPlrInfo as u8, 2);
+        assert_eq!(CmdId::OperateObj as u8, 41);
+        // Renumbered C++ values (previously misaligned in Rust).
+        assert_eq!(CmdId::BreakObj as u8, 42);
+        assert_eq!(CmdId::DropItem as u8, 51);
+        assert_eq!(CmdId::SendPlrInfo as u8, 53);
+        assert_eq!(CmdId::ActivatePortal as u8, 55);
+        assert_eq!(CmdId::String as u8, 61);
+        assert_eq!(CmdId::SyncQuest as u8, 71);
+        assert_eq!(CmdId::Invalid as u8, 80);
+        // Rust-port-only commands live above the C++ range.
+        assert_eq!(CmdId::Chat as u8, 87);
+        assert_eq!(CmdId::Pong as u8, 100);
     }
 
 
