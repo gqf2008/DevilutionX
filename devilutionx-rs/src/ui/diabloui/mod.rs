@@ -188,6 +188,56 @@ impl HeroClass {
         let names = Self::DEFAULT_NAMES[self as usize % Self::COUNT];
         names[index % names.len()]
     }
+
+    /// C++ `InitClassList`: whether the class appears in the hero-class
+    /// selection list (Monk requires Hellfire; Bard/Barbarian require their
+    /// assets or the test flags).
+    pub fn is_listed(self, avail: &ClassAvailability) -> bool {
+        match self {
+            Self::Monk => avail.is_hellfire,
+            Self::Bard => avail.has_bard_assets || avail.test_bard,
+            Self::Barbarian => avail.has_barbarian_assets || avail.test_barbarian,
+            _ => true,
+        }
+    }
+
+    /// C++ `SelheroClassSelectorSelect`: whether the class can be selected in
+    /// the shareware build (Rogue/Sorcerer need the full retail game; Bard
+    /// additionally needs its assets).
+    pub fn is_selectable(self, avail: &ClassAvailability) -> bool {
+        if avail.is_spawn {
+            match self {
+                Self::Rogue | Self::Sorcerer => return false,
+                Self::Bard => return avail.has_bard_assets,
+                _ => {}
+            }
+        }
+        true
+    }
+}
+
+/// C++ class-availability state (gbIsSpawn, gbIsHellfire, asset flags).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClassAvailability {
+    pub is_spawn: bool,
+    pub is_hellfire: bool,
+    pub has_bard_assets: bool,
+    pub has_barbarian_assets: bool,
+    pub test_bard: bool,
+    pub test_barbarian: bool,
+}
+
+impl Default for ClassAvailability {
+    fn default() -> Self {
+        Self {
+            is_spawn: false,
+            is_hellfire: false,
+            has_bard_assets: false,
+            has_barbarian_assets: false,
+            test_bard: false,
+            test_barbarian: false,
+        }
+    }
 }
 
 /// Game difficulty levels
@@ -280,6 +330,46 @@ mod tests {
         // Index wraps modulo 10.
         assert_eq!(HeroClass::Warrior.default_name(10), "Aidan");
         assert_eq!(HeroClass::Warrior.default_name(5), "Lenalas");
+    }
+
+
+    #[test]
+    fn test_class_listing_rules() {
+        use super::{ClassAvailability, HeroClass};
+        let base = ClassAvailability::default();
+        // Non-Hellfire, no assets: only the three base classes listed.
+        for class in [HeroClass::Warrior, HeroClass::Rogue, HeroClass::Sorcerer] {
+            assert!(class.is_listed(&base));
+        }
+        assert!(!HeroClass::Monk.is_listed(&base), "Monk needs Hellfire");
+        assert!(!HeroClass::Bard.is_listed(&base), "Bard needs assets");
+        assert!(!HeroClass::Barbarian.is_listed(&base), "Barbarian needs assets");
+
+        // Hellfire enables Monk; test flags / assets enable Bard/Barbarian.
+        let hellfire = ClassAvailability { is_hellfire: true, ..base };
+        assert!(HeroClass::Monk.is_listed(&hellfire));
+        let test = ClassAvailability { test_bard: true, test_barbarian: true, ..base };
+        assert!(HeroClass::Bard.is_listed(&test));
+        assert!(HeroClass::Barbarian.is_listed(&test));
+    }
+
+    #[test]
+    fn test_class_selectability_in_shareware() {
+        use super::{ClassAvailability, HeroClass};
+        let spawn = ClassAvailability { is_spawn: true, ..Default::default() };
+        // Rogue/Sorcerer unavailable in shareware (full retail message).
+        assert!(!HeroClass::Rogue.is_selectable(&spawn));
+        assert!(!HeroClass::Sorcerer.is_selectable(&spawn));
+        // Warrior is fine.
+        assert!(HeroClass::Warrior.is_selectable(&spawn));
+        // Bard is selectable only with assets.
+        assert!(!HeroClass::Bard.is_selectable(&spawn));
+        let spawn_bard = ClassAvailability { is_spawn: true, has_bard_assets: true, ..Default::default() };
+        assert!(HeroClass::Bard.is_selectable(&spawn_bard));
+        // Outside shareware everything is selectable.
+        let full = ClassAvailability::default();
+        assert!(HeroClass::Rogue.is_selectable(&full));
+        assert!(HeroClass::Barbarian.is_selectable(&full));
     }
 
 
