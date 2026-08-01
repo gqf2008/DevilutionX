@@ -175,6 +175,15 @@ fn decodes_real_cpp_save_game_entry() {
         );
         assert!(header.active_monster_count >= 0, "{name} monster count sane");
         assert!(header.active_item_count >= 0, "{name} item count sane");
+        // Level-seed table (17 classic levels): town (level 0) is DTYPE_TOWN,
+        // level 1 is DTYPE_CATHEDRAL, per getHellfireLevelType.
+        let seeds = devilutionx_rs::game::loadsave::CppGameHeader::parse_level_seeds(&decoded, 17)
+            .expect("level seed table parses");
+        assert_eq!(seeds.len(), 17, "{name} classic game has 17 levels");
+        assert_eq!(seeds[0].1, 0, "{name} level 0 is DTYPE_TOWN (=0)");
+        assert_eq!(seeds[1].1, 1, "{name} level 1 is DTYPE_CATHEDRAL (=1)");
+        // The active level's seed must be non-zero (the generator reseeds it).
+        assert!(seeds[header.currlevel as usize].0 != 0, "{name} active level seed set");
         // A non-spawn password must fail the checksum (proves the password gate).
         let wrong = codec_decode(&raw, "xrgyrkj1");
         assert!(wrong.is_empty(), "wrong password must be rejected by checksum");

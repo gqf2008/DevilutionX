@@ -1691,6 +1691,25 @@ pub struct CppGameHeader {
 }
 
 impl CppGameHeader {
+    /// Parse the per-level `DungeonSeeds`/level-type table that immediately
+    /// follows the fixed header (C++ loadsave.cpp:2803-2806): for each of the
+    /// `level_count` levels, a BE u32 seed then a BE u32 `getHellfireLevelType`
+    /// value. Returns `None` if the entry is too short.
+    pub fn parse_level_seeds(decoded: &[u8], level_count: usize) -> Option<Vec<(u32, u32)>> {
+        let mut out = Vec::with_capacity(level_count);
+        let mut offset = 43usize;
+        for _ in 0..level_count {
+            if decoded.len() < offset + 8 {
+                return None;
+            }
+            let seed = u32::from_be_bytes([decoded[offset], decoded[offset + 1], decoded[offset + 2], decoded[offset + 3]]);
+            let ltype = u32::from_be_bytes([decoded[offset + 4], decoded[offset + 5], decoded[offset + 6], decoded[offset + 7]]);
+            out.push((seed, ltype));
+            offset += 8;
+        }
+        Some(out)
+    }
+
     /// Parse the fixed header from a decoded `game` entry (43 bytes).
     pub fn parse(decoded: &[u8]) -> Option<Self> {
         if decoded.len() < 43 {
