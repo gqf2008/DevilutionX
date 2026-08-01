@@ -9,7 +9,7 @@
 
 use crate::game::types::Point;  // Use game::types::Point to match Monster/Player
 use crate::game::monster_exact::{Monster, MonsterMode};
-use crate::game::player_exact::{Player, HeroClass};
+use crate::game::player_exact::{Player, HeroClass, PlayerMode};
 use rand::Rng;
 
 /// Helper function: Calculate Chebyshev distance (max(dx, dy))
@@ -92,6 +92,22 @@ pub fn monster_attack_player(
         return AttackResult::Miss; // C++ line 1199
     }
 
+    // 3b. Block roll (C++ monster.cpp:1191-1207): a standing/attacking player
+    // with a shield rolls; block chance = GetBlockChance() - 2*monster.level
+    // (dex + baseToBlock + 2*playerLevel - 2*monsterLevel), clamped 0-100.
+    let mut blk_roll = 100;
+    if matches!(player._p_mode, PlayerMode::Stand | PlayerMode::Attack) && player._p_block_flag {
+        blk_roll = rng.random_range(0..100);
+    }
+    let base_to_block = crate::game::player_dat::get_player_combat_data(to_dat_class(player._p_class))
+        .base_to_block as i32;
+    let mut blk = player._p_dexterity + base_to_block + player._p_level as i32 * 2 - monster.level as i32 * 2;
+    blk = blk.clamp(0, 100);
+    if blk_roll < blk {
+        player.set_mode(PlayerMode::Block); // C++ StartPlrBlock
+        return AttackResult::Block;
+    }
+
     // 4. Calculate damage (C++ line 1223-1224)
     let min_dam_64x = (monster.min_damage as i32) << 6;
     let max_dam_64x = (monster.max_damage as i32) << 6;
@@ -111,6 +127,19 @@ pub fn monster_attack_player(
     player.modify_hp(-final_damage);
 
     AttackResult::Hit { damage: final_damage }
+}
+
+/// Map the `player_exact::HeroClass` to the `player_dat::HeroClass` used by
+/// the per-class combat-data table (same variant order, distinct types).
+fn to_dat_class(class: HeroClass) -> crate::game::player_dat::HeroClass {
+    match class {
+        HeroClass::Warrior => crate::game::player_dat::HeroClass::Warrior,
+        HeroClass::Rogue => crate::game::player_dat::HeroClass::Rogue,
+        HeroClass::Sorcerer => crate::game::player_dat::HeroClass::Sorcerer,
+        HeroClass::Monk => crate::game::player_dat::HeroClass::Monk,
+        HeroClass::Bard => crate::game::player_dat::HeroClass::Bard,
+        HeroClass::Barbarian => crate::game::player_dat::HeroClass::Barbarian,
+    }
 }
 
 /// Calculate monster's chance to hit player — exact port of C++
@@ -241,15 +270,7 @@ pub fn player_attack_monster(
 /// - `CalculateArmorPierce(armor, isMelee=true)` (player.h:653, non-Hellfire):
 ///   the Barbarian melee branch subtracts armor/8; tmac is clamped to >= 0.
 fn calculate_player_to_hit(player: &Player, monster: &Monster) -> i32 {
-    let class = match player._p_class {
-        HeroClass::Warrior => crate::game::player_dat::HeroClass::Warrior,
-        HeroClass::Rogue => crate::game::player_dat::HeroClass::Rogue,
-        HeroClass::Sorcerer => crate::game::player_dat::HeroClass::Sorcerer,
-        HeroClass::Monk => crate::game::player_dat::HeroClass::Monk,
-        HeroClass::Bard => crate::game::player_dat::HeroClass::Bard,
-        HeroClass::Barbarian => crate::game::player_dat::HeroClass::Barbarian,
-    };
-    let combat_data = crate::game::player_dat::get_player_combat_data(class);
+    let combat_data = crate::game::player_dat::get_player_combat_data(to_dat_class(player._p_class));
     let mut hper = player._p_level as i32
         + player._p_dexterity / 2
         + player._p_i_bonus_to_hit
@@ -345,6 +366,40 @@ mod tests {
         strong._p_dexterity = 100;
         assert_eq!(calculate_monster_to_hit(&weak, &strong, 1), 15);
         assert_eq!(calculate_monster_to_hit(&weak, &strong, 16), 30);
+    }
+
+    /// C++ block roll (monster.cpp:1191-1207): a standing/attacking player
+    /// with a shield may block; block chance = dex + baseToBlock +
+    /// 2*playerLevel - 2*monsterLevel, clamped 0-100.
+    #[test]
+    fn test_monster_attack_player_block_roll_matches_cpp() {
+        let mut monster = Monster::new(1, MonsterType::Zombie, 10, 10, 0);
+        monster.level = 1;
+        monster.to_hit = 100; // hit roll always succeeds
+
+        let mut player = Player::new();
+        player._p_class = HeroClass::Warrior; // base_to_block 30
+        player._p_level = 1;
+        player._p_dexterity = 50;
+        player._p_block_flag = true;
+        player._p_mode = PlayerMode::Stand;
+        player._p_hit_points = 100 * 64;
+        player.position = Point::new(11, 10); // adjacent to the monster
+
+        // blk = 50 + 30 + 2 - 2 = 80 (clamped 0-100). Find a seed whose
+        // blk_roll (second roll) is < 80 so the player blocks.
+        let mut blocked = false;
+        for seed in 1..=200u64 {
+            let mut rng = StdRng::seed_from_u64(seed);
+            let result = monster_attack_player(&monster, &mut player, &mut rng, 1);
+            if result == AttackResult::Block {
+                blocked = true;
+                break;
+            }
+            player._p_hit_points = 100 * 64; // restore for next attempt
+            player._p_mode = PlayerMode::Stand;
+        }
+        assert!(blocked, "a blocking Warrior must block some hit rolls");
     }
 
     #[test]
