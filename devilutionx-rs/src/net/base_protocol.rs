@@ -15,6 +15,10 @@ pub struct BaseProtocol {
     transport: Loopback,
     /// Local player id (C++ `my_player_id`).
     pub player_id: u8,
+    /// C++ `isGameHost_`.
+    pub is_game_host: bool,
+    /// C++ `game_init_info` payload.
+    game_info: Vec<u8>,
 }
 
 impl Default for BaseProtocol {
@@ -28,7 +32,54 @@ impl BaseProtocol {
         Self {
             transport: Loopback::new(),
             player_id: PLR_SINGLE,
+            is_game_host: false,
+            game_info: Vec::new(),
         }
+    }
+
+    /// C++ `base_protocol::create(addrstr)` — host a game. The loopback
+    /// transport is always "online", so hosting succeeds immediately with the
+    /// local player as player 0.
+    pub fn create_game(&mut self, _addrstr: &str) -> i32 {
+        self.is_game_host = true;
+        self.player_id = self.transport.create();
+        self.player_id as i32
+    }
+
+    /// C++ `base_protocol::join(addrstr)` — the loopback transport ABORTs on
+    /// join (dvlnet/loopback.cpp); mirror that as an error return.
+    pub fn join_game(&mut self, _addrstr: &str) -> i32 {
+        -1
+    }
+
+    /// C++ `IsGameHost()`.
+    pub fn is_game_host(&self) -> bool {
+        self.is_game_host
+    }
+
+    /// C++ `SNetLeaveGame` — the loopback has no peers, so it always succeeds.
+    pub fn leave_game(&mut self, _reason: u32) -> bool {
+        true
+    }
+
+    /// C++ `SNetDropPlayer` — the loopback has no other players.
+    pub fn drop_player(&mut self, _player_id: u8, _reason: u32) -> bool {
+        true
+    }
+
+    /// C++ `setup_gameinfo(info)`.
+    pub fn set_game_info(&mut self, info: Vec<u8>) {
+        self.game_info = info;
+    }
+
+    /// C++ `game_init_info` (mirrors the stored payload).
+    pub fn game_info(&self) -> &[u8] {
+        &self.game_info
+    }
+
+    /// C++ `make_default_gamename()` (via the transport).
+    pub fn make_default_gamename(&self) -> String {
+        self.transport.make_default_gamename()
     }
 
     /// C++ `base_protocol::create()` — enters loopback mode as the single
@@ -113,5 +164,34 @@ mod tests {
         let (sender, data) = session.receive_message().expect("queued");
         assert_eq!(sender, PLR_SINGLE);
         assert_eq!(data, payload);
+    }
+
+    #[test]
+    fn test_create_game_hosts_immediately() {
+        let mut session = BaseProtocol::new();
+        assert!(!session.is_game_host());
+        let pid = session.create_game("loopback");
+        assert_eq!(pid, PLR_SINGLE as i32);
+        assert!(session.is_game_host());
+        assert!(session.is_loopback());
+        // Game info round-trips.
+        session.set_game_info(vec![1, 2, 3, 4]);
+        assert_eq!(session.game_info(), &[1, 2, 3, 4]);
+        assert_eq!(session.make_default_gamename(), "loopback");
+    }
+
+    #[test]
+    fn test_join_game_fails_on_loopback() {
+        let mut session = BaseProtocol::new();
+        assert_eq!(session.join_game("somewhere"), -1, "loopback cannot join");
+        assert!(!session.is_game_host());
+    }
+
+    #[test]
+    fn test_leave_and_drop_succeed_on_loopback() {
+        let mut session = BaseProtocol::new();
+        session.create_game("loopback");
+        assert!(session.leave_game(crate::net::packet::leave_info::LEAVE_EXIT));
+        assert!(session.drop_player(1, crate::net::packet::leave_info::LEAVE_DROP));
     }
 }
