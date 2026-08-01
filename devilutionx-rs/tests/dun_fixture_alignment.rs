@@ -8,8 +8,11 @@
 //! tile match rate — the objective's "持续对齐回归" gate for generation
 //! fidelity.
 //!
-//! Current fidelity (2026-08-01): L1 ~4.5%, L2 ~0-19%, L3 ~27%, L4 TBD —
-//! the generators are approximate reimplementations, not yet byte-exact.
+//! Current fidelity (2026-08-02): L1 ~4.5%, L2 ~0-19%, L3 ~27% (stale
+//! fixtures), L4 100% on current-HEAD fixtures (13-428074402, 13-594689775
+//! Warlord quest, 14-717625719, 14-815743776, 15-1256511996, 15-1583642716,
+//! 16-741281013). L4 aligns cell-for-cell with an independent C++ repro built
+//! from `Source/levels/drlg_l4.cpp` (see `devilutionx-rs/tools/l4repro/`).
 //! The harness asserts a non-zero sanity floor per level so a total
 //! regression (e.g. the L2 empty-grid bug) fails loudly, while the printed
 //! rates document the long-tail gap for future work.
@@ -95,6 +98,7 @@ fn generate_tiles(level: u8, seed: u32, quest_active: bool) -> [[u8; 40]; 40] {
         }
         _ => {
             let mut gen = Dungeon4Generator::new();
+            gen.warlord_quest_active = quest_active;
             let mut d = Dungeon::new();
             gen.generate(&mut d, seed, level, LevelEntry::Main);
             for y in 0..40 {
@@ -146,8 +150,9 @@ fn dun_fixture_generation_alignment() {
             let Some(gold) = parse_dun_tiles(&entry.path()) else { continue };
             let mut file_best = 0usize;
             let mut file_desc = String::new();
-            // Quest-gated levels: try both quest states (L2 5-8, L3 9-12).
-            let quest_states: &[bool] = if matches!(type_id, 2 | 3) {
+            // Quest-gated levels: try both quest states (L2 5-8, L3 9-12,
+            // L4 Warlord quest on level 13).
+            let quest_states: &[bool] = if matches!(type_id, 2 | 3 | 4) {
                 &[false, true]
             } else {
                 &[false]
@@ -157,7 +162,11 @@ fn dun_fixture_generation_alignment() {
                 let m = match_count(&gold, &tiles);
                 if m > file_best {
                     file_best = m;
-                    file_desc = format!("quest={quest}");
+                    file_desc = if type_id == 4 {
+                        format!("warlord={quest}")
+                    } else {
+                        format!("quest={quest}")
+                    };
                 }
             }
             eprintln!("[dun_fixture] L{} seed {}: {} match {}", level, seed, file_desc, file_best);
