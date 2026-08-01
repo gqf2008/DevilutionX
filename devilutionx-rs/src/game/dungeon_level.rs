@@ -288,6 +288,11 @@ pub fn build_dungeon_layout(gen: &CathedralGenerator, level: &DungeonLevelData) 
     }
     let mut trans_val = [[0i8; MAXDUNY]; MAXDUNX];
     crate::levels::gendung::flood_transparency_values(&tiles, Tile::Floor as u8, &mut trans_val);
+    // C++ GenerateLevel (drlg_l1.cpp): after the retry loop, copy the TransVal
+    // below each EntranceStairs tile into the stairs row, then run
+    // FixTransparency() to spread the region value over Dirt wall footprints.
+    crate::levels::drlg_l1::copy_stairs_transparency(&gen.dungeon, &mut trans_val);
+    crate::levels::drlg_l1::fix_transparency(&gen.dungeon, &mut trans_val);
     for y in 0..MAXDUNY {
         for x in 0..MAXDUNX {
             layout.trans_val[y * MAXDUNX + x] = trans_val[x][y];

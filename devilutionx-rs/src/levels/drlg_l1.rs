@@ -8,7 +8,7 @@
 //! Translation Date: 2024-XX-XX
 
 use crate::levels::gendung::Dungeon;
-use crate::levels::types::{DungeonType, ThemeLocation};
+use crate::levels::types::{DungeonType, ThemeLocation, DMAXX, DMAXY, MAXDUNX, MAXDUNY};
 use crate::utils::random::Rng;
 
 // ===================================================================
@@ -1937,6 +1937,71 @@ impl CathedralGenerator {
     }
 }
 
+// -------------------------------------------------------------------
+// Transparency helpers (C++ drlg_l1.cpp)
+// -------------------------------------------------------------------
+
+/// C++ `FixTransparency()` (drlg_l1.cpp:1031-1064): propagate the floor
+/// region's `TransVal` into the 2x2 micro-tile footprint of Dirt walls
+/// (DirtHwall/DirtVwall/ends/corners) so the renderer treats those walls as
+/// see-through over the floor.
+pub fn fix_transparency(
+    tiles: &[[Tile; DUNGEON_SIZE]; DUNGEON_SIZE],
+    trans_val: &mut [[i8; MAXDUNY]; MAXDUNX],
+) {
+    let mut yy = 16usize;
+    for j in 0..DMAXY {
+        let mut xx = 16usize;
+        for i in 0..DMAXX {
+            let t = tiles[i][j];
+            // BUGFIX: `j > 0` is checked after the tile test in C++; keep the
+            // same guarded semantics.
+            if t == Tile::DirtHwallEnd && j > 0 && tiles[i][j - 1] == Tile::DirtHwall {
+                trans_val[xx + 1][yy] = trans_val[xx][yy];
+                trans_val[xx + 1][yy + 1] = trans_val[xx][yy];
+            }
+            if t == Tile::DirtVwallEnd && i + 1 < DMAXY && tiles[i + 1][j] == Tile::DirtVwall {
+                trans_val[xx][yy + 1] = trans_val[xx][yy];
+                trans_val[xx + 1][yy + 1] = trans_val[xx][yy];
+            }
+            if t == Tile::DirtHwall {
+                trans_val[xx + 1][yy] = trans_val[xx][yy];
+                trans_val[xx + 1][yy + 1] = trans_val[xx][yy];
+            }
+            if t == Tile::DirtVwall {
+                trans_val[xx][yy + 1] = trans_val[xx][yy];
+                trans_val[xx + 1][yy + 1] = trans_val[xx][yy];
+            }
+            if t == Tile::VDirtCorner {
+                trans_val[xx + 1][yy] = trans_val[xx][yy];
+                trans_val[xx][yy + 1] = trans_val[xx][yy];
+                trans_val[xx + 1][yy + 1] = trans_val[xx][yy];
+            }
+            xx += 2;
+        }
+        yy += 2;
+    }
+}
+
+/// C++ drlg_l1.cpp:1202-1211 (`DRLG_CopyTrans(xx, yy + 1, xx, yy)` for every
+/// `EntranceStairs` tile): copy the TransVal from the micro-tile row below each
+/// stairs tile into the stairs row so the stairs render over the drop.
+pub fn copy_stairs_transparency(
+    tiles: &[[Tile; DUNGEON_SIZE]; DUNGEON_SIZE],
+    trans_val: &mut [[i8; MAXDUNY]; MAXDUNX],
+) {
+    for j in 0..DMAXY {
+        for i in 0..DMAXX {
+            if tiles[i][j] == Tile::EntranceStairs {
+                let xx = 2 * i + 16;
+                let yy = 2 * j + 16;
+                trans_val[xx][yy] = trans_val[xx][yy + 1];
+                trans_val[xx + 1][yy] = trans_val[xx + 1][yy + 1];
+            }
+        }
+    }
+}
+
 // ===================================================================
 // TESTS
 // ===================================================================
@@ -1944,6 +2009,91 @@ impl CathedralGenerator {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// C++ `FixTransparency` (drlg_l1.cpp:1031-1064): a flood-filled floor
+    /// region (value 7) adjacent to Dirt walls propagates its TransVal across
+    /// the wall's 2x2 micro footprint (right/bottom copies).
+    #[test]
+    fn test_fix_transparency_propagates_into_dirt_walls() {
+        let mut tiles = [[Tile::Dirt; DUNGEON_SIZE]; DUNGEON_SIZE];
+        let mut trans_val = [[0i8; MAXDUNY]; MAXDUNX];
+        // 2x2 floor region at logical (10,10)-(11,11), region id 7.
+        for y in 10..12 {
+            for x in 10..12 {
+                tiles[x][y] = Tile::Floor;
+                let xx = 2 * x + 16;
+                let yy = 2 * y + 16;
+                trans_val[xx][yy] = 7;
+                trans_val[xx + 1][yy] = 7;
+                trans_val[xx][yy + 1] = 7;
+                trans_val[xx + 1][yy + 1] = 7;
+            }
+        }
+        // Dirt walls on the floor region's east/south borders. The top-left
+        // micro of each wall is a diagonal/edge neighbour of a floor tile, so
+        // after the C++ flood fill it already carries the region id (simulate
+        // that here).
+        tiles[12][10] = Tile::DirtHwall; // east of (11,10)
+        tiles[12][11] = Tile::DirtHwallEnd; // east of (11,11)
+        tiles[10][12] = Tile::DirtVwallEnd; // south of (10,11)
+        tiles[11][12] = Tile::DirtVwall; // south of (11,11)
+        tiles[12][12] = Tile::VDirtCorner; // SE diagonal of (11,11)
+        // Wall micros adjacent to the floor inherit the region id (flood).
+        trans_val[2 * 12 + 16][2 * 10 + 16] = 7; // DirtHwall (12,10) top-left
+        trans_val[2 * 12 + 16][2 * 11 + 16] = 7; // DirtHwallEnd (12,11) top-left
+        trans_val[2 * 10 + 16][2 * 12 + 16] = 7; // DirtVwallEnd (10,12) top-left
+        trans_val[2 * 11 + 16][2 * 12 + 16] = 7; // DirtVwall (11,12) top-left
+        trans_val[2 * 12 + 16][2 * 12 + 16] = 7; // VDirtCorner (12,12) top-left
+
+        fix_transparency(&tiles, &mut trans_val);
+
+        // DirtHwall (12,10): copies (xx+1,yy) and (xx+1,yy+1) from (xx,yy).
+        let xx = 2 * 12 + 16;
+        let yy = 2 * 10 + 16;
+        assert_eq!(trans_val[xx + 1][yy], 7, "DirtHwall right micro");
+        assert_eq!(trans_val[xx + 1][yy + 1], 7, "DirtHwall bottom-right micro");
+        // DirtHwallEnd (12,11) with DirtHwall above at (12,10): same copies.
+        let xx = 2 * 12 + 16;
+        let yy = 2 * 11 + 16;
+        assert_eq!(trans_val[xx + 1][yy], 7, "DirtHwallEnd right micro");
+        assert_eq!(trans_val[xx + 1][yy + 1], 7, "DirtHwallEnd bottom-right micro");
+        // DirtVwallEnd (10,12) with DirtVwall at (10+1,12): copies (xx,yy+1),(xx+1,yy+1).
+        let xx = 2 * 10 + 16;
+        let yy = 2 * 12 + 16;
+        assert_eq!(trans_val[xx][yy + 1], 7, "DirtVwallEnd bottom micro");
+        assert_eq!(trans_val[xx + 1][yy + 1], 7, "DirtVwallEnd bottom-right micro");
+        // DirtVwall (11,12): copies (xx,yy+1) and (xx+1,yy+1).
+        let xx = 2 * 11 + 16;
+        let yy = 2 * 12 + 16;
+        assert_eq!(trans_val[xx][yy + 1], 7, "DirtVwall bottom micro");
+        assert_eq!(trans_val[xx + 1][yy + 1], 7, "DirtVwall bottom-right micro");
+        // VDirtCorner (12,12): copies all three neighbors from its top-left micro.
+        let xx = 2 * 12 + 16;
+        let yy = 2 * 12 + 16;
+        assert_eq!(trans_val[xx + 1][yy], 7, "VDirtCorner right micro");
+        assert_eq!(trans_val[xx][yy + 1], 7, "VDirtCorner bottom micro");
+        assert_eq!(trans_val[xx + 1][yy + 1], 7, "VDirtCorner bottom-right micro");
+    }
+
+    /// C++ drlg_l1.cpp:1202-1211: each EntranceStairs tile copies the TransVal
+    /// from the micro-tile row below into its own row.
+    #[test]
+    fn test_copy_stairs_transparency() {
+        let mut tiles = [[Tile::Dirt; DUNGEON_SIZE]; DUNGEON_SIZE];
+        let mut trans_val = [[0i8; MAXDUNY]; MAXDUNX];
+        tiles[20][20] = Tile::EntranceStairs;
+        // The bottom micro row of the stairs tile (yy+1) carries region id 5;
+        // C++ copies it up into the top row (yy).
+        let xx = 2 * 20 + 16;
+        let yy = 2 * 20 + 16;
+        trans_val[xx][yy + 1] = 5;
+        trans_val[xx + 1][yy + 1] = 5;
+
+        copy_stairs_transparency(&tiles, &mut trans_val);
+
+        assert_eq!(trans_val[xx][yy], 5, "stairs left micro inherits bottom row");
+        assert_eq!(trans_val[xx + 1][yy], 5, "stairs right micro inherits bottom row");
+    }
 
     #[test]
     fn test_tile_enum_values() {
