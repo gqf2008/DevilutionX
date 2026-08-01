@@ -301,15 +301,18 @@ int main(int argc, char **argv)
 {
 	using namespace devilution;
 	uint32_t seed = 68685319;
+	int level = 5;
 	int quest = 1;
 	if (argc > 1)
 		seed = (uint32_t)std::strtoul(argv[1], nullptr, 10);
 	if (argc > 2)
-		quest = std::atoi(argv[2]);
+		level = std::atoi(argv[2]);
+	if (argc > 3)
+		quest = std::atoi(argv[3]);
 
 	for (auto &o : LevelSeeds)
 		o = std::nullopt;
-	currlevel = 5;
+	currlevel = level;
 	leveltype = DTYPE_CATACOMBS;
 	for (auto &q : Quests) {
 		q._qactive = QUEST_NOTAVAIL;
@@ -319,20 +322,26 @@ int main(int argc, char **argv)
 	Quests[Q_BLOOD]._qidx = Q_BLOOD;
 	Quests[Q_BLOOD]._qlevel = 5;
 	Quests[Q_BLOOD]._qactive = quest ? QUEST_INIT : QUEST_NOTAVAIL;
+	Quests[Q_SCHAMB]._qidx = Q_SCHAMB;
+	Quests[Q_SCHAMB]._qlevel = 6;
+	Quests[Q_SCHAMB]._qactive = quest ? QUEST_INIT : QUEST_NOTAVAIL;
+	Quests[Q_BLIND]._qidx = Q_BLIND;
+	Quests[Q_BLIND]._qlevel = 7;
+	Quests[Q_BLIND]._qactive = quest ? QUEST_INIT : QUEST_NOTAVAIL;
 	SetPieceRoom = WorldTileRectangle(WorldTilePosition { 0, 0 }, WorldTileSize { 0, 0 });
 	SetPiece = WorldTileRectangle(WorldTilePosition { 0, 0 }, WorldTileSize { 0, 0 });
 
 	fprintf(stderr, "[stage] before CreateL2Dungeon\n");
 	CreateL2Dungeon(seed, ENTRY_MAIN);
 	fprintf(stderr, "[stage] after CreateL2Dungeon\n");
-	if (argc > 3 && std::string(argv[3]) == "th") {
+	if (argc > 4 && std::string(argv[4]) == "th") {
 		int n = DVL_debug_theme_count();
 		printf("themes=%d\n", n);
 		for (int i = 0; i < n; i++)
 			printf("%d %d %d %d\n", DVL_debug_theme_x(i), DVL_debug_theme_y(i), DVL_debug_theme_w(i), DVL_debug_theme_h(i));
 		return 0;
 	}
-	if (argc > 3) {
+	if (argc > 4 && std::string(argv[4]) == "pd") {
 		char (*pd)[DMAXX] = DVL_debug_predungeon();
 		for (int y = 0; y < DMAXY; y++) {
 			for (int x = 0; x < DMAXX; x++)

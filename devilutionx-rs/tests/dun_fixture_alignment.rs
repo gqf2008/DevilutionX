@@ -40,24 +40,26 @@ fn parse_dun_tiles(path: &PathBuf) -> Option<Vec<u16>> {
     Some(tiles)
 }
 
-/// Demo level 1..=4 -> (game currlevel, seed used for the fixture name).
-/// Rust demo levels map to game levels 1 / 5 / 9 / 13 (Cathedral /
-/// Catacombs / Caves / Hell).
-fn demo_to_currlevel(demo: u8) -> u8 {
-    match demo {
-        1 => 1,
-        2 => 5,
-        3 => 9,
-        _ => 13,
+/// Level type -> (first currlevel, generator dispatch). Cathedral 1-4,
+/// Catacombs 5-8, Caves 9-12, Hell 13-16 (GetLevelType in gendung.cpp).
+fn level_type_of(level: u8) -> u8 {
+    if level <= 4 {
+        1
+    } else if level <= 8 {
+        2
+    } else if level <= 12 {
+        3
+    } else {
+        4
     }
 }
 
-/// Generate the Rust logical tile grid for a demo level and seed.
-/// `quest_active` selects the L2 Q_BLOOD quest-room state (C++ only adds the
-/// 14x20 quest room when `Quests[Q_BLOOD]._qactive != QUEST_NOTAVAIL`).
-fn generate_tiles(demo: u8, seed: u32, quest_active: bool) -> [[u8; 40]; 40] {
+/// Generate the Rust logical tile grid for a fixture `(currlevel, seed)`.
+/// `quest_active` selects the quest-room state:
+/// - L2 (5-8): Q_BLOOD (level 5) room; L3 (9-12): Q_ANVIL (level 10) room.
+fn generate_tiles(level: u8, seed: u32, quest_active: bool) -> [[u8; 40]; 40] {
     let mut out = [[0u8; 40]; 40];
-    match demo {
+    match level_type_of(level) {
         1 => {
             let mut gen = CathedralGenerator::new();
             gen.generate(DungeonType::Cathedral, seed);
@@ -70,8 +72,10 @@ fn generate_tiles(demo: u8, seed: u32, quest_active: bool) -> [[u8; 40]; 40] {
         2 => {
             let mut gen = CatacombsGenerator::new();
             gen.blood_quest_active = quest_active;
+            gen.schamb_quest_active = quest_active;
+            gen.blind_quest_active = quest_active;
             let mut d = Dungeon::new();
-            gen.generate(&mut d, seed, 5);
+            gen.generate(&mut d, seed, level);
             for y in 0..40 {
                 for x in 0..40 {
                     out[x][y] = d.tiles[x][y];
@@ -80,8 +84,9 @@ fn generate_tiles(demo: u8, seed: u32, quest_active: bool) -> [[u8; 40]; 40] {
         }
         3 => {
             let mut gen = CavesGenerator::new();
+            gen.anvil_quest_active = quest_active;
             let mut d = Dungeon::new();
-            gen.generate(&mut d, seed, 9, LevelEntry::Main);
+            gen.generate(&mut d, seed, level, LevelEntry::Main);
             for y in 0..40 {
                 for x in 0..40 {
                     out[x][y] = d.tiles[x][y];
@@ -91,7 +96,7 @@ fn generate_tiles(demo: u8, seed: u32, quest_active: bool) -> [[u8; 40]; 40] {
         _ => {
             let mut gen = Dungeon4Generator::new();
             let mut d = Dungeon::new();
-            gen.generate(&mut d, seed, 13, LevelEntry::Main);
+            gen.generate(&mut d, seed, level, LevelEntry::Main);
             for y in 0..40 {
                 for x in 0..40 {
                     out[x][y] = d.tiles[x][y];
@@ -121,59 +126,56 @@ fn dun_fixture_generation_alignment() {
         return;
     };
     let mut all_passed = true;
-    for demo in 1..=4u8 {
-        let curr = demo_to_currlevel(demo);
+    // Group fixtures by level type; report the best per type and per file.
+    for type_id in 1..=4u8 {
         let mut best = 0usize;
-        let mut best_seed = 0u32;
-        let entries = match std::fs::read_dir(&dir) {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
-        for entry in entries.flatten() {
+        let mut best_desc = String::new();
+        for entry in std::fs::read_dir(&dir).unwrap().flatten() {
             let name = entry.file_name().to_string_lossy().into_owned();
-            if !name.starts_with(&format!("{curr}-")) || !name.ends_with(".dun") {
+            if !name.ends_with(".dun") || name.contains("-changed") {
                 continue;
             }
-            let seed_str = name
-                .trim_start_matches(&format!("{curr}-"))
-                .trim_end_matches(".dun");
-            let Ok(seed) = seed_str.parse::<u32>() else { continue };
+            let Some((level_s, seed_s)) = name.trim_end_matches(".dun").split_once('-') else {
+                continue;
+            };
+            let Ok(level) = level_s.parse::<u8>() else { continue };
+            if level_type_of(level) != type_id {
+                continue;
+            }
+            let Ok(seed) = seed_s.parse::<u32>() else { continue };
             let Some(gold) = parse_dun_tiles(&entry.path()) else { continue };
-            // L2 (Catacombs): try both Q_BLOOD quest-room states — the C++
-            // fixtures are generated with a fixed quest state per seed
-            // (drlg_l2_test.cpp sets Q_BLOOD NOTAVAIL/INIT).
-            let tiles_noquest = generate_tiles(demo, seed, false);
-            let m_noquest = match_count(&gold, &tiles_noquest);
-            let mut m = m_noquest;
-            let mut quest_used = false;
-            if demo == 2 {
-                let tiles_quest = generate_tiles(demo, seed, true);
-                let m_quest = match_count(&gold, &tiles_quest);
-                if m_quest > m {
-                    m = m_quest;
-                    quest_used = true;
+            let mut file_best = 0usize;
+            let mut file_desc = String::new();
+            // Quest-gated levels: try both quest states (L2 5-8, L3 9-12).
+            let quest_states: &[bool] = if matches!(type_id, 2 | 3) {
+                &[false, true]
+            } else {
+                &[false]
+            };
+            for &quest in quest_states {
+                let tiles = generate_tiles(level, seed, quest);
+                let m = match_count(&gold, &tiles);
+                if m > file_best {
+                    file_best = m;
+                    file_desc = format!("quest={quest}");
                 }
             }
-            if m > best {
-                best = m;
-                best_seed = seed;
-                eprintln!(
-                    "[dun_fixture] L{} seed {}: quest={} match {}",
-                    demo, seed, quest_used, m
-                );
+            eprintln!("[dun_fixture] L{} seed {}: {} match {}", level, seed, file_desc, file_best);
+            if file_best > best {
+                best = file_best;
+                best_desc = format!("{} (seed {}, {})", level, seed, file_desc);
             }
         }
         let pct = best as f64 / 16.0;
         eprintln!(
-            "[dun_fixture] demo L{} (game L{}): best tile match {}/1600 ({:.1}%) seed {}",
-            demo, curr, best, pct, best_seed
+            "[dun_fixture] level-type {}: best tile match {}/1600 ({:.1}%) {}",
+            type_id, best, pct, best_desc
         );
-        // Sanity floor: the harness must match *something* — a total
-        // regression (empty grid / wrong seed mapping) fails loudly.
         if best == 0 {
-            eprintln!("[dun_fixture] WARN: L{} has zero matching cells", demo);
+            eprintln!("[dun_fixture] WARN: level type {} has zero matching cells", type_id);
             all_passed = false;
         }
     }
-    assert!(all_passed, "every demo level must match at least one gold cell");
+    assert!(all_passed, "every level type must match at least one gold cell");
 }
+

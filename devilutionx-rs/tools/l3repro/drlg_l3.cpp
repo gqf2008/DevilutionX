@@ -1802,7 +1802,9 @@ void Fence()
 
 bool PlaceAnvil()
 {
+	fprintf(stderr, "[anvil] enter\n");
 	const std::unique_ptr<uint16_t[]> setPieceData = LoadFileInMem<uint16_t>("levels\\l3data\\anvil.dun");
+	fprintf(stderr, "[anvil] data=%p\n", (void *)setPieceData.get());
 	// growing the size by 2 to allow a 1 tile border on all sides
 	const WorldTileSize areaSize = GetDunSize(setPieceData.get()) + 2;
 	WorldTileCoord sx = GenerateRnd(DMAXX - areaSize.width);
@@ -1995,7 +1997,9 @@ void GenerateLevel(lvl_entry entry)
 	if (LevelSeeds[currlevel])
 		SetRndSeed(*LevelSeeds[currlevel]);
 
+	int dbgAttempt = 0;
 	while (true) {
+		fprintf(stderr, "[retry] attempt=%d start=%u\n", dbgAttempt++, GetLCGEngineState());
 		LevelSeeds[currlevel] = GetLCGEngineState();
 		InitDungeonFlags();
 		int x1 = GenerateRnd(20) + 10;
@@ -2014,6 +2018,7 @@ void GenerateLevel(lvl_entry entry)
 			y2 = y1 + 12;
 			FloorArea(x1, y1, x2, y2);
 		}
+		fprintf(stderr, "[retry] attempt=%d carved rng=%u\n", dbgAttempt - 1, GetLCGEngineState());
 		FillDiagonals();
 		FillSingles();
 		FillStraights();
@@ -2088,6 +2093,15 @@ void GenerateLevel(lvl_entry entry)
 		PlaceMiniSetRandom1x1(11, 50, 25);
 	} else {
 		fprintf(stderr, "[rng] post-loop %u\n", GetLCGEngineState());
+	{
+		uint32_t h = 2166136261u;
+		for (int j = 0; j < DMAXY; j++) for (int i = 0; i < DMAXX; i++) { h ^= dungeon[i][j]; h *= 16777619u; }
+		fprintf(stderr, "[chk] post-loop %u\n", h);
+		if (getenv("DVL_DUMP_POST_LOOP")) {
+			for (int j = 0; j < DMAXY; j++) { for (int i = 0; i < DMAXX; i++) fprintf(stdout, "%d%c", dungeon[i][j], i==DMAXX-1?'\n':' '); }
+			return;
+		}
+	}
 		PoolFix();
 		Warp();
 		fprintf(stderr, "[rng] after warp %u\n", GetLCGEngineState());

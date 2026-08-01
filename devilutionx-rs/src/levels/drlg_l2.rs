@@ -823,6 +823,10 @@ pub struct CatacombsGenerator {
     /// C++ when the quest is not active (verified against drlg_l2_test.cpp
     /// fixtures: 5-1677631846 is NOTAVAIL, 5-68685319 is INIT).
     pub blood_quest_active: bool,
+    /// C++ `Quests[Q_SCHAMB]._qactive != QUEST_NOTAVAIL` — level 6 quest room.
+    pub schamb_quest_active: bool,
+    /// C++ `Quests[Q_BLIND]._qactive != QUEST_NOTAVAIL` — level 7 quest room.
+    pub blind_quest_active: bool,
     /// Seeded RNG (matches Diablo's `SetRndSeed`/`GenerateRnd`).
     rng: Rng,
     /// TEMPORARY diagnostic (test-only): if `Some(n)`, `connect_hall` aborts
@@ -849,6 +853,8 @@ impl CatacombsGenerator {
             protected: [[false; DMAXY]; DMAXX],
             set_piece_room: None,
             blood_quest_active: false,
+            schamb_quest_active: false,
+            blind_quest_active: false,
             rng: Rng::with_default_seed(),
             #[cfg(test)]
             test_hall_cap: None,
@@ -1050,39 +1056,69 @@ impl CatacombsGenerator {
     }
 
     /// C++ equivalent: PlaceDunTiles (gendung.cpp) for the Q_BLOOD set piece.
-    /// `blood1.dun` tile layer (10x16) from test/fixtures/levels/l2data/.
-    const BLOOD1_TILES: [[u8; 10]; 16] = [
-        [0, 0, 0, 55, 58, 57, 7, 0, 0, 0],
-        [0, 0, 3, 54, 60, 63, 1, 3, 0, 0],
-        [0, 0, 3, 53, 61, 59, 1, 3, 0, 0],
-        [87, 32, 29, 8, 157, 157, 8, 31, 30, 7],
-        [26, 3, 3, 23, 0, 0, 25, 3, 3, 24],
-        [27, 3, 3, 24, 0, 0, 27, 3, 3, 26],
-        [23, 3, 3, 27, 0, 0, 23, 3, 3, 27],
-        [156, 3, 3, 27, 0, 0, 24, 3, 3, 156],
-        [9, 32, 31, 83, 0, 0, 9, 29, 31, 6],
-        [0, 0, 3, 3, 0, 3, 0, 3, 0, 0],
-        [0, 0, 3, 3, 3, 3, 3, 3, 0, 0],
-        [0, 0, 3, 6, 0, 3, 6, 3, 0, 0],
-        [0, 0, 3, 3, 3, 0, 0, 3, 0, 0],
-        [0, 0, 3, 0, 3, 0, 0, 3, 0, 0],
-        [0, 0, 3, 6, 0, 0, 6, 3, 0, 0],
-        [0, 0, 0, 3, 3, 3, 3, 0, 0, 0],
-    ];
-
     /// C++ equivalent: InitSetPiece (drlg_l2.cpp) for the Q_BLOOD quest room.
     /// Places the blood1.dun tiles at SetPieceRoom.position with floorId=3 and
     /// protects them from subsequent miniset placement.
     fn init_set_piece(&mut self, dungeon: &mut Dungeon) {
-        if !self.blood_quest_active {
-            return;
-        }
+        // C++ InitSetPiece picks the set piece by quest availability:
+        // Q_BLIND -> blind1.dun, Q_BLOOD -> blood1.dun, Q_SCHAMB -> bonestr2.dun.
+        let tiles: &[&[u8]] = match self.current_level {
+            5 if self.blood_quest_active => {
+                const B: &[&[u8]] = &[
+                    &[0, 0, 0, 55, 58, 57, 7, 0, 0, 0],
+                    &[0, 0, 3, 54, 60, 63, 1, 3, 0, 0],
+                    &[0, 0, 3, 53, 61, 59, 1, 3, 0, 0],
+                    &[87, 32, 29, 8, 157, 157, 8, 31, 30, 7],
+                    &[26, 3, 3, 23, 0, 0, 25, 3, 3, 24],
+                    &[27, 3, 3, 24, 0, 0, 27, 3, 3, 26],
+                    &[23, 3, 3, 27, 0, 0, 23, 3, 3, 27],
+                    &[156, 3, 3, 27, 0, 0, 24, 3, 3, 156],
+                    &[9, 32, 31, 83, 0, 0, 9, 29, 31, 6],
+                    &[0, 0, 3, 3, 0, 3, 0, 3, 0, 0],
+                    &[0, 0, 3, 3, 3, 3, 3, 3, 0, 0],
+                    &[0, 0, 3, 6, 0, 3, 6, 3, 0, 0],
+                    &[0, 0, 3, 3, 3, 0, 0, 3, 0, 0],
+                    &[0, 0, 3, 0, 3, 0, 0, 3, 0, 0],
+                    &[0, 0, 3, 6, 0, 0, 6, 3, 0, 0],
+                    &[0, 0, 0, 3, 3, 3, 3, 0, 0, 0],
+                ];
+                B
+            }
+            6 if self.schamb_quest_active => {
+                const B: &[&[u8]] = &[
+                    &[104, 0, 0, 0, 0, 0, 104],
+                    &[0, 6, 0, 90, 0, 6, 0],
+                    &[0, 0, 0, 0, 0, 0, 0],
+                    &[0, 89, 158, 160, 0, 88, 0],
+                    &[0, 0, 159, 0, 0, 0, 0],
+                    &[0, 6, 0, 91, 0, 6, 0],
+                    &[104, 0, 0, 0, 0, 0, 104],
+                ];
+                B
+            }
+            7 if self.blind_quest_active => {
+                const B: &[&[u8]] = &[
+                    &[8, 2, 73, 2, 2, 2, 7, 0, 0, 0, 0],
+                    &[156, 0, 0, 0, 0, 0, 68, 0, 0, 0, 0],
+                    &[70, 0, 94, 99, 111, 0, 1, 0, 0, 0, 0],
+                    &[1, 0, 92, 97, 3, 0, 1, 0, 0, 0, 0],
+                    &[1, 0, 3, 3, 110, 0, 9, 2, 73, 2, 7],
+                    &[1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+                    &[9, 75, 2, 2, 7, 0, 109, 108, 3, 0, 69],
+                    &[0, 0, 0, 0, 79, 0, 3, 94, 99, 0, 1],
+                    &[0, 0, 0, 0, 1, 0, 3, 92, 97, 0, 156],
+                    &[0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1],
+                    &[0, 0, 0, 0, 9, 2, 2, 2, 74, 2, 6],
+                ];
+                B
+            }
+            _ => return,
+        };
         let Some((px, py, _pw, _ph)) = self.set_piece_room else {
             return;
         };
-        for y in 0..16 {
-            for x in 0..10 {
-                let tile = Self::BLOOD1_TILES[y][x];
+        for (y, row) in tiles.iter().enumerate() {
+            for (x, &tile) in row.iter().enumerate() {
                 let dx = px + x;
                 let dy = py + y;
                 if tile != 0 {
@@ -1177,9 +1213,8 @@ impl CatacombsGenerator {
     fn get_quest_room_size(&self) -> Option<(usize, usize)> {
         match self.current_level {
             5 if self.blood_quest_active => Some((14, 20)), // Q_BLOOD
-            5 => None,
-            6 => Some((10, 10)), // Q_SCHAMB (Bone Chamber)
-            7 => Some((15, 15)), // Q_BLIND (Halls of the Blind)
+            6 if self.schamb_quest_active => Some((10, 10)), // Q_SCHAMB
+            7 if self.blind_quest_active => Some((15, 15)), // Q_BLIND
             _ => None,
         }
     }
@@ -2868,8 +2903,12 @@ mod tests {
         gen.blood_quest_active = true;
         assert_eq!(gen.get_quest_room_size(), Some((14, 20)));
         gen.current_level = 6;
+        assert_eq!(gen.get_quest_room_size(), None); // Q_SCHAMB not active
+        gen.schamb_quest_active = true;
         assert_eq!(gen.get_quest_room_size(), Some((10, 10)));
         gen.current_level = 7;
+        assert_eq!(gen.get_quest_room_size(), None); // Q_BLIND not active
+        gen.blind_quest_active = true;
         assert_eq!(gen.get_quest_room_size(), Some((15, 15)));
         gen.current_level = 8;
         assert_eq!(gen.get_quest_room_size(), None);

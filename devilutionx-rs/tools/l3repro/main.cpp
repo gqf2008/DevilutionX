@@ -281,7 +281,7 @@ template <>
 std::unique_ptr<uint16_t[]> LoadFileInMem<uint16_t>(const char *path)
 {
 	std::string resolved = path;
-	const std::string prefix = "levels\\\\l3data\\\\";
+	const std::string prefix = "levels\\l3data\\";
 	if (resolved.rfind(prefix, 0) == 0)
 		resolved = "test/fixtures/levels/l3data/" + resolved.substr(prefix.size());
 	std::ifstream f(resolved, std::ios::binary);
@@ -312,23 +312,35 @@ bool Quest::IsAvailable() const
 int main(int argc, char **argv)
 {
 	using namespace devilution;
+	fprintf(stderr, "[main] start argc=%d\n", argc);
 	uint32_t seed = 262005438;
+	int level = 9;
+	int anvil = 0;
 	if (argc > 1)
 		seed = (uint32_t)std::strtoul(argv[1], nullptr, 10);
+	if (argc > 2)
+		level = std::atoi(argv[2]);
+	if (argc > 3)
+		anvil = std::atoi(argv[3]);
 
 	for (auto &o : LevelSeeds)
 		o = std::nullopt;
-	currlevel = 9;
+	currlevel = level;
 	leveltype = DTYPE_CAVES;
 	for (auto &q : Quests) {
 		q._qactive = QUEST_NOTAVAIL;
 		q._qlevel = 0;
 		q._qidx = Q_ANVIL;
 	}
+	Quests[Q_ANVIL]._qidx = Q_ANVIL;
+	Quests[Q_ANVIL]._qlevel = 10;
+	Quests[Q_ANVIL]._qactive = anvil ? QUEST_INIT : QUEST_NOTAVAIL;
 	SetPieceRoom = WorldTileRectangle(WorldTilePosition { 0, 0 }, WorldTileSize { 0, 0 });
 	SetPiece = WorldTileRectangle(WorldTilePosition { 0, 0 }, WorldTileSize { 0, 0 });
 
+	fprintf(stderr, "[main] before CreateL3Dungeon level=%d anvil=%d\n", currlevel, anvil);
 	CreateL3Dungeon(seed, ENTRY_MAIN);
+	fprintf(stderr, "[main] after CreateL3Dungeon\n");
 
 	for (int y = 0; y < DMAXY; y++) {
 		for (int x = 0; x < DMAXX; x++) {

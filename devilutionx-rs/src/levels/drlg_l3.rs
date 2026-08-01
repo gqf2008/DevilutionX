@@ -496,6 +496,14 @@ pub struct CavesGenerator {
 
     /// Theme room rectangles (x, y, width, height) placed by DRLG_PlaceThemeRooms
     theme_locations: Vec<(usize, usize, usize, usize)>,
+    /// C++ `Quests[Q_ANVIL].IsAvailable()` — the Anvil quest room (level 10).
+    pub anvil_quest_active: bool,
+    /// C++ `SetPiece` — position where `anvil.dun` was placed (for the
+    /// post-River anvil-room tile adjustments).
+    anvil_position: Option<(usize, usize)>,
+    /// C++ `Protected` bitset — set by PlaceAnvil over the anvil area; the
+    /// miniset scan skips protected cells.
+    protected: [[bool; DMAXY]; DMAXX],
 }
 
 impl CavesGenerator {
@@ -505,9 +513,104 @@ impl CavesGenerator {
             predungeon: [[0; MAXDUNY]; MAXDUNX],
             lockout_count: 0,
             theme_locations: Vec::new(),
+            anvil_quest_active: false,
+            anvil_position: None,
+            protected: [[false; DMAXY]; DMAXX],
         }
     }
 
+
+    /// `anvil.dun` tile layer (9x9) from test/fixtures/levels/l3data/.
+    const ANVIL_TILES: [[u8; 9]; 9] = [
+        [7, 29, 26, 26, 26, 26, 26, 30, 7],
+        [29, 33, 33, 33, 37, 41, 36, 35, 30],
+        [25, 37, 41, 27, 32, 21, 34, 33, 28],
+        [25, 39, 22, 7, 7, 7, 31, 27, 32],
+        [25, 28, 7, 7, 7, 7, 7, 7, 7],
+        [25, 39, 20, 7, 7, 7, 29, 26, 30],
+        [25, 35, 38, 30, 29, 26, 34, 33, 28],
+        [31, 33, 33, 35, 34, 33, 33, 37, 32],
+        [7, 31, 27, 27, 27, 27, 27, 32, 7],
+    ];
+
+    /// C++ equivalent: FloorArea (drlg_l3.cpp) — carve a 12x12 floor block
+    /// into the cellular-automata grid for the Anvil quest room.
+    fn floor_area_write(&mut self, x1: i32, y1: i32, x2: i32, y2: i32) {
+        for j in y1..=y2 {
+            for i in x1..=x2 {
+                if i >= 0 && i < MAXDUNX as i32 && j >= 0 && j < MAXDUNY as i32 {
+                    self.predungeon[i as usize][j as usize] = 1;
+                }
+            }
+        }
+    }
+
+    /// C++ equivalent: PlaceAnvil (drlg_l3.cpp:1801) — scan for an 11x11
+    /// floor-7 area (anvil.dun size + 1-tile border), place the set piece and
+    /// record `SetPiece`. Two RNG draws for the random start.
+    fn place_anvil(&mut self, dungeon: &mut Dungeon) -> bool {
+        const AREA: usize = 11; // anvil 9x9 + 2 border
+        let mut sx = self.random_range(0, DMAXX - AREA) as i32;
+        let mut sy = self.random_range(0, DMAXY - AREA) as i32;
+        let mut found = false;
+        for _tries in 0..199 {
+            if sx == (DMAXX - AREA) as i32 {
+                sx = 0;
+                sy += 1;
+                if sy == (DMAXY - AREA) as i32 {
+                    sy = 0;
+                }
+            }
+            found = true;
+            'scan: for dy in 0..AREA {
+                for dx in 0..AREA {
+                    // Protected is empty before the anvil set piece.
+                    if dungeon.tiles[(sx + dx as i32) as usize][(sy + dy as i32) as usize] != 7 {
+                        found = false;
+                        break 'scan;
+                    }
+                }
+            }
+            if found {
+                break;
+            }
+            sx += 1;
+        }
+        if !found {
+            return false;
+        }
+        let px = (sx + 1) as usize;
+        let py = (sy + 1) as usize;
+        // C++ PlaceDunTiles(anvil, {sx+1, sy+1}, 7).
+        for y in 0..9 {
+            for x in 0..9 {
+                let tile = Self::ANVIL_TILES[y][x];
+                if tile != 0 {
+                    dungeon.tiles[px + x][py + y] = tile;
+                } else {
+                    dungeon.tiles[px + x][py + y] = 7;
+                }
+            }
+        }
+        // C++ SetPiece = { {sx, sy}, areaSize } — the 11x11 area rect (not the
+        // +1 tile offset), used by the post-River reversal and the miniset
+        // Protected check.
+        let spx = sx as usize;
+        let spy = sy as usize;
+        for dy in 0..AREA {
+            for dx in 0..AREA {
+                self.protected[spx + dx][spy + dy] = true;
+            }
+        }
+        // C++ "Hack to avoid rivers entering the island, reversed later":
+        // block the river with wall tiles, restored to 7 in the post-loop
+        // anvil block after River().
+        dungeon.tiles[spx + 7][spy + 5] = 2;
+        dungeon.tiles[spx + 8][spy + 5] = 2;
+        dungeon.tiles[spx + 9][spy + 5] = 2;
+        self.anvil_position = Some((spx, spy));
+        true
+    }
 
     /// Generate L3 cave dungeon
     /// C++ equivalent: GenerateLevel
@@ -533,7 +636,13 @@ impl CavesGenerator {
             self.create_block(x1, y2, 2, 2);
             self.create_block(x1, y1, 2, 3);
 
-            // TODO: Quest room handling (Q_ANVIL)
+            // C++ `if (Quests[Q_ANVIL].IsAvailable())` — carve the 12x12
+            // Anvil quest room floor block.
+            if self.anvil_quest_active && level == 10 {
+                let ax1 = self.random_range(10, 20) as i32;
+                let ay1 = self.random_range(10, 20) as i32;
+                self.floor_area_write(ax1, ay1, ax1 + 12, ay1 + 12);
+            }
 
             // Apply cellular automata rules
             self.fill_diagonals();
@@ -557,6 +666,11 @@ impl CavesGenerator {
             // Place stairs
             if !self.place_stairs(dungeon, level, entry) {
                 continue; // Retry if stairs placement failed
+            }
+
+            // C++ `if (Quests[Q_ANVIL].IsAvailable() && !PlaceAnvil()) continue;`
+            if self.anvil_quest_active && level == 10 && !self.place_anvil(dungeon) {
+                continue; // Retry if the anvil set piece could not be placed
             }
 
             // C++ `PlacePool()` is the loop-break condition: retry the whole
@@ -588,6 +702,19 @@ impl CavesGenerator {
             self.hall_of_heroes(dungeon);
             // C++ calls River() after HallOfHeroes.
             self.river(dungeon);
+
+            // C++ `if (Quests[Q_ANVIL].IsAvailable())` — anvil-room tiles after
+            // the river pass.
+            if self.anvil_quest_active && level == 10 {
+                if let Some((px, py)) = self.anvil_position {
+                    dungeon.tiles[px + 7][py + 5] = 7;
+                    dungeon.tiles[px + 8][py + 5] = 7;
+                    dungeon.tiles[px + 9][py + 5] = 7;
+                    if matches!(dungeon.tiles[px + 10][py + 5], 17 | 18) {
+                        dungeon.tiles[px + 10][py + 5] = 45;
+                    }
+                }
+            }
 
             // C++ DRLG_PlaceThemeRooms(5, 10, 7, 0, false) + Fence()
             self.place_theme_rooms(dungeon, 5, 10, 7, 0, false);
@@ -635,6 +762,8 @@ impl CavesGenerator {
     fn init_dungeon_flags(&mut self) {
         self.predungeon = [[0; MAXDUNY]; MAXDUNX];
         self.lockout_count = 0;
+        self.anvil_position = None;
+        self.protected = [[false; DMAXY]; DMAXX];
     }
 
     /// C++ `Warp()` (drlg_l3.cpp): turns the 2x2 town-warp block (tile 125)
@@ -1204,6 +1333,10 @@ impl CavesGenerator {
     fn miniset_matches(&self, dungeon: &Dungeon, miniset: &Miniset, sx: usize, sy: usize) -> bool {
         for j in 0..miniset.height {
             for i in 0..miniset.width {
+                // C++ Miniset::matches checks Protected (anvil set piece).
+                if self.protected[sx + i][sy + j] {
+                    return false;
+                }
                 let search_val = miniset.search[j][i];
                 let dungeon_val = dungeon.tiles[sx + i][sy + j];
 
@@ -2119,7 +2252,9 @@ impl CavesGenerator {
                 if dunx + 1 < DMAXX {
                     found = self.spawn(dungeon, (dunx + 1) as i32, duny as i32, &mut totarea);
                 }
-                if dunx > 0 && !found {
+                // C++ `dunx - 1 > 0` (i.e. dunx > 1) — the left/up spawn is
+                // skipped at the first column/row.
+                if dunx > 1 && !found {
                     found = self.spawn(dungeon, (dunx - 1) as i32, duny as i32, &mut totarea);
                 } else {
                     found = true;
@@ -2129,7 +2264,7 @@ impl CavesGenerator {
                 } else {
                     found = true;
                 }
-                if duny > 0 && !found {
+                if duny > 1 && !found {
                     found = self.spawn(dungeon, dunx as i32, (duny - 1) as i32, &mut totarea);
                 } else {
                     found = true;
