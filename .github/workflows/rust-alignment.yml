@@ -24,6 +24,17 @@ jobs:
         working-directory: devilutionx-rs
         run: cargo test --test dun_fixture_alignment -- --nocapture 2>&1 | grep dun_fixture
 
+  data-tables:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify data tables against upstream TSVs (monstdat/spelldat/objdat/affixes/Experience)
+        working-directory: devilutionx-rs/tools/table_data
+        run: python verify_tables.py
+
   cpp-repros:
     runs-on: ubuntu-latest
     steps:
