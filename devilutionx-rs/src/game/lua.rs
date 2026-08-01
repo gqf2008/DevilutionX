@@ -244,6 +244,39 @@ impl LuaEngine {
         Ok(())
     }
 
+
+    /// Register `devilutionx.items` (C++ `lua/modules/items.cpp`).
+    pub fn register_items_module(&self) -> mlua::Result<()> {
+        let items: Table = self.lua.create_table()?;
+        items.set(
+            "addItemDataFromTsv",
+            self.lua.create_function(|lua, (path, base): (String, i64)| {
+                lua.set_named_registry_value("item_tsv_path", path)?;
+                lua.set_named_registry_value("item_tsv_base", base)?;
+                Ok(())
+            })?,
+        )?;
+        items.set(
+            "addUniqueItemDataFromTsv",
+            self.lua.create_function(|lua, (path, base): (String, i64)| {
+                lua.set_named_registry_value("unique_item_tsv_path", path)?;
+                lua.set_named_registry_value("unique_item_tsv_base", base)?;
+                Ok(())
+            })?,
+        )?;
+        // Construct a Lua item from (item_type, value, name) and expose the
+        // C++ Item predicate methods.
+        items.set(
+            "new",
+            self.lua.create_function(|lua, (item_type, value, name): (String, i64, String)| {
+                lua.create_userdata(LuaItem::new(&item_type, value, name))
+            })?,
+        )?;
+        let devilutionx: Table = self.lua.globals().get("devilutionx")?;
+        devilutionx.set("items", items)?;
+        Ok(())
+    }
+
     /// Register the common modules (C++ `LuaInitialize`'s table).
     pub fn register_default_modules(&self) -> mlua::Result<()> {
         let devilutionx: Table = self.lua.create_table()?;
@@ -256,12 +289,50 @@ impl LuaEngine {
         self.register_monsters_module()?;
         self.register_player_module()?;
         self.register_towners_module()?;
+        self.register_items_module()?;
         Ok(())
     }
 }
 
 /// C++ `SfxID::LAST` sentinel for the audio module's validity check.
 pub const LAST_SFX_ID: i32 = 122;
+
+/// A Lua-visible item wrapper exposing the C++ `Item` predicate methods.
+pub struct LuaItem {
+    pub item_type: String,
+    pub value: i64,
+    pub name: String,
+}
+
+impl LuaItem {
+    pub fn new(item_type: &str, value: i64, name: String) -> Self {
+        Self {
+            item_type: item_type.to_string(),
+            value,
+            name,
+        }
+    }
+}
+
+impl mlua::UserData for LuaItem {
+    fn add_methods<M: mlua::UserDataMethods<Self>>(methods: &mut M) {
+        methods.add_method("isGold", |_, this, ()| Ok(this.item_type == "Gold"));
+        methods.add_method("isWeapon", |_, this, ()| {
+            Ok(matches!(this.item_type.as_str(), "Sword" | "Axe" | "Mace" | "Bow" | "Staff" | "Dagger"))
+        });
+        methods.add_method("isArmor", |_, this, ()| {
+            Ok(matches!(this.item_type.as_str(), "Helm" | "Armor" | "Shield"))
+        });
+        methods.add_method("isEquipment", |_, this, ()| {
+            Ok(matches!(
+                this.item_type.as_str(),
+                "Sword" | "Axe" | "Mace" | "Bow" | "Staff" | "Dagger" | "Helm" | "Armor" | "Shield" | "Ring" | "Amulet"
+            ))
+        });
+        methods.add_method("getName", |_, this, ()| Ok(this.name.clone()));
+        methods.add_method("getValue", |_, this, ()| Ok(this.value));
+    }
+}
 
 /// Format a Lua value for the log module (C++ `sol::utility::to_string`).
 fn lua_value_to_string(value: &Value) -> String {
@@ -446,6 +517,50 @@ mod tests {
             .unwrap();
         let p: mlua::Value = engine.state().globals().get("p").unwrap();
         assert!(matches!(p, mlua::Value::Nil));
+    }
+
+
+    #[test]
+    fn test_items_module_predicates() {
+        let engine = LuaEngine::new().unwrap();
+        engine.register_default_modules().unwrap();
+        engine
+            .load_script(
+                "items.lua",
+                r#"
+                gold = devilutionx.items.new("Gold", 50, "")
+                is_gold = gold:isGold()
+                sword = devilutionx.items.new("Sword", 0, "Short Sword")
+                is_weapon = sword:isWeapon()
+                is_armor = sword:isArmor()
+                name = sword:getName()
+                "#,
+            )
+            .unwrap();
+        let is_gold: bool = engine.state().globals().get("is_gold").unwrap();
+        let is_weapon: bool = engine.state().globals().get("is_weapon").unwrap();
+        let is_armor: bool = engine.state().globals().get("is_armor").unwrap();
+        let name: String = engine.state().globals().get("name").unwrap();
+        assert!(is_gold);
+        assert!(is_weapon);
+        assert!(!is_armor);
+        assert_eq!(name, "Short Sword");
+    }
+
+    #[test]
+    fn test_items_module_tsv_paths() {
+        let engine = LuaEngine::new().unwrap();
+        engine.register_default_modules().unwrap();
+        engine
+            .load_script(
+                "items_tsv.lua",
+                "devilutionx.items.addItemDataFromTsv('items.tsv', 100)",
+            )
+            .unwrap();
+        let path: String = engine.state().named_registry_value("item_tsv_path").unwrap();
+        let base: i64 = engine.state().named_registry_value("item_tsv_base").unwrap();
+        assert_eq!(path, "items.tsv");
+        assert_eq!(base, 100);
     }
 
 
