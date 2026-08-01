@@ -112,6 +112,7 @@ impl DataInfo {
 ///
 /// ## Example
 /// ```rust
+/// use devilutionx_rs::engine::encrypt::pkware_compress;
 /// let mut data = vec![0u8; 1000]; // Fill with data
 /// let compressed_size = pkware_compress(&mut data);
 /// data.truncate(compressed_size as usize);
@@ -168,6 +169,7 @@ pub fn pkware_compress(data: &mut [u8]) -> u32 {
 ///
 /// ## Example
 /// ```rust
+/// use devilutionx_rs::engine::encrypt::pkware_decompress;
 /// let mut buffer = vec![0u8; 10000];
 /// // ... fill buffer with compressed data ...
 /// let compressed_size = 500;

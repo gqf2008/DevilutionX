@@ -19,7 +19,7 @@
 //! - Source/townerdat.hpp: TownerDataEntry
 //!
 //! # Architecture
-//! ```
+//! ```text
 //! TownerType enum (13 NPCs)
 //!     ↓
 //! TownerDataEntry (static config)

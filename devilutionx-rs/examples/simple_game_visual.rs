@@ -26,7 +26,7 @@ fn main() -> Result<(), String> {
     println!("初始 HP: {}/{}", player._p_hit_points >> 6, player._p_max_hp >> 6);
     println!("初始 Mana: {}/{}\n", player._p_mana >> 6, player._p_max_mana >> 6);
 
-    let mut game_state = GameState::new(player, true);
+    let mut game_state = GameState::new(player, true, 12345);
     let mut rng = StdRng::seed_from_u64(12345);
 
     // 初始化 SDL2

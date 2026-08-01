@@ -351,13 +351,14 @@ impl DialogueOption {
 /// ```
 /// # use devilutionx_rs::game::dialogue::{DialogueNode, DialogueOption, Player};
 /// # use devilutionx_rs::game::store::TalkId;
+/// let options: &'static [DialogueOption] = Box::leak(Box::new([
+///     DialogueOption::new("Buy", TalkId::SmithBuy, |_| true),
+///     DialogueOption::new("Leave", TalkId::None, |_| true),
+/// ]));
 /// let node = DialogueNode {
 ///     talk_id: TalkId::Smith,
 ///     greeting: Some("What can I do for ye?"),
-///     options: &[
-///         DialogueOption::new("Buy", TalkId::SmithBuy, |_| true),
-///         DialogueOption::new("Leave", TalkId::None, |_| true),
-///     ],
+///     options,
 /// };
 ///
 /// let player = Player::default();
@@ -388,10 +389,10 @@ impl DialogueNode {
     /// let node = DialogueNode {
     ///     talk_id: TalkId::Smith,
     ///     greeting: Some("Greetings"),
-    ///     options: &[
+    ///     options: Box::leak(Box::new([
     ///         DialogueOption::new("Option 1", TalkId::None, |_| true),
     ///         DialogueOption::new("Option 2", TalkId::None, |p| p.gold >= 100),
-    ///     ],
+    ///     ])),
     /// };
     ///
     /// let mut player = Player::default();

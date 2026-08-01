@@ -30,7 +30,7 @@ fn main() {
     );
 
     // 创建游戏状态 (Town模式，不处理Monster)
-    let mut game_state = GameState::new(player, true);
+    let mut game_state = GameState::new(player, true, 12345);
     let mut rng = StdRng::seed_from_u64(12345);
 
     println!("\n⏱️  开始运行 50 帧游戏循环...\n");
@@ -60,6 +60,9 @@ fn main() {
                 GameLogicStep::ProcessObjects => "ProcessObjects",
                 GameLogicStep::ProcessMissiles => "ProcessMissiles",
                 GameLogicStep::ProcessItems => "ProcessItems",
+                GameLogicStep::ProcessTowners => "ProcessTowners",
+                GameLogicStep::ProcessItemsTown => "ProcessItemsTown",
+                GameLogicStep::ProcessMissilesTown => "ProcessMissilesTown",
             };
 
             let mut changes = Vec::new();

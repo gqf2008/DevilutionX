@@ -31,7 +31,7 @@
 /// # 示例
 ///
 /// ```
-/// # use devilutionx::utils::str_case::ascii_str_to_lower_in_place;
+/// # use devilutionx_rs::utils::str_case::ascii_str_to_lower_in_place;
 /// let mut s = String::from("HELLO World 123");
 /// ascii_str_to_lower_in_place(&mut s);
 /// assert_eq!(s, "hello world 123");
@@ -79,7 +79,7 @@ pub fn ascii_str_to_lower_in_place(s: &mut String) {
 /// # 示例
 ///
 /// ```
-/// # use devilutionx::utils::str_case::ascii_str_to_lower;
+/// # use devilutionx_rs::utils::str_case::ascii_str_to_lower;
 /// let s = "HELLO World 123";
 /// let lower = ascii_str_to_lower(s);
 /// assert_eq!(lower, "hello world 123");
