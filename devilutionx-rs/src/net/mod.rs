@@ -1,5 +1,7 @@
 /// Networking module - multiplayer support
 #[cfg(feature = "network")]
+pub mod packet;
+#[cfg(feature = "network")]
 pub mod protocol;
 #[cfg(feature = "network")]
 pub mod client;
