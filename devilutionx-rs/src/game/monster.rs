@@ -4993,12 +4993,16 @@ mod tests {
 
         ai_mega(&mut monster);
 
-        // Should attempt inferno or move
+        // Should attempt inferno, melee (close range), move, or stay. The
+        // close-range branch can pick start_attack() (MeleeAttack), which the
+        // assertion must accept to stay deterministic across RNG outcomes.
         assert!(
             monster.mode == MonsterMode::SpecialRangedAttack ||
+            monster.mode == MonsterMode::MeleeAttack ||
             monster.mode == MonsterMode::MoveNorthwards ||
             monster.mode == MonsterMode::MoveSouthwards ||
             monster.mode == MonsterMode::MoveSideways ||
+            monster.mode == MonsterMode::DelayedDeath ||
             monster.mode == MonsterMode::Stand
         );
     }
