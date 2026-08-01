@@ -41,6 +41,38 @@ pub const NUM_LIGHT_RADIUSES: usize = 16;
 /// Maximum light falloff distance
 pub const MAX_FALLOFF_DISTANCE: usize = 128;
 
+/// C++ `VisionRays[23][15]` — exact port from `Source/vision.cpp`.
+/// 23 rays of up to 15 points in one quadrant (0°-90°), mirrored to the other
+/// three quadrants at cast time. Zero points are padding and ignored.
+pub const VISION_RAYS: [[(i8, i8); 15]; 23] = [
+    [(1, 0), (2, 0), (3, 0), (4, 0), (5, 0), (6, 0), (7, 0), (8, 0), (9, 0), (10, 0), (11, 0), (12, 0), (13, 0), (14, 0), (15, 0)],
+    [(1, 0), (2, 0), (3, 0), (4, 0), (5, 0), (6, 0), (7, 0), (8, 1), (9, 1), (10, 1), (11, 1), (12, 1), (13, 1), (14, 1), (15, 1)],
+    [(1, 0), (2, 0), (3, 0), (4, 1), (5, 1), (6, 1), (7, 1), (8, 1), (9, 1), (10, 1), (11, 1), (12, 2), (13, 2), (14, 2), (15, 2)],
+    [(1, 0), (2, 0), (3, 1), (4, 1), (5, 1), (6, 1), (7, 1), (8, 2), (9, 2), (10, 2), (11, 2), (12, 2), (13, 3), (14, 3), (15, 3)],
+    [(1, 0), (2, 1), (3, 1), (4, 1), (5, 1), (6, 2), (7, 2), (8, 2), (9, 3), (10, 3), (11, 3), (12, 3), (13, 4), (14, 4), (0, 0)],
+    [(1, 0), (2, 1), (3, 1), (4, 1), (5, 2), (6, 2), (7, 3), (8, 3), (9, 3), (10, 4), (11, 4), (12, 4), (13, 5), (14, 5), (0, 0)],
+    [(1, 0), (2, 1), (3, 1), (4, 2), (5, 2), (6, 3), (7, 3), (8, 3), (9, 4), (10, 4), (11, 5), (12, 5), (13, 6), (14, 6), (0, 0)],
+    [(1, 1), (2, 1), (3, 2), (4, 2), (5, 3), (6, 3), (7, 4), (8, 4), (9, 5), (10, 5), (11, 6), (12, 6), (13, 7), (0, 0), (0, 0)],
+    [(1, 1), (2, 1), (3, 2), (4, 2), (5, 3), (6, 4), (7, 4), (8, 5), (9, 6), (10, 6), (11, 7), (12, 7), (12, 8), (13, 8), (0, 0)],
+    [(1, 1), (2, 2), (3, 2), (4, 3), (5, 4), (6, 5), (7, 5), (8, 6), (9, 7), (10, 7), (10, 8), (11, 8), (12, 9), (0, 0), (0, 0)],
+    [(1, 1), (2, 2), (3, 3), (4, 4), (5, 5), (6, 5), (7, 6), (8, 7), (9, 8), (10, 9), (11, 9), (11, 10), (0, 0), (0, 0), (0, 0)],
+    [(1, 1), (2, 2), (3, 3), (4, 4), (5, 5), (6, 6), (7, 7), (8, 8), (9, 9), (10, 10), (11, 11), (0, 0), (0, 0), (0, 0), (0, 0)],
+    [(1, 1), (2, 2), (3, 3), (4, 4), (5, 5), (5, 6), (6, 7), (7, 8), (8, 9), (9, 10), (9, 11), (10, 11), (0, 0), (0, 0), (0, 0)],
+    [(1, 1), (2, 2), (2, 3), (3, 4), (4, 5), (5, 6), (5, 7), (6, 8), (7, 9), (7, 10), (8, 10), (8, 11), (9, 12), (0, 0), (0, 0)],
+    [(1, 1), (1, 2), (2, 3), (2, 4), (3, 5), (4, 6), (4, 7), (5, 8), (6, 9), (6, 10), (7, 11), (7, 12), (8, 12), (8, 13), (0, 0)],
+    [(1, 1), (1, 2), (2, 3), (2, 4), (3, 5), (3, 6), (4, 7), (4, 8), (5, 9), (5, 10), (6, 11), (6, 12), (7, 13), (0, 0), (0, 0)],
+    [(0, 1), (1, 2), (1, 3), (2, 4), (2, 5), (3, 6), (3, 7), (3, 8), (4, 9), (4, 10), (5, 11), (5, 12), (6, 13), (6, 14), (0, 0)],
+    [(0, 1), (1, 2), (1, 3), (1, 4), (2, 5), (2, 6), (3, 7), (3, 8), (3, 9), (4, 10), (4, 11), (4, 12), (5, 13), (5, 14), (0, 0)],
+    [(0, 1), (1, 2), (1, 3), (1, 4), (1, 5), (2, 6), (2, 7), (2, 8), (3, 9), (3, 10), (3, 11), (3, 12), (4, 13), (4, 14), (0, 0)],
+    [(0, 1), (0, 2), (1, 3), (1, 4), (1, 5), (1, 6), (1, 7), (2, 8), (2, 9), (2, 10), (2, 11), (2, 12), (3, 13), (3, 14), (3, 15)],
+    [(0, 1), (0, 2), (0, 3), (1, 4), (1, 5), (1, 6), (1, 7), (1, 8), (1, 9), (1, 10), (1, 11), (2, 12), (2, 13), (2, 14), (2, 15)],
+    [(0, 1), (0, 2), (0, 3), (0, 4), (0, 5), (0, 6), (0, 7), (1, 8), (1, 9), (1, 10), (1, 11), (1, 12), (1, 13), (1, 14), (1, 15)],
+    [(0, 1), (0, 2), (0, 3), (0, 4), (0, 5), (0, 6), (0, 7), (0, 8), (0, 9), (0, 10), (0, 11), (0, 12), (0, 13), (0, 14), (0, 15)],
+];
+
+/// Ray-length adjustment so all rays lie on an accurate circle (C++ `RayLenAdj`).
+const RAY_LEN_ADJ: [u8; 23] = [0, 0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 4, 3, 2, 2, 2, 1, 1, 1, 0, 0, 0, 0];
+
 /// Dungeon level types for lighting behavior
 ///
 /// **C++ Reference**: `Source/engine/lighting_defs.hpp`
@@ -206,6 +238,8 @@ pub struct LightManager {
     pub pre_light: [[u8; 112]; 112],
     /// Current light buffer
     pub light_buffer: [[u8; 112]; 112],
+    /// Tiles revealed by vision rays this frame (C++ dFlags Visible bit).
+    pub visible: [[bool; 112]; 112],
     /// Current level type (affects light behavior)
     pub level_type: DungeonLevelType,
     /// Debug: disable lighting
@@ -234,6 +268,7 @@ impl LightManager {
             update_vision: false,
             pre_light: [[0; 112]; 112],
             light_buffer: [[LIGHTS_MAX; 112]; 112],
+            visible: [[false; 112]; 112],
             level_type: DungeonLevelType::default(),
             #[cfg(debug_assertions)]
             disable_lighting: false,
@@ -962,16 +997,90 @@ impl LightManager {
     ///
     /// **C++ Reference**: `Source/lighting.cpp` - `DoUnVision()`
     fn do_unvision(&mut self, _position: Point, _radius: u8) {
-        // Vision removal - typically handled by automap system
-        // For now, this is a stub
+        // Vision removal - typically handled by automap system.
+        // Follow-up: clear the `visible` grid within `_position ± _radius+2`
+        // (C++ DoUnVision clears the Visible|Lit flag bits).
     }
 
     /// Apply vision to an area
     ///
     /// **C++ Reference**: `Source/lighting.cpp` - `DoVision()`
-    fn do_vision(&mut self, _position: Point, _radius: u8, _exploration: MapExplorationType, _is_main_player: bool) {
-        // Vision application - typically handled by automap system
-        // For now, this is a stub
+    fn do_vision(&mut self, position: Point, radius: u8, _exploration: MapExplorationType, _is_main_player: bool) {
+        // Faithful port of C++ DoVision(): cast the 23 VisionRays in all four
+        // quadrants and mark every tile the rays reach as visible.
+        //
+        // Wall blocking (C++ `TileAllowsLight`, `TileProperties::BlockLight`)
+        // needs the level's tile-property grid, which this module does not
+        // own; the live path passes `|_| true` until the level layer is wired
+        // in. `cast_vision_rays` is the exact C++ algorithm and is tested
+        // against wall-blocking semantics directly.
+        let rays = Self::cast_vision_rays(
+            position,
+            radius,
+            |p| p.x >= 0 && p.x < 112 && p.y >= 0 && p.y < 112,
+            |_| true,
+        );
+        for tile in rays {
+            self.visible[tile.x as usize][tile.y as usize] = true;
+        }
+    }
+
+    /// Cast C++ `DoVision` rays and return every tile they reach.
+    ///
+    /// **C++ Reference**: `Source/vision.cpp:51` - `DoVision(position, radius,
+    /// markVisibleFn, markTransparentFn, passesLightFn, inBoundsFn)`.
+    ///
+    /// Ports the exact algorithm: 23 rays per quadrant (`VisionRays`), length
+    /// `radius - RayLenAdj[j]`, mirrored over the four quadrants. A ray stops
+    /// at the first tile that does not pass light (`tile_allows_light`), and
+    /// rays crossing diagonally additionally require one of the two diagonally
+    /// adjacent tiles to pass light (the corner case documented in vision.cpp).
+    pub fn cast_vision_rays(
+        position: Point,
+        radius: u8,
+        in_bounds: impl Fn(Point) -> bool,
+        tile_allows_light: impl Fn(Point) -> bool,
+    ) -> Vec<Point> {
+        let mut visible = Vec::new();
+        visible.push(position);
+
+        const QUADRANTS: [(i8, i8); 4] = [(1, 1), (-1, 1), (1, -1), (-1, -1)];
+
+        for (qx, qy) in QUADRANTS {
+            for (j, ray) in VISION_RAYS.iter().enumerate() {
+                let ray_len = radius as i32 - RAY_LEN_ADJ[j] as i32;
+                for k in 0..ray_len {
+                    let (rx, ry) = ray[k as usize];
+                    let ray_point = Point::new(
+                        position.x + (rx as i32) * (qx as i32),
+                        position.y + (ry as i32) * (qy as i32),
+                    );
+                    if !in_bounds(ray_point) {
+                        break;
+                    }
+                    // Diagonal rays must also clear one of the two diagonally
+                    // adjacent tiles (C++ adjacent1/adjacent2 check).
+                    if rx > 0 && ry > 0 {
+                        let adjacent1 = Point::new(
+                            ray_point.x - (qx as i32),
+                            ray_point.y,
+                        );
+                        let adjacent2 = Point::new(
+                            ray_point.x,
+                            ray_point.y - (qy as i32),
+                        );
+                        if !(tile_allows_light(adjacent1) || tile_allows_light(adjacent2)) {
+                            break;
+                        }
+                    }
+                    visible.push(ray_point);
+                    if !tile_allows_light(ray_point) {
+                        break;
+                    }
+                }
+            }
+        }
+        visible
     }
 
     /// Perform light color cycling (Hell level effect)
@@ -1518,4 +1627,79 @@ mod tests {
         // update_lighting should still be true because processing was skipped
         assert!(manager.update_lighting);
     }
+    // -----------------------------------------------------------------------
+    // Vision raycasting (port of Source/vision.cpp DoVision)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_vision_rays_table_shape() {
+        assert_eq!(VISION_RAYS.len(), 23);
+        for row in VISION_RAYS.iter() {
+            assert_eq!(row.len(), 15);
+        }
+        assert_eq!(RAY_LEN_ADJ.len(), 23);
+    }
+
+    #[test]
+    fn test_cast_vision_rays_open_floor_marks_origin_and_axis() {
+        let visible = LightManager::cast_vision_rays(
+            Point::new(50, 50),
+            8,
+            |p| p.x >= 0 && p.x < 112 && p.y >= 0 && p.y < 112,
+            |_| true,
+        );
+        assert!(visible.contains(&Point::new(50, 50)));
+        // East axis ray (row 0 of VisionRays, quadrant (1,1)).
+        assert!(visible.contains(&Point::new(58, 50)));
+        // South axis ray (rel (0,1), quadrant (1,1)).
+        assert!(visible.contains(&Point::new(50, 58)));
+        // Distance is never exceeded: (50, 62) is beyond radius 8.
+        assert!(!visible.contains(&Point::new(50, 62)));
+    }
+
+    #[test]
+    fn test_cast_vision_rays_wall_blocks_ray() {
+        let visible = LightManager::cast_vision_rays(
+            Point::new(50, 50),
+            8,
+            |p| p.x >= 0 && p.x < 112 && p.y >= 0 && p.y < 112,
+            |p| !(p.x == 53 && p.y == 50), // wall directly east
+        );
+        assert!(visible.contains(&Point::new(52, 50)), "tile before wall visible");
+        assert!(visible.contains(&Point::new(53, 50)), "wall tile itself visible");
+        assert!(!visible.contains(&Point::new(54, 50)), "tile beyond wall hidden");
+        assert!(!visible.contains(&Point::new(58, 50)), "far east tile hidden");
+    }
+
+    #[test]
+    fn test_cast_vision_rays_diagonal_corner_blocked() {
+        // C++ vision.cpp corner case: 'x' at origin, walls '#' at (50,51) and
+        // (51,50) must hide the diagonal tile '?' at (51,51).
+        let observer = Point::new(50, 50);
+        let wall = |p: Point| (p.x == 50 && p.y == 51) || (p.x == 51 && p.y == 50);
+        let visible = LightManager::cast_vision_rays(observer, 8, |p| p.x >= 0 && p.x < 112 && p.y >= 0 && p.y < 112, |p| !wall(p));
+        assert!(!visible.contains(&Point::new(51, 51)), "diagonal tile hidden by corner walls");
+
+        // With one adjacent tile open, the diagonal passes (C++ `||`).
+        let wall2 = |p: Point| (p.x == 51 && p.y == 50);
+        let visible2 = LightManager::cast_vision_rays(observer, 8, |p| p.x >= 0 && p.x < 112 && p.y >= 0 && p.y < 112, |p| !wall2(p));
+        assert!(visible2.contains(&Point::new(51, 51)), "diagonal tile visible with one open adjacent");
+    }
+
+    #[test]
+    fn test_do_vision_marks_visible_grid() {
+        let mut manager = LightManager::new();
+        manager.init();
+        manager.update_vision = true;
+        manager.vision_active[0] = true;
+        manager.vision_list[0] = Light::new(Point::new(50, 50), 8);
+
+        manager.process_vision_list(&[true, false, false, false]);
+
+        assert!(manager.visible[50][50], "origin visible");
+        assert!(manager.visible[50][58], "south tile visible");
+        assert!(!manager.visible[50][62], "beyond radius not visible");
+    }
+
+
 }
