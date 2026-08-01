@@ -1146,18 +1146,22 @@ impl CatacombsGenerator {
         // Define room in predungeon
         self.define_room(room_top_left, room_bottom_right, quest_size.is_some());
 
-        // Add room to list
-        let room_id = self.room_count;
+        // Add room to list (0-based vector) and compute the 1-based room id
+        // matching C++ `nRid = nRoomCnt` after DefineRoom's `nRoomCnt++`.
+        // The previous code took `room_id` BEFORE incrementing, so every room's
+        // id was off by one and the root's direct children got `dest_room == 0`
+        // (their halls — and the hall RNG draws + corridor carving — were
+        // skipped entirely, diverging the RNG stream from C++).
         let room = RoomNode::new(room_top_left, room_bottom_right);
         self.room_list.push(room);
         self.room_count += 1;
+        let room_id = self.room_count;
 
         // Create hall to destination room if needed
         if dest_room != 0 {
-            // Copy the destination room out of `self.room_list` up front so the
-            // immutable borrow ends before we call the (mutable) RNG below.
-            // `RoomNode` is `Copy`, so this is cheap and avoids borrow conflicts.
-            let dest = self.room_list[dest_room];
+            // C++ `RoomList` is 1-based; the Rust vector is 0-based, so map
+            // `RoomList[nRDest]` to `room_list[nRDest - 1]`.
+            let dest = self.room_list[dest_room - 1];
             let (hx1, hy1, hx2, hy2) = match hall_dir {
                 HallDirection::Up => {
                     let hx1 = self.random_range(0, room_width - 2) as i32 + room_top_left.x + 1;
