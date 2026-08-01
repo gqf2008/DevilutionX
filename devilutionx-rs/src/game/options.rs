@@ -87,19 +87,6 @@ pub enum FrameRateControl {
     CPUSleep = 2,
 }
 
-/// 浮动数字显示方式
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[repr(u8)]
-pub enum FloatingNumbers {
-    /// 关闭
-    #[default]
-    Off = 0,
-    /// 随机角度
-    Random = 1,
-    /// 仅垂直
-    Vertical = 2,
-}
-
 //=============================================================================
 // 选项结构体
 //=============================================================================
@@ -266,8 +253,6 @@ pub struct GameplayOptions {
     pub auto_elixir_pickup: bool,
     /// 城镇自动拾取
     pub auto_pickup_in_town: bool,
-    /// Adria 回复魔法
-    pub adria_refills_mana: bool,
     /// 自动装备武器
     pub auto_equip_weapons: bool,
     /// 自动装备护甲
@@ -302,8 +287,6 @@ pub struct GameplayOptions {
     pub num_reju_potion_pickup: i32,
     /// 自动拾取完全恢复药水数量
     pub num_full_reju_potion_pickup: i32,
-    /// 浮动数字
-    pub floating_numbers: FloatingNumbers,
     /// 显示生命值
     pub show_health_values: bool,
     /// 显示魔法值
@@ -325,7 +308,6 @@ impl Default for GameplayOptions {
             auto_gold_pickup: false,
             auto_elixir_pickup: false,
             auto_pickup_in_town: false,
-            adria_refills_mana: false,
             auto_equip_weapons: true,
             auto_equip_armor: false,
             auto_equip_helms: false,
@@ -343,7 +325,6 @@ impl Default for GameplayOptions {
             num_full_mana_potion_pickup: 0,
             num_reju_potion_pickup: 0,
             num_full_reju_potion_pickup: 0,
-            floating_numbers: FloatingNumbers::Off,
             show_health_values: false,
             show_mana_values: false,
         }
