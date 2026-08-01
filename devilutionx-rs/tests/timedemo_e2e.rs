@@ -189,12 +189,19 @@ fn decodes_real_cpp_save_game_entry() {
         assert!(wrong.is_empty(), "wrong password must be rejected by checksum");
     }
 
-    // The hero entry decrypts to the C++ hero blob (non-empty, sane length).
+    // The hero entry decrypts to the C++ `PlayerPack` (pfile.cpp EncodeHero:
+    // a `#pragma pack(1)` struct codec-encrypted with the save password). The
+    // Rust `pack::PlayerPack::from_bytes` parses that packed layout, so the
+    // real fixture hero must decode to a Warrior with a name.
     let mut save = load_save_archive(fixture_path("spawn_0.sv")).expect("open save");
     assert!(save.has_entry("hero"), "save has a hero entry");
     let raw = save.read_entry("hero").expect("read hero entry");
     let hero = codec_decode(&raw, PASSWORD_SPAWN_SINGLE);
     assert!(hero.len() > 100, "hero blob is substantial, got {}", hero.len());
+    let pack = devilutionx_rs::game::pack::PlayerPack::from_bytes(&hero);
+    assert_eq!(pack.class, 0, "fixture hero is a Warrior (PC_WARRIOR=0)");
+    assert_eq!(pack.name, "timedemo", "fixture hero name is the timedemo Warrior");
+    assert_eq!(pack.plr_level, 1, "fixture hero starts at dungeon level 1");
 }
 
 /// Tier 1..3 acceptance: load `spawn_0.sv`, replay `demo_0.dmo` headlessly through
