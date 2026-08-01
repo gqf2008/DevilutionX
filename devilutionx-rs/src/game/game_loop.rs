@@ -727,34 +727,57 @@ fn process_input(_input: &mut InputSystem) -> Result<()> {
 /// Prints diagnostics about the generation. Returns an error string if the L1
 /// art is unavailable.
 pub fn descend_to_dungeon(game_state: &mut GameState) -> Result<(), String> {
-    println!("[Descend] Generating L1 Cathedral...");
-    let level = match &game_state.dungeon_level_data {
-        Some(l) => l,
-        None => return Err("L1 Cathedral art not loaded (dungeon_level_data is None)".to_string()),
+    descend_to_level(game_state, 1)
+}
+
+/// Generate and enter any dungeon level (1=L1 Cathedral .. 4=L4 Hell).
+///
+/// Uses the faithful per-level generator through
+/// `generate_dungeon_layout`, cloning the level's pre-loaded art from
+/// `game_state.dungeon_art` into `dungeon_level_data` for the renderer,
+/// re-centres the camera, detects the L1 up-stair (town return), and places a
+/// starting monster pack.
+pub fn descend_to_level(game_state: &mut GameState, level: u8) -> Result<(), String> {
+    println!("[Descend] Generating L{}...", level);
+    let art = match game_state.dungeon_art.get(level as usize) {
+        Some(Some(a)) => a.clone(),
+        _ => {
+            return Err(format!(
+                "L{} art not loaded (dungeon_art[{}] is None)",
+                level, level
+            ))
+        }
     };
 
     // Generate + map to dPiece grid. Use the game seed so the level is stable.
     let seed = (game_state.game_tick as u32).wrapping_add(0xC0FFEE);
-    let layout = crate::game::dungeon_level::generate_l1_cathedral(seed, level);
+    let layout = crate::game::dungeon_level::generate_dungeon_layout(level, seed, &art)?;
     let filled = crate::game::dungeon_level::count_filled(&layout);
     println!(
-        "[Descend] L1 Cathedral generated (seed {}): {}x{}, {} non-zero dPiece cells, {} TIL megas",
-        seed, layout.width, layout.height, filled, level.til.tiles.len()
+        "[Descend] L{} generated (seed {}): {}x{}, {} non-zero dPiece cells, {} TIL megas",
+        level, seed, layout.width, layout.height, filled, art.til.tiles.len()
     );
 
     // Resolve the Cathedral→town up-stair tile (C++ `InitL1Triggers` scans for
     // `dPiece == 128`; the Rust generator instead stamps the EntranceStairs
     // TIL mega, so we detect by matching that mega's micro1 value in the
-    // generated d_piece grid). Falls back to None if no match found.
-    let up_stairs = find_dungeon_up_stairs(&layout, level);
+    // generated d_piece grid). L2-L4 up-stairs (between dungeon levels) are a
+    // follow-up once stair placement per level is wired.
+    let up_stairs = if level == 1 {
+        find_dungeon_up_stairs(&layout, &art)
+    } else {
+        None
+    };
     if let Some((sx, sy)) = up_stairs {
         println!("[Descend] up-stair (to town) located at micro-tile ({}, {})", sx, sy);
     } else {
         println!("[Descend] WARNING: no up-stair tile found in generated layout");
     }
 
+    game_state.dungeon_level_data = Some(art);
     game_state.dungeon_layout = Some(layout);
     game_state.dungeon_up_stairs = up_stairs;
+    game_state.current_dungeon_level = level;
     game_state.in_dungeon = true;
     // Keep is_town in sync so GameState::update's monster/item logic matches the
     // active mode (dungeon processes monsters; town skips them).
@@ -774,7 +797,7 @@ pub fn descend_to_dungeon(game_state: &mut GameState) -> Result<(), String> {
     game_state.player.position.x = center_x;
     game_state.player.position.y = center_y;
 
-    println!("[Descend] Entered L1 Cathedral at ({}, {})", center_x, center_y);
+    println!("[Descend] Entered L{} at ({}, {})", level, center_x, center_y);
 
     // Stamp the cooldown so the freshly-spawned position can't instantly
     // re-trigger a transition. The player starts in the dungeon interior and
@@ -3449,6 +3472,43 @@ impl LevelType {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_descend_to_level_enters_dungeon() {
+        use crate::engine::dungeon::{DungeonLevelData, DungeonType, MinData, PaletteData, SolData, TilData, TilEntry};
+        use crate::game::game_state::GameState;
+        use crate::game::player_exact::Player;
+
+        let mut til_tiles = Vec::new();
+        for i in 0..16u16 {
+            til_tiles.push(TilEntry { micro1: i, micro2: i + 1, micro3: i + 2, micro4: i + 3 });
+        }
+        let art = DungeonLevelData {
+            dungeon_type: DungeonType::Cathedral,
+            palette: PaletteData::default(),
+            sol: SolData { properties: vec![] },
+            min: MinData { mega_tiles: vec![], blocks_per_tile: 10 },
+            til: TilData { tiles: til_tiles },
+            level_cel: vec![],
+        };
+
+        let player = Player::new();
+        let mut gs = GameState::new(player, true, 12345);
+        gs.dungeon_art[1] = Some(art);
+
+        descend_to_level(&mut gs, 1).expect("descend to L1 succeeds");
+        assert!(gs.in_dungeon);
+        assert_eq!(gs.current_dungeon_level, 1);
+        assert!(gs.dungeon_layout.is_some(), "dungeon layout generated");
+        assert!(gs.dungeon_level_data.is_some(), "active art set");
+        assert_eq!(gs.camera.tile_x, 16 + 20 * 2, "camera centered in dungeon");
+
+        // A level whose art was never loaded fails gracefully (no panic).
+        let player2 = Player::new();
+        let mut gs2 = GameState::new(player2, true, 12345);
+        assert!(descend_to_level(&mut gs2, 2).is_err());
+    }
+
     use crate::engine::dungeon::{
         DungeonLevelData, DungeonType, LevelCelBlock, MegaTile, MinData, PaletteData, SolData,
         TilData, TileType, TilEntry,

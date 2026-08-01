@@ -498,7 +498,7 @@ impl DungeonType {
 }
 
 /// Complete dungeon level data
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DungeonLevelData {
     /// Dungeon type
     pub dungeon_type: DungeonType,

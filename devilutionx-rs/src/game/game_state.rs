@@ -317,6 +317,15 @@ pub struct GameState {
     /// L1 assets are unavailable (e.g. shareware build without L1 data).
     pub dungeon_level_data: Option<DungeonLevelData>,
 
+    /// Per-dungeon-level art cache (index 1=L1 .. 4=L4), loaded once from MPQ.
+    /// `descend_to_level` clones the active level's art into
+    /// `dungeon_level_data` for rendering. Entries stay `None` when the assets
+    /// are unavailable (e.g. shareware build lacks L2-L4 art).
+    pub dungeon_art: Vec<Option<DungeonLevelData>>,
+
+    /// The dungeon level currently being rendered (1=L1 .. 4=L4); 0 = in town.
+    pub current_dungeon_level: u8,
+
     /// Decoded stand sprites for the monster types currently in the dungeon,
     /// indexed by `MonsterType`. Built by `monster_sprites::MonsterSpriteSet`
     /// when descending. The dungeon renderer uses these to draw each living
@@ -480,6 +489,8 @@ impl GameState {
             dungeon_up_stairs: None,
             last_transition_tick: 0,
             dungeon_level_data: None,
+            dungeon_art: vec![None; 5],
+            current_dungeon_level: 0,
             monster_sprites: None,
             pending_sfx: Vec::new(),
             towners: Self::build_towner_list(),

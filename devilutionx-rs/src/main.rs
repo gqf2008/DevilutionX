@@ -1939,13 +1939,45 @@ fn start_game(ctx: &mut DiabloContext, class: game::player::PlayerClass, event_p
                 level.til.tiles.len(),
                 level.min.mega_tiles.len()
             );
-            game_state.dungeon_level_data = Some(level);
+            game_state.dungeon_level_data = Some(level.clone());
+            game_state.dungeon_art[1] = Some(level);
         }
         Err(e) => {
             println!(
                 "[StartGame] Could not load L1 Cathedral data ({}); dungeon descent will be unavailable",
                 e
             );
+        }
+    }
+
+    // Pre-load the remaining dungeon-level art (L2 Catacombs, L3 Caves, L4 Hell)
+    // into the per-level cache so `descend_to_level` can switch levels at
+    // runtime. Non-fatal per level: shareware builds lack L2-L4 data, so those
+    // slots stay `None` and descending to them logs a graceful failure.
+    for (slot, dungeon_type) in [
+        (2usize, engine::dungeon::DungeonType::Catacombs),
+        (3usize, engine::dungeon::DungeonType::Caves),
+        (4usize, engine::dungeon::DungeonType::Hell),
+    ] {
+        match engine::dungeon::DungeonLevelData::load_from_asset_manager(
+            &mut ctx.mpq_manager,
+            dungeon_type,
+        ) {
+            Ok(level) => {
+                println!(
+                    "[StartGame] Loaded L{} art: {} CEL bytes, {} TIL megas",
+                    slot,
+                    level.level_cel.len(),
+                    level.til.tiles.len()
+                );
+                game_state.dungeon_art[slot] = Some(level);
+            }
+            Err(e) => {
+                println!(
+                    "[StartGame] Could not load L{} art ({}); descending there is unavailable",
+                    slot, e
+                );
+            }
         }
     }
 
