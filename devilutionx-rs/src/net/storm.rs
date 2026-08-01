@@ -7,6 +7,25 @@
 use crate::net::base_protocol::BaseProtocol;
 use crate::net::transport::ProviderCaps;
 
+/// C++ `conn_type` (Source/storm/storm_net.hpp:14-19).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum ConnType {
+    ZeroTier = 0,
+    Tcp = 1,
+    Loopback = 2,
+}
+
+/// C++ `ConnectionNames` (Source/DiabloUI/multi/selconn.cpp:29-32) — the
+/// display names for the connection-selection list, in enum order.
+pub fn connection_name(conn: ConnType) -> &'static str {
+    match conn {
+        ConnType::ZeroTier => "ZeroTier",
+        ConnType::Tcp => "Client-Server (TCP)",
+        ConnType::Loopback => "Offline",
+    }
+}
+
 /// C++ `conn_type::SELCONN_LOOPBACK`.
 pub const SELCONN_LOOPBACK: u8 = 2;
 
@@ -154,4 +173,18 @@ mod tests {
         assert_eq!(caps.max_players, 4);
         assert_eq!(caps.max_message_size, 512);
     }
+
+    /// C++ `conn_type` enum values (storm_net.hpp) and `ConnectionNames`
+    /// (selconn.cpp) — the connection-selection list is built from these.
+    #[test]
+    fn test_conn_type_and_names_match_cpp() {
+        assert_eq!(ConnType::ZeroTier as u8, 0);
+        assert_eq!(ConnType::Tcp as u8, 1);
+        assert_eq!(ConnType::Loopback as u8, 2);
+        assert_eq!(SELCONN_LOOPBACK, ConnType::Loopback as u8);
+        assert_eq!(connection_name(ConnType::ZeroTier), "ZeroTier");
+        assert_eq!(connection_name(ConnType::Tcp), "Client-Server (TCP)");
+        assert_eq!(connection_name(ConnType::Loopback), "Offline");
+    }
 }
+
