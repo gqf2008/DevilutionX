@@ -1476,681 +1476,720 @@ macro_rules! udat {
 /// Unique items data table (expanded - contains 50 major unique items)
 /// Covers most iconic weapons, armor, and jewelry
 pub const UNIQUE_ITEMS: [UniqueItemData; 90] = [
-    // The Butcher's Cleaver (0)
-    udat!("The Butcher's Cleaver", 106, UniqueBaseItem::Cleaver, 1, 0, 3000,
+    //   0 The Butcher's Cleaver
+    udat!("The Butcher's Cleaver", 255, UniqueBaseItem::Cleaver, 1, 3, 3650,
+          ItemEffectType::Str, 10, 10,
+          ItemEffectType::SetDam, 4, 24,
+          ItemEffectType::SetDur, 10, 10,
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0,
+          ItemEffectType::Invalid, 0, 0),
+    //   1 The Undead Crown
+    udat!("The Undead Crown", 77, UniqueBaseItem::SkeletonCrown, 1, 2, 16650,
+          ItemEffectType::RndStealLife, 0, 0,
+          ItemEffectType::SetAC, 8, 8,
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0),
-
-    // Undead Crown (1)
-    udat!("Undead Crown", 78, UniqueBaseItem::SkeletonCrown, 1, 0, 4000,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0),
-
-    // Windforce (2 - actually ID 18, placeholder)
-    udat!("Windforce", 164, UniqueBaseItem::LongBow, 25, 6, 40000,
-          ItemEffectType::ToHit, 200, 200,
-          ItemEffectType::Damage, 0, 200,
-          ItemEffectType::Str, 5, 5,
-          ItemEffectType::Knockback, 0, 0,
-          ItemEffectType::FastAttack, 0, 0,
-          ItemEffectType::Invalid, 0, 0),
-
-    // The Grandfather (3 - actually ID 35)
-    udat!("The Grandfather", 161, UniqueBaseItem::GreatSword, 25, 4, 50000,
-          ItemEffectType::ToHit, 70, 70,
-          ItemEffectType::Damage, 10, 15,
-          ItemEffectType::AllRes, 20, 20,
-          ItemEffectType::Life, 10, 10,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0),
-
-    // Helm of Spirits (4)
-    udat!("Helm of Spirits", 77, UniqueBaseItem::Helm, 12, 4, 8000,
-          ItemEffectType::SetAC, 40, 40,
-          ItemEffectType::AllRes, 20, 20,
-          ItemEffectType::Mana, 20, 20,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0),
-
-    // Thinking Cap (5)
-    udat!("Thinking Cap", 93, UniqueBaseItem::Helm, 12, 3, 6000,
-          ItemEffectType::SetAC, 30, 30,
-          ItemEffectType::Mag, 5, 5,
-          ItemEffectType::SpellLevelAdd, 1, 2,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0),
-
-    // Arkaine's Valor (6)
-    udat!("Arkaine's Valor", 157, UniqueBaseItem::FullPlate, 18, 4, 19500,
-          ItemEffectType::SetAC, 60, 60,
-          ItemEffectType::Vit, 10, 10,
-          ItemEffectType::FastRecover, 0, 0,
-          ItemEffectType::Damage, 10, 10,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0),
-
-    // Griswold's Edge (7)
-    udat!("Griswold's Edge", 0, UniqueBaseItem::BroadSword, 8, 3, 6000,
-          ItemEffectType::ToHit, 20, 30,
-          ItemEffectType::SetDam, 1, 10,
-          ItemEffectType::Knockback, 0, 0,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0),
-
-    // Veil of Steel (8)
-    udat!("Veil of Steel", 85, UniqueBaseItem::GreatHelm, 16, 4, 12000,
-          ItemEffectType::SetAC, 50, 50,
-          ItemEffectType::AllRes, 50, 50,
-          ItemEffectType::Str, 15, 15,
-          ItemEffectType::Vit, 15, 15,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0),
-
-    // Harlequin Crest (9)
-    udat!("Harlequin Crest", 81, UniqueBaseItem::HarlequinCrest, 1, 2, 4500,
-          ItemEffectType::SetAC, 15, 15,
+    //   2 Empyrean Band
+    udat!("Empyrean Band", 255, UniqueBaseItem::InfraRing, 1, 4, 8000,
           ItemEffectType::Attribs, 2, 2,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0),
-
-    // The Protector (10)
-    udat!("The Protector", 162, UniqueBaseItem::LongStaff, 10, 3, 7500,
-          ItemEffectType::SetAC, 40, 40,
-          ItemEffectType::Life, 10, 10,
-          ItemEffectType::AllRes, 20, 20,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0),
-
-    // Ring of Truth (11)
-    udat!("Ring of Truth", 10, UniqueBaseItem::Ring, 12, 3, 8000,
-          ItemEffectType::Light, 3, 3,
-          ItemEffectType::AllRes, 10, 10,
-          ItemEffectType::Damage, 1, 12,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0),
-
-    // Ring of Regha (12)
-    udat!("Ring of Regha", 11, UniqueBaseItem::Ring, 12, 4, 15000,
-          ItemEffectType::Str, 10, 10,
-          ItemEffectType::Mag, 10, 10,
-          ItemEffectType::AllRes, 10, 10,
           ItemEffectType::Light, 2, 2,
+          ItemEffectType::FastRecover, 1, 1,
+          ItemEffectType::AbsHalfTrap, 0, 0,
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0),
-
-    // Optic Amulet (13)
-    udat!("Optic Amulet", 44, UniqueBaseItem::OpticAmulet, 1, 1, 5000,
-          ItemEffectType::Light, 5, 5,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0),
-
-    // Torn Flesh of Souls (14)
-    udat!("Torn Flesh of Souls", 92, UniqueBaseItem::Cape, 12, 2, 6000,
-          ItemEffectType::SetAC, 10, 10,
-          ItemEffectType::Life, -10, -20,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0),
-
-    // The Rift Bow (15)
-    udat!("The Rift Bow", 0, UniqueBaseItem::BattleBow, 15, 5, 18000,
-          ItemEffectType::ToHit, 50, 50,
-          ItemEffectType::Damage, 0, 100,
-          ItemEffectType::Dex, 5, 5,
-          ItemEffectType::RndArrowVel, 0, 0,
-          ItemEffectType::FastAttack, 0, 0,
-          ItemEffectType::Invalid, 0, 0),
-
-    // The Needler (16)
-    udat!("The Needler", 158, UniqueBaseItem::HunterBow, 16, 5, 22000,
-          ItemEffectType::ToHit, 50, 100,
-          ItemEffectType::Damage, 0, 150,
-          ItemEffectType::FastAttack, 0, 0,
-          ItemEffectType::Dex, 10, 10,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0),
-
-    // Messerschmidt's Reaver (17)
-    udat!("Messerschmidt's Reaver", 163, UniqueBaseItem::BattleAxe, 20, 5, 35000,
-          ItemEffectType::ToHit, 100, 100,
-          ItemEffectType::SetDam, 15, 25,
-          ItemEffectType::Str, 10, 10,
-          ItemEffectType::FireDam, 0, 0,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0),
-
-    // The Grizzly (18)
-    udat!("The Grizzly", 160, UniqueBaseItem::Maul, 18, 4, 25000,
-          ItemEffectType::ToHit, 100, 100,
-          ItemEffectType::SetDam, 10, 20,
-          ItemEffectType::Knockback, 0, 0,
-          ItemEffectType::Str, 20, 20,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0),
-
-    // Royal Circlet (19)
-    udat!("Royal Circlet", 79, UniqueBaseItem::Crown, 14, 3, 12000,
-          ItemEffectType::SetAC, 40, 40,
-          ItemEffectType::AllRes, 10, 10,
+    //   3 Optic Amulet
+    udat!("Optic Amulet", 255, UniqueBaseItem::OpticAmulet, 1, 4, 9750,
           ItemEffectType::Light, 2, 2,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0),
-
-    // More Unique Weapons (20-34)
-    udat!("Lightsabre", 0, UniqueBaseItem::Sabre, 15, 5, 24000,
-          ItemEffectType::ToHit, 20, 20,
-          ItemEffectType::SetDam, 1, 20,
-          ItemEffectType::LightDam, 1, 10,
           ItemEffectType::LightRes, 20, 20,
-          ItemEffectType::Light, 3, 3,
-          ItemEffectType::Invalid, 0, 0),
-    udat!("Inferno", 0, UniqueBaseItem::LongSword, 12, 4, 18500,
-          ItemEffectType::ToHit, 20, 20,
-          ItemEffectType::SetDam, 2, 12,
-          ItemEffectType::FireDam, 2, 12,
-          ItemEffectType::FireRes, 20, 20,
+          ItemEffectType::GetHit, 1, 1,
+          ItemEffectType::Mag, 5, 5,
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0),
-    udat!("Doombringer", 0, UniqueBaseItem::BastardSword, 18, 5, 32000,
-          ItemEffectType::ToHit, 25, 25,
-          ItemEffectType::SetDam, 4, 20,
-          ItemEffectType::Str, 5, 5,
-          ItemEffectType::Vit, 5, 5,
-          ItemEffectType::AllRes, 10, 10,
-          ItemEffectType::Invalid, 0, 0),
-    udat!("Falcon's Talon", 0, UniqueBaseItem::Scimitar, 11, 4, 11250,
-          ItemEffectType::ToHit, 20, 30,
-          ItemEffectType::Damage, 1, 100,
-          ItemEffectType::Dex, 10, 10,
-          ItemEffectType::FastAttack, 0, 0,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0),
-    udat!("Gibbous Moon", 0, UniqueBaseItem::BroadSword, 8, 4, 6660,
-          ItemEffectType::Attribs, 2, 2,
-          ItemEffectType::Damage, 0, 25,
-          ItemEffectType::Mana, 15, 15,
-          ItemEffectType::LightCurse, 3, 3,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0),
-    udat!("Ice Shank", 0, UniqueBaseItem::LongSword, 9, 3, 5250,
-          ItemEffectType::FireRes, 40, 40,
-          ItemEffectType::SetDur, 15, 15,
-          ItemEffectType::Str, 5, 10,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0),
-    udat!("The Bonesaw", 0, UniqueBaseItem::Claymore, 12, 6, 4400,
-          ItemEffectType::DamMod, 10, 10,
-          ItemEffectType::Str, 10, 10,
-          ItemEffectType::MagCurse, 5, 5,
-          ItemEffectType::DexCurse, 5, 5,
+    //   4 Ring of Truth
+    udat!("Ring of Truth", 255, UniqueBaseItem::TRing, 1, 3, 9100,
           ItemEffectType::Life, 10, 10,
-          ItemEffectType::ManaCurse, 10, 10),
-    udat!("Shadowhawk", 0, UniqueBaseItem::BroadSword, 14, 4, 13750,
+          ItemEffectType::GetHit, 1, 1,
+          ItemEffectType::AllRes, 10, 10,
+          ItemEffectType::Invalid, 0, 0,
+          ItemEffectType::Invalid, 0, 0,
+          ItemEffectType::Invalid, 0, 0),
+    //   5 Harlequin Crest
+    udat!("Harlequin Crest", 255, UniqueBaseItem::HarlequinCrest, 1, 5, 4000,
+          ItemEffectType::ACCurse, 3, 3,
+          ItemEffectType::GetHit, 1, 1,
+          ItemEffectType::Attribs, 2, 2,
+          ItemEffectType::Life, 7, 7,
+          ItemEffectType::Mana, 7, 7,
+          ItemEffectType::Invalid, 0, 0),
+    //   6 Veil of Steel
+    udat!("Veil of Steel", 255, UniqueBaseItem::SteelVeil, 1, 6, 63800,
+          ItemEffectType::AllRes, 50, 50,
           ItemEffectType::LightCurse, 2, 2,
-          ItemEffectType::StealLife, 5, 5,
-          ItemEffectType::ToHit, 15, 15,
-          ItemEffectType::AllRes, 5, 5,
+          ItemEffectType::ArmorPercent, 60, 60,
+          ItemEffectType::ManaCurse, 30, 30,
+          ItemEffectType::Str, 15, 15,
+          ItemEffectType::Vit, 15, 15),
+    //   7 Arkaine's Valor
+    udat!("Arkaine's Valor", 255, UniqueBaseItem::ArmorOfValor, 1, 4, 42000,
+          ItemEffectType::SetAC, 25, 25,
+          ItemEffectType::Vit, 10, 10,
+          ItemEffectType::GetHit, 3, 3,
+          ItemEffectType::FastRecover, 3, 3,
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0),
-    udat!("Wizardspike", 50, UniqueBaseItem::Dagger, 15, 4, 12920,
-          ItemEffectType::Mag, 15, 15,
-          ItemEffectType::Mana, 35, 35,
+    //   8 Griswold's Edge
+    udat!("Griswold's Edge", 255, UniqueBaseItem::Griswold, 1, 6, 42000,
+          ItemEffectType::FireDam, 1, 10,
           ItemEffectType::ToHit, 25, 25,
-          ItemEffectType::AllRes, 15, 15,
+          ItemEffectType::FastAttack, 2, 2,
+          ItemEffectType::Knockback, 0, 0,
+          ItemEffectType::Mana, 20, 20,
+          ItemEffectType::LifeCurse, 20, 20),
+    //   9 Lightforge
+    udat!("Lightforge", 255, UniqueBaseItem::LightningForge, 1, 6, 26675,
+          ItemEffectType::Light, 4, 4,
+          ItemEffectType::Damage, 150, 150,
+          ItemEffectType::ToHit, 25, 25,
+          ItemEffectType::FireDam, 10, 20,
+          ItemEffectType::Indestructible, 0, 0,
+          ItemEffectType::Attribs, 8, 8),
+    //  10 The Rift Bow
+    udat!("The Rift Bow", 255, UniqueBaseItem::ShortBow, 1, 3, 1800,
+          ItemEffectType::RndArrowVel, 0, 0,
+          ItemEffectType::DamMod, 2, 2,
+          ItemEffectType::DexCurse, 3, 3,
+          ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0),
-    udat!("Gonnagal's Dirk", 54, UniqueBaseItem::Dagger, 5, 4, 7040,
+    //  11 The Needler
+    udat!("The Needler", 158, UniqueBaseItem::ShortBow, 2, 3, 8900,
+          ItemEffectType::ToHit, 50, 50,
+          ItemEffectType::SetDam, 1, 3,
+          ItemEffectType::FastAttack, 2, 2,
+          ItemEffectType::Invalid, 0, 0,
+          ItemEffectType::Invalid, 0, 0,
+          ItemEffectType::Invalid, 0, 0),
+    //  12 The Celestial Bow
+    udat!("The Celestial Bow", 133, UniqueBaseItem::LongBow, 2, 3, 1200,
+          ItemEffectType::NoMinStr, 0, 0,
+          ItemEffectType::DamMod, 2, 2,
+          ItemEffectType::SetAC, 5, 5,
+          ItemEffectType::Invalid, 0, 0,
+          ItemEffectType::Invalid, 0, 0,
+          ItemEffectType::Invalid, 0, 0),
+    //  13 Deadly Hunter
+    udat!("Deadly Hunter", 108, UniqueBaseItem::CompositeBow, 3, 3, 8750,
+          ItemEffectType::TripleDemonDamage, 0, 0,
+          ItemEffectType::ToHit, 20, 20,
+          ItemEffectType::MagCurse, 5, 5,
+          ItemEffectType::Invalid, 0, 0,
+          ItemEffectType::Invalid, 0, 0,
+          ItemEffectType::Invalid, 0, 0),
+    //  14 Bow of the Dead
+    udat!("Bow of the Dead", 108, UniqueBaseItem::CompositeBow, 5, 5, 2500,
+          ItemEffectType::ToHit, 10, 10,
+          ItemEffectType::Dex, 4, 4,
+          ItemEffectType::VitCurse, 3, 3,
+          ItemEffectType::LightCurse, 2, 2,
+          ItemEffectType::SetDur, 30, 30,
+          ItemEffectType::Invalid, 0, 0),
+    //  15 The Blackoak Bow
+    udat!("The Blackoak Bow", 255, UniqueBaseItem::LongBow, 5, 4, 2500,
+          ItemEffectType::Dex, 10, 10,
+          ItemEffectType::VitCurse, 10, 10,
+          ItemEffectType::Damage, 50, 50,
+          ItemEffectType::LightCurse, 1, 1,
+          ItemEffectType::Invalid, 0, 0,
+          ItemEffectType::Invalid, 0, 0),
+    //  16 Flamedart
+    udat!("Flamedart", 255, UniqueBaseItem::HunterBow, 10, 3, 14250,
+          ItemEffectType::FireArrows, 1, 6,
+          ItemEffectType::ToHit, 20, 20,
+          ItemEffectType::FireRes, 40, 40,
+          ItemEffectType::Invalid, 0, 0,
+          ItemEffectType::Invalid, 0, 0,
+          ItemEffectType::Invalid, 0, 0),
+    //  17 Fleshstinger
+    udat!("Fleshstinger", 255, UniqueBaseItem::LongBow, 13, 4, 16500,
+          ItemEffectType::Dex, 15, 15,
+          ItemEffectType::ToHit, 40, 40,
+          ItemEffectType::Damage, 80, 80,
+          ItemEffectType::Durability, 6, 6,
+          ItemEffectType::Invalid, 0, 0,
+          ItemEffectType::Invalid, 0, 0),
+    //  18 Windforce
+    udat!("Windforce", 164, UniqueBaseItem::WarBow, 17, 3, 37750,
+          ItemEffectType::Str, 5, 5,
+          ItemEffectType::Damage, 200, 200,
+          ItemEffectType::Knockback, 0, 0,
+          ItemEffectType::Invalid, 0, 0,
+          ItemEffectType::Invalid, 0, 0,
+          ItemEffectType::Invalid, 0, 0),
+    //  19 Eaglehorn
+    udat!("Eaglehorn", 108, UniqueBaseItem::BattleBow, 26, 4, 42500,
+          ItemEffectType::Dex, 20, 20,
+          ItemEffectType::ToHit, 50, 50,
+          ItemEffectType::Damage, 100, 100,
+          ItemEffectType::Indestructible, 0, 0,
+          ItemEffectType::Invalid, 0, 0,
+          ItemEffectType::Invalid, 0, 0),
+    //  20 Gonnagal's Dirk
+    udat!("Gonnagal's Dirk", 54, UniqueBaseItem::Dagger, 1, 4, 7040,
           ItemEffectType::DexCurse, 5, 5,
           ItemEffectType::DamMod, 4, 4,
           ItemEffectType::FastAttack, 2, 2,
           ItemEffectType::FireRes, 25, 25,
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0),
-    udat!("The Defender", 0, UniqueBaseItem::Sabre, 3, 3, 2000,
+    //  21 The Defender
+    udat!("The Defender", 255, UniqueBaseItem::Sabre, 1, 3, 2000,
           ItemEffectType::SetAC, 5, 5,
           ItemEffectType::Vit, 5, 5,
           ItemEffectType::ToHitCurse, 5, 5,
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0),
-    udat!("Gryphon's Claw", 68, UniqueBaseItem::Falchion, 5, 3, 1000,
-          ItemEffectType::Damage, 0, 100,
+    //  22 Gryphon's Claw
+    udat!("Gryphon's Claw", 68, UniqueBaseItem::Falchion, 1, 3, 1000,
+          ItemEffectType::Damage, 100, 100,
           ItemEffectType::MagCurse, 2, 2,
           ItemEffectType::DexCurse, 5, 5,
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0),
-    udat!("Black Razor", 53, UniqueBaseItem::Dagger, 7, 3, 2000,
-          ItemEffectType::Damage, 0, 150,
+    //  23 Black Razor
+    udat!("Black Razor", 53, UniqueBaseItem::Dagger, 1, 3, 2000,
+          ItemEffectType::Damage, 150, 150,
           ItemEffectType::Vit, 2, 2,
           ItemEffectType::SetDur, 5, 5,
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0),
-    udat!("The Executioner's Blade", 58, UniqueBaseItem::Falchion, 8, 4, 7080,
-          ItemEffectType::Damage, 0, 150,
+    //  24 Gibbous Moon
+    udat!("Gibbous Moon", 255, UniqueBaseItem::BroadSword, 2, 4, 6660,
+          ItemEffectType::Attribs, 2, 2,
+          ItemEffectType::Damage, 25, 25,
+          ItemEffectType::Mana, 15, 15,
+          ItemEffectType::LightCurse, 3, 3,
+          ItemEffectType::Invalid, 0, 0,
+          ItemEffectType::Invalid, 0, 0),
+    //  25 Ice Shank
+    udat!("Ice Shank", 255, UniqueBaseItem::LongSword, 3, 3, 5250,
+          ItemEffectType::FireRes, 40, 40,
+          ItemEffectType::SetDur, 15, 15,
+          ItemEffectType::Str, 5, 10,
+          ItemEffectType::Invalid, 0, 0,
+          ItemEffectType::Invalid, 0, 0,
+          ItemEffectType::Invalid, 0, 0),
+    //  26 The Executioner's Blade
+    udat!("The Executioner's Blade", 58, UniqueBaseItem::Falchion, 3, 4, 7080,
+          ItemEffectType::Damage, 150, 150,
           ItemEffectType::LifeCurse, 10, 10,
           ItemEffectType::LightCurse, 1, 1,
           ItemEffectType::Durability, 200, 200,
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0),
-
-    // More Unique Axes (35-40)
-    udat!("The Mangler", 0, UniqueBaseItem::LargeAxe, 10, 3, 8000,
-          ItemEffectType::ToHit, 20, 20,
-          ItemEffectType::SetDam, 2, 10,
-          ItemEffectType::Str, 5, 5,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0),
-    udat!("Sharp Beak", 0, UniqueBaseItem::SmallAxe, 8, 3, 6200,
-          ItemEffectType::ToHit, 15, 15,
-          ItemEffectType::Damage, 1, 50,
-          ItemEffectType::Dex, 5, 5,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0),
-    udat!("Bloodslayer", 0, UniqueBaseItem::BroadAxe, 14, 4, 18000,
-          ItemEffectType::ToHit, 60, 60,
-          ItemEffectType::SetDam, 8, 24,
-          ItemEffectType::Damage, 0, 200,
-          ItemEffectType::Str, 15, 15,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0),
-    udat!("Celestial Axe", 0, UniqueBaseItem::BattleAxe, 15, 3, 20000,
-          ItemEffectType::ToHit, 15, 25,
-          ItemEffectType::SetDam, 5, 20,
-          ItemEffectType::AllRes, 10, 10,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0),
-    udat!("Wicked Axe", 0, UniqueBaseItem::BroadAxe, 11, 3, 11000,
-          ItemEffectType::ToHit, 30, 30,
-          ItemEffectType::Damage, 1, 150,
+    //  27 The Bonesaw
+    udat!("The Bonesaw", 255, UniqueBaseItem::Claymore, 6, 6, 4400,
+          ItemEffectType::DamMod, 10, 10,
+          ItemEffectType::Str, 10, 10,
+          ItemEffectType::MagCurse, 5, 5,
+          ItemEffectType::DexCurse, 5, 5,
           ItemEffectType::Life, 10, 10,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0),
-    udat!("Stonecleaver", 104, UniqueBaseItem::BroadAxe, 14, 4, 16500,
-          ItemEffectType::ToHit, 50, 50,
-          ItemEffectType::SetDam, 6, 18,
-          ItemEffectType::Damage, 1, 200,
-          ItemEffectType::FireRes, 40, 40,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0),
-
-    // More Unique Maces (41-44)
-    udat!("Crackrust", 0, UniqueBaseItem::Mace, 8, 2, 4200,
+          ItemEffectType::ManaCurse, 10, 10),
+    //  28 Shadowhawk
+    udat!("Shadowhawk", 255, UniqueBaseItem::BroadSword, 8, 4, 13750,
+          ItemEffectType::LightCurse, 2, 2,
+          ItemEffectType::StealLife, 5, 5,
           ItemEffectType::ToHit, 15, 15,
-          ItemEffectType::Damage, 1, 100,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0,
+          ItemEffectType::AllRes, 5, 5,
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0),
-    udat!("Civerb's Cudgel", 0, UniqueBaseItem::MorningStar, 12, 4, 14000,
-          ItemEffectType::ToHit, 200, 200,
-          ItemEffectType::Damage, 2, 150,
-          ItemEffectType::SetDam, 1, 20,
-          ItemEffectType::Damage, 0, 200,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0),
-    udat!("Celestial Star", 0, UniqueBaseItem::Flail, 15, 4, 22500,
-          ItemEffectType::ToHit, 20, 20,
-          ItemEffectType::SetDam, 8, 18,
-          ItemEffectType::Str, 5, 5,
-          ItemEffectType::AllRes, 20, 20,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0),
-    udat!("Baranar's Star", 0, UniqueBaseItem::MorningStar, 11, 3, 12000,
-          ItemEffectType::ToHit, 12, 12,
-          ItemEffectType::Damage, 4, 16,
-          ItemEffectType::FastAttack, 2, 2,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0),
-
-    // More Unique Staves/Misc (45-49)
-    udat!("Staff of Shadows", 0, UniqueBaseItem::LongStaff, 12, 5, 16000,
-          ItemEffectType::Mag, 10, 10,
-          ItemEffectType::Mana, 40, 40,
+    //  29 Wizardspike
+    udat!("Wizardspike", 50, UniqueBaseItem::Dagger, 11, 4, 12920,
+          ItemEffectType::Mag, 15, 15,
+          ItemEffectType::Mana, 35, 35,
           ItemEffectType::ToHit, 25, 25,
-          ItemEffectType::Charges, 40, 40,
-          ItemEffectType::AllRes, 10, 10,
-          ItemEffectType::Invalid, 0, 0),
-    udat!("Immolator", 0, UniqueBaseItem::LongStaff, 15, 4, 20000,
-          ItemEffectType::ToHit, 30, 30,
-          ItemEffectType::FireDam, 10, 30,
-          ItemEffectType::FastAttack, 1, 1,
-          ItemEffectType::FireRes, 20, 20,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0),
-    udat!("Stormspire", 0, UniqueBaseItem::WarStaff, 20, 4, 35000,
-          ItemEffectType::ToHit, 40, 40,
-          ItemEffectType::LightDam, 1, 50,
-          ItemEffectType::LightArrows, 0, 0,
-          ItemEffectType::LightRes, 30, 30,
-          ItemEffectType::Invalid, 0, 0,
-          ItemEffectType::Invalid, 0, 0),
-    udat!("Gleamsong", 0, UniqueBaseItem::CompositeStaff, 13, 3, 18750,
-          ItemEffectType::ToHit, 20, 30,
-          ItemEffectType::Damage, 1, 200,
           ItemEffectType::AllRes, 15, 15,
           ItemEffectType::Invalid, 0, 0,
+          ItemEffectType::Invalid, 0, 0),
+    //  30 Lightsabre
+    udat!("Lightsabre", 255, UniqueBaseItem::Sabre, 13, 4, 19150,
+          ItemEffectType::Light, 2, 2,
+          ItemEffectType::LightDam, 1, 10,
+          ItemEffectType::ToHit, 20, 20,
+          ItemEffectType::LightRes, 50, 50,
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0),
-    udat!("Thundercall", 0, UniqueBaseItem::WarStaff, 18, 5, 28500,
-          ItemEffectType::ToHit, 35, 35,
-          ItemEffectType::SetDam, 1, 50,
-          ItemEffectType::LightDam, 1, 40,
-          ItemEffectType::Mag, 10, 10,
-          ItemEffectType::Charges, 60, 60,
+    //  31 The Falcon's Talon
+    udat!("The Falcon's Talon", 68, UniqueBaseItem::Scimitar, 15, 4, 7867,
+          ItemEffectType::FastAttack, 4, 4,
+          ItemEffectType::ToHit, 20, 20,
+          ItemEffectType::DamageCurse, 33, 33,
+          ItemEffectType::Dex, 10, 10,
+          ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0),
-
-    // Items 50-69: More Unique Weapons, Helms
-    udat!("Baranar's Star", 0, UniqueBaseItem::MorningStar, 5, 6, 6850,
+    //  32 Inferno
+    udat!("Inferno", 255, UniqueBaseItem::LongSword, 17, 4, 34600,
+          ItemEffectType::FireDam, 2, 12,
+          ItemEffectType::Light, 3, 3,
+          ItemEffectType::Mana, 20, 20,
+          ItemEffectType::FireRes, 80, 80,
+          ItemEffectType::Invalid, 0, 0,
+          ItemEffectType::Invalid, 0, 0),
+    //  33 Doombringer
+    udat!("Doombringer", 255, UniqueBaseItem::BastardSword, 19, 5, 18250,
+          ItemEffectType::ToHit, 25, 25,
+          ItemEffectType::Damage, 250, 250,
+          ItemEffectType::AttribsCurse, 5, 5,
+          ItemEffectType::LifeCurse, 25, 25,
+          ItemEffectType::LightCurse, 2, 2,
+          ItemEffectType::Invalid, 0, 0),
+    //  34 The Grizzly
+    udat!("The Grizzly", 160, UniqueBaseItem::TwoHandSword, 23, 5, 50000,
+          ItemEffectType::Str, 20, 20,
+          ItemEffectType::VitCurse, 5, 5,
+          ItemEffectType::Damage, 200, 200,
+          ItemEffectType::Knockback, 0, 0,
+          ItemEffectType::Durability, 100, 100,
+          ItemEffectType::Invalid, 0, 0),
+    //  35 The Grandfather
+    udat!("The Grandfather", 161, UniqueBaseItem::GreatSword, 27, 5, 119800,
+          ItemEffectType::OneHand, 0, 0,
+          ItemEffectType::Attribs, 5, 5,
+          ItemEffectType::ToHit, 20, 20,
+          ItemEffectType::Damage, 70, 70,
+          ItemEffectType::Life, 20, 20,
+          ItemEffectType::Invalid, 0, 0),
+    //  36 The Mangler
+    udat!("The Mangler", 144, UniqueBaseItem::LargeAxe, 2, 4, 2850,
+          ItemEffectType::Damage, 200, 200,
+          ItemEffectType::DexCurse, 5, 5,
+          ItemEffectType::MagCurse, 5, 5,
+          ItemEffectType::ManaCurse, 10, 10,
+          ItemEffectType::Invalid, 0, 0,
+          ItemEffectType::Invalid, 0, 0),
+    //  37 Sharp Beak
+    udat!("Sharp Beak", 143, UniqueBaseItem::LargeAxe, 2, 3, 2850,
+          ItemEffectType::Life, 20, 20,
+          ItemEffectType::MagCurse, 10, 10,
+          ItemEffectType::ManaCurse, 10, 10,
+          ItemEffectType::Invalid, 0, 0,
+          ItemEffectType::Invalid, 0, 0,
+          ItemEffectType::Invalid, 0, 0),
+    //  38 Bloodslayer
+    udat!("Bloodslayer", 144, UniqueBaseItem::BroadAxe, 3, 4, 2500,
+          ItemEffectType::Damage, 100, 100,
+          ItemEffectType::TripleDemonDamage, 0, 0,
+          ItemEffectType::AttribsCurse, 5, 5,
+          ItemEffectType::SpellLevelAdd, -1, -1,
+          ItemEffectType::Invalid, 0, 0,
+          ItemEffectType::Invalid, 0, 0),
+    //  39 The Celestial Axe
+    udat!("The Celestial Axe", 255, UniqueBaseItem::BattleAxe, 4, 4, 14100,
+          ItemEffectType::NoMinStr, 0, 0,
+          ItemEffectType::ToHit, 15, 15,
+          ItemEffectType::Life, 15, 15,
+          ItemEffectType::StrCurse, 15, 15,
+          ItemEffectType::Invalid, 0, 0,
+          ItemEffectType::Invalid, 0, 0),
+    //  40 Wicked Axe
+    udat!("Wicked Axe", 143, UniqueBaseItem::LargeAxe, 5, 5, 31150,
+          ItemEffectType::ToHit, 30, 30,
+          ItemEffectType::Dex, 10, 10,
+          ItemEffectType::VitCurse, 10, 10,
+          ItemEffectType::GetHit, 1, 6,
+          ItemEffectType::Indestructible, 0, 0,
+          ItemEffectType::Invalid, 0, 0),
+    //  41 Stonecleaver
+    udat!("Stonecleaver", 104, UniqueBaseItem::BroadAxe, 7, 4, 23900,
+          ItemEffectType::Life, 30, 30,
+          ItemEffectType::ToHit, 20, 20,
+          ItemEffectType::Damage, 50, 50,
+          ItemEffectType::LightRes, 40, 40,
+          ItemEffectType::Invalid, 0, 0,
+          ItemEffectType::Invalid, 0, 0),
+    //  42 Aguinara's Hatchet
+    udat!("Aguinara's Hatchet", 255, UniqueBaseItem::SmallAxe, 12, 3, 24800,
+          ItemEffectType::SpellLevelAdd, 1, 1,
+          ItemEffectType::Mag, 10, 10,
+          ItemEffectType::MagicRes, 80, 80,
+          ItemEffectType::Invalid, 0, 0,
+          ItemEffectType::Invalid, 0, 0,
+          ItemEffectType::Invalid, 0, 0),
+    //  43 Hellslayer
+    udat!("Hellslayer", 255, UniqueBaseItem::BattleAxe, 15, 5, 26200,
+          ItemEffectType::Str, 8, 8,
+          ItemEffectType::Vit, 8, 8,
+          ItemEffectType::Damage, 100, 100,
+          ItemEffectType::Life, 25, 25,
+          ItemEffectType::ManaCurse, 25, 25,
+          ItemEffectType::Invalid, 0, 0),
+    //  44 Messerschmidt's Reaver
+    udat!("Messerschmidt's Reaver", 163, UniqueBaseItem::GreatAxe, 25, 5, 58000,
+          ItemEffectType::Damage, 200, 200,
+          ItemEffectType::DamMod, 15, 15,
+          ItemEffectType::Attribs, 5, 5,
+          ItemEffectType::LifeCurse, 50, 50,
+          ItemEffectType::FireDam, 2, 12,
+          ItemEffectType::Invalid, 0, 0),
+    //  45 Crackrust
+    udat!("Crackrust", 255, UniqueBaseItem::Mace, 1, 5, 11375,
+          ItemEffectType::Attribs, 2, 2,
+          ItemEffectType::Indestructible, 0, 0,
+          ItemEffectType::AllRes, 15, 15,
+          ItemEffectType::Damage, 50, 50,
+          ItemEffectType::SpellLevelAdd, -1, -1,
+          ItemEffectType::Invalid, 0, 0),
+    //  46 Hammer of Jholm
+    udat!("Hammer of Jholm", 255, UniqueBaseItem::Maul, 1, 4, 8700,
+          ItemEffectType::SetDam, 4, 10,
+          ItemEffectType::Indestructible, 0, 0,
+          ItemEffectType::Str, 3, 3,
+          ItemEffectType::ToHit, 15, 15,
+          ItemEffectType::Invalid, 0, 0,
+          ItemEffectType::Invalid, 0, 0),
+    //  47 Civerb's Cudgel
+    udat!("Civerb's Cudgel", 255, UniqueBaseItem::Mace, 1, 3, 2000,
+          ItemEffectType::TripleDemonDamage, 0, 0,
+          ItemEffectType::DexCurse, 5, 5,
+          ItemEffectType::MagCurse, 2, 2,
+          ItemEffectType::Invalid, 0, 0,
+          ItemEffectType::Invalid, 0, 0,
+          ItemEffectType::Invalid, 0, 0),
+    //  48 The Celestial Star
+    udat!("The Celestial Star", 255, UniqueBaseItem::Flail, 2, 4, 7810,
+          ItemEffectType::NoMinStr, 0, 0,
+          ItemEffectType::Light, 2, 2,
+          ItemEffectType::DamMod, 10, 10,
+          ItemEffectType::ACCurse, 8, 8,
+          ItemEffectType::Invalid, 0, 0,
+          ItemEffectType::Invalid, 0, 0),
+    //  49 Baranar's Star
+    udat!("Baranar's Star", 255, UniqueBaseItem::MorningStar, 5, 6, 6850,
           ItemEffectType::ToHit, 12, 12,
           ItemEffectType::Damage, 80, 80,
           ItemEffectType::FastAttack, 1, 1,
           ItemEffectType::Vit, 4, 4,
           ItemEffectType::DexCurse, 4, 4,
           ItemEffectType::SetDur, 60, 60),
-    udat!("Gnarled Root", 0, UniqueBaseItem::SpikedClub, 9, 6, 9820,
+    //  50 Gnarled Root
+    udat!("Gnarled Root", 255, UniqueBaseItem::SpikedClub, 9, 6, 9820,
           ItemEffectType::ToHit, 20, 20,
           ItemEffectType::Damage, 300, 300,
           ItemEffectType::Dex, 10, 10,
           ItemEffectType::Mag, 5, 5,
           ItemEffectType::AllRes, 10, 10,
           ItemEffectType::ACCurse, 10, 10),
-    udat!("The Cranium Basher", 0, UniqueBaseItem::Maul, 12, 5, 36500,
+    //  51 The Cranium Basher
+    udat!("The Cranium Basher", 255, UniqueBaseItem::Maul, 12, 5, 36500,
           ItemEffectType::DamMod, 20, 20,
           ItemEffectType::Str, 15, 15,
           ItemEffectType::Indestructible, 0, 0,
           ItemEffectType::ManaCurse, 150, 150,
           ItemEffectType::AllRes, 5, 5,
           ItemEffectType::Invalid, 0, 0),
-    udat!("Schaefer's Hammer", 0, UniqueBaseItem::WarHammer, 16, 6, 56125,
+    //  52 Schaefer's Hammer
+    udat!("Schaefer's Hammer", 255, UniqueBaseItem::WarHammer, 16, 6, 56125,
           ItemEffectType::DamageCurse, 100, 100,
           ItemEffectType::LightDam, 1, 50,
           ItemEffectType::Life, 50, 50,
           ItemEffectType::ToHit, 30, 30,
           ItemEffectType::LightRes, 80, 80,
           ItemEffectType::Light, 1, 1),
-    udat!("Dreamflange", 0, UniqueBaseItem::Mace, 26, 5, 26450,
+    //  53 Dreamflange
+    udat!("Dreamflange", 255, UniqueBaseItem::Mace, 26, 5, 26450,
           ItemEffectType::Mag, 30, 30,
           ItemEffectType::Mana, 50, 50,
           ItemEffectType::MagicRes, 50, 50,
           ItemEffectType::Light, 2, 2,
           ItemEffectType::SpellLevelAdd, 1, 1,
           ItemEffectType::Invalid, 0, 0),
-    udat!("Staff of Shadows", 0, UniqueBaseItem::LongStaff, 2, 5, 1250,
+    //  54 Staff of Shadows
+    udat!("Staff of Shadows", 255, UniqueBaseItem::LongStaff, 2, 5, 1250,
           ItemEffectType::MagCurse, 10, 10,
           ItemEffectType::ToHit, 10, 10,
           ItemEffectType::Damage, 60, 60,
           ItemEffectType::LightCurse, 2, 2,
           ItemEffectType::FastAttack, 1, 1,
           ItemEffectType::Invalid, 0, 0),
-    udat!("Immolator", 0, UniqueBaseItem::LongStaff, 4, 4, 3900,
+    //  55 Immolator
+    udat!("Immolator", 255, UniqueBaseItem::LongStaff, 4, 4, 3900,
           ItemEffectType::FireRes, 20, 20,
           ItemEffectType::FireDam, 4, 4,
           ItemEffectType::Mana, 10, 10,
           ItemEffectType::VitCurse, 5, 5,
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0),
-    udat!("Storm Spire", 0, UniqueBaseItem::WarStaff, 8, 4, 22500,
+    //  56 Storm Spire
+    udat!("Storm Spire", 255, UniqueBaseItem::WarStaff, 8, 4, 22500,
           ItemEffectType::LightRes, 50, 50,
           ItemEffectType::LightDam, 2, 8,
           ItemEffectType::Str, 10, 10,
           ItemEffectType::MagCurse, 10, 10,
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0),
-    udat!("Gleamsong", 0, UniqueBaseItem::ShortStaff, 8, 4, 6520,
+    //  57 Gleamsong
+    udat!("Gleamsong", 255, UniqueBaseItem::ShortStaff, 8, 4, 6520,
           ItemEffectType::Mana, 25, 25,
           ItemEffectType::StrCurse, 3, 3,
           ItemEffectType::VitCurse, 3, 3,
           ItemEffectType::Spell, 10, 76,
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0),
-    udat!("Thundercall", 0, UniqueBaseItem::CompositeStaff, 14, 5, 22250,
+    //  58 Thundercall
+    udat!("Thundercall", 255, UniqueBaseItem::CompositeStaff, 14, 5, 22250,
           ItemEffectType::ToHit, 35, 35,
           ItemEffectType::LightDam, 1, 10,
           ItemEffectType::Spell, 3, 76,
           ItemEffectType::LightRes, 30, 30,
           ItemEffectType::Light, 2, 2,
           ItemEffectType::Invalid, 0, 0),
-    udat!("The Protector", 0, UniqueBaseItem::ShortStaff, 16, 5, 17240,
+    //  59 The Protector
+    udat!("The Protector", 162, UniqueBaseItem::ShortStaff, 16, 5, 17240,
           ItemEffectType::Vit, 5, 5,
           ItemEffectType::GetHit, 5, 5,
           ItemEffectType::SetAC, 40, 40,
           ItemEffectType::Spell, 2, 86,
           ItemEffectType::Thorns, 1, 3,
           ItemEffectType::Invalid, 0, 0),
-    udat!("Naj's Puzzler", 0, UniqueBaseItem::LongStaff, 18, 5, 34000,
+    //  60 Naj's Puzzler
+    udat!("Naj's Puzzler", 255, UniqueBaseItem::LongStaff, 18, 5, 34000,
           ItemEffectType::Mag, 20, 20,
           ItemEffectType::Dex, 10, 10,
           ItemEffectType::AllRes, 20, 20,
           ItemEffectType::Spell, 23, 57,
           ItemEffectType::LifeCurse, 25, 25,
           ItemEffectType::Invalid, 0, 0),
-    udat!("Mindcry", 0, UniqueBaseItem::QuarterStaff, 20, 4, 41500,
+    //  61 Mindcry
+    udat!("Mindcry", 255, UniqueBaseItem::QuarterStaff, 20, 4, 41500,
           ItemEffectType::Mag, 15, 15,
           ItemEffectType::Spell, 13, 69,
           ItemEffectType::AllRes, 15, 15,
           ItemEffectType::SpellLevelAdd, 1, 1,
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0),
-    udat!("Rod of Onan", 0, UniqueBaseItem::WarStaff, 22, 3, 44167,
+    //  62 Rod of Onan
+    udat!("Rod of Onan", 255, UniqueBaseItem::WarStaff, 22, 3, 44167,
           ItemEffectType::Spell, 21, 50,
           ItemEffectType::Damage, 100, 100,
           ItemEffectType::Attribs, 5, 5,
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0),
-    udat!("Helm of Spirits", 0, UniqueBaseItem::Helm, 1, 1, 7525,
+    //  63 Helm of Spirits
+    udat!("Helm of Spirits", 77, UniqueBaseItem::Helm, 1, 1, 7525,
           ItemEffectType::StealLife, 5, 5,
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0),
-    udat!("Thinking Cap", 0, UniqueBaseItem::SkullCap, 6, 4, 2020,
+    //  64 Thinking Cap
+    udat!("Thinking Cap", 93, UniqueBaseItem::SkullCap, 6, 4, 2020,
           ItemEffectType::Mana, 30, 30,
           ItemEffectType::SpellLevelAdd, 2, 2,
           ItemEffectType::AllRes, 20, 20,
           ItemEffectType::SetDur, 1, 1,
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0),
-    udat!("Overlord's Helm", 0, UniqueBaseItem::Helm, 7, 5, 12500,
+    //  65 OverLord's Helm
+    udat!("OverLord's Helm", 99, UniqueBaseItem::Helm, 7, 5, 12500,
           ItemEffectType::Str, 20, 20,
           ItemEffectType::Dex, 15, 15,
           ItemEffectType::Vit, 5, 5,
           ItemEffectType::MagCurse, 20, 20,
           ItemEffectType::SetDur, 15, 15,
           ItemEffectType::Invalid, 0, 0),
-    udat!("Fool's Crest", 0, UniqueBaseItem::Helm, 12, 4, 10150,
+    //  66 Fool's Crest
+    udat!("Fool's Crest", 80, UniqueBaseItem::Helm, 12, 4, 10150,
           ItemEffectType::AttribsCurse, 4, 4,
           ItemEffectType::Life, 100, 100,
           ItemEffectType::GetHitCurse, 1, 6,
           ItemEffectType::Thorns, 1, 3,
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0),
-    udat!("Gotterdamerung", 0, UniqueBaseItem::GreatHelm, 21, 5, 54900,
+    //  67 Gotterdamerung
+    udat!("Gotterdamerung", 85, UniqueBaseItem::GreatHelm, 21, 5, 54900,
           ItemEffectType::Attribs, 20, 20,
           ItemEffectType::SetAC, 60, 60,
           ItemEffectType::GetHit, 4, 4,
           ItemEffectType::AllResZero, 0, 0,
           ItemEffectType::LightCurse, 4, 4,
           ItemEffectType::Invalid, 0, 0),
-    udat!("Royal Circlet", 0, UniqueBaseItem::Crown, 27, 4, 24875,
+    //  68 Royal Circlet
+    udat!("Royal Circlet", 79, UniqueBaseItem::Crown, 27, 4, 24875,
           ItemEffectType::Attribs, 10, 10,
           ItemEffectType::Mana, 40, 40,
           ItemEffectType::SetAC, 40, 40,
           ItemEffectType::Light, 1, 1,
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0),
-
-    // Items 70-89: Armors, Shields, Rings
-    udat!("Torn Flesh of Souls", 0, UniqueBaseItem::Rags, 2, 4, 4825,
+    //  69 Torn Flesh of Souls
+    udat!("Torn Flesh of Souls", 92, UniqueBaseItem::Rags, 2, 4, 4825,
           ItemEffectType::SetAC, 8, 8,
           ItemEffectType::Vit, 10, 10,
           ItemEffectType::GetHit, 1, 1,
           ItemEffectType::Indestructible, 0, 0,
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0),
-    udat!("The Gladiator's Bane", 0, UniqueBaseItem::StuddedArmor, 6, 4, 3450,
+    //  70 The Gladiator's Bane
+    udat!("The Gladiator's Bane", 255, UniqueBaseItem::StuddedArmor, 6, 4, 3450,
           ItemEffectType::SetAC, 25, 25,
           ItemEffectType::GetHit, 2, 2,
           ItemEffectType::Durability, 200, 200,
           ItemEffectType::AttribsCurse, 3, 3,
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0),
-    udat!("The Rainbow Cloak", 0, UniqueBaseItem::Cloak, 2, 5, 4900,
+    //  71 The Rainbow Cloak
+    udat!("The Rainbow Cloak", 138, UniqueBaseItem::Cloak, 2, 5, 4900,
           ItemEffectType::SetAC, 10, 10,
           ItemEffectType::Attribs, 1, 1,
           ItemEffectType::AllRes, 10, 10,
           ItemEffectType::Life, 5, 5,
           ItemEffectType::Durability, 50, 50,
           ItemEffectType::Invalid, 0, 0),
-    udat!("Leather of Aut", 0, UniqueBaseItem::LeatherArmor, 4, 5, 10550,
+    //  72 Leather of Aut
+    udat!("Leather of Aut", 255, UniqueBaseItem::LeatherArmor, 4, 5, 10550,
           ItemEffectType::SetAC, 15, 15,
           ItemEffectType::Str, 5, 5,
           ItemEffectType::MagCurse, 5, 5,
           ItemEffectType::Dex, 5, 5,
           ItemEffectType::Indestructible, 0, 0,
           ItemEffectType::Invalid, 0, 0),
-    udat!("Wisdom's Wrap", 0, UniqueBaseItem::Robe, 5, 5, 6200,
+    //  73 Wisdom's Wrap
+    udat!("Wisdom's Wrap", 138, UniqueBaseItem::Robe, 5, 5, 6200,
           ItemEffectType::Mag, 5, 5,
           ItemEffectType::Mana, 10, 10,
           ItemEffectType::LightRes, 25, 25,
           ItemEffectType::SetAC, 15, 15,
           ItemEffectType::GetHit, 1, 1,
           ItemEffectType::Invalid, 0, 0),
-    udat!("Sparking Mail", 0, UniqueBaseItem::ChainMail, 9, 2, 15750,
+    //  74 Sparking Mail
+    udat!("Sparking Mail", 255, UniqueBaseItem::ChainMail, 9, 2, 15750,
           ItemEffectType::SetAC, 30, 30,
           ItemEffectType::LightDam, 1, 10,
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0),
-    udat!("Scavenger Carapace", 0, UniqueBaseItem::BreastPlate, 13, 4, 14000,
+    //  75 Scavenger Carapace
+    udat!("Scavenger Carapace", 255, UniqueBaseItem::BreastPlate, 13, 4, 14000,
           ItemEffectType::GetHit, 15, 15,
           ItemEffectType::ACCurse, 30, 30,
           ItemEffectType::Dex, 5, 5,
           ItemEffectType::LightRes, 40, 40,
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0),
-    udat!("Nightscape", 0, UniqueBaseItem::Cape, 16, 5, 11600,
+    //  76 Nightscape
+    udat!("Nightscape", 138, UniqueBaseItem::Cape, 16, 5, 11600,
           ItemEffectType::FastRecover, 2, 2,
           ItemEffectType::LightCurse, 4, 4,
           ItemEffectType::SetAC, 15, 15,
           ItemEffectType::Dex, 3, 3,
           ItemEffectType::AllRes, 20, 20,
           ItemEffectType::Invalid, 0, 0),
-    udat!("Naj's Light Plate", 0, UniqueBaseItem::PlateMail, 19, 5, 78700,
+    //  77 Naj's Light Plate
+    udat!("Naj's Light Plate", 159, UniqueBaseItem::PlateMail, 19, 5, 78700,
           ItemEffectType::NoMinStr, 0, 0,
           ItemEffectType::Mag, 5, 5,
           ItemEffectType::Mana, 20, 20,
           ItemEffectType::AllRes, 20, 20,
           ItemEffectType::SpellLevelAdd, 1, 1,
           ItemEffectType::Invalid, 0, 0),
-    udat!("Demonspike Coat", 0, UniqueBaseItem::FullPlate, 25, 5, 251175,
+    //  78 Demonspike Coat
+    udat!("Demonspike Coat", 255, UniqueBaseItem::FullPlate, 25, 5, 251175,
           ItemEffectType::SetAC, 100, 100,
           ItemEffectType::GetHit, 6, 6,
           ItemEffectType::Str, 10, 10,
           ItemEffectType::Indestructible, 0, 0,
           ItemEffectType::FireRes, 50, 50,
           ItemEffectType::Invalid, 0, 0),
-    udat!("The Deflector", 0, UniqueBaseItem::Buckler, 1, 4, 1500,
+    //  79 The Deflector
+    udat!("The Deflector", 255, UniqueBaseItem::Buckler, 1, 4, 1500,
           ItemEffectType::SetAC, 7, 7,
           ItemEffectType::AllRes, 10, 10,
           ItemEffectType::DamageCurse, 20, 20,
           ItemEffectType::ToHitCurse, 5, 5,
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0),
-    udat!("Split Skull Shield", 0, UniqueBaseItem::Buckler, 1, 5, 2025,
+    //  80 Split Skull Shield
+    udat!("Split Skull Shield", 116, UniqueBaseItem::Buckler, 1, 5, 2025,
           ItemEffectType::SetAC, 10, 10,
           ItemEffectType::Life, 10, 10,
           ItemEffectType::Str, 2, 2,
           ItemEffectType::LightCurse, 1, 1,
           ItemEffectType::SetDur, 15, 15,
           ItemEffectType::Invalid, 0, 0),
-    udat!("Dragon's Breach", 0, UniqueBaseItem::KiteShield, 2, 5, 19200,
+    //  81 Dragon's Breach
+    udat!("Dragon's Breach", 117, UniqueBaseItem::KiteShield, 2, 5, 19200,
           ItemEffectType::FireRes, 25, 25,
           ItemEffectType::Str, 5, 5,
           ItemEffectType::SetAC, 20, 20,
           ItemEffectType::MagCurse, 5, 5,
           ItemEffectType::Indestructible, 0, 0,
           ItemEffectType::Invalid, 0, 0),
-    udat!("Blackoak Shield", 0, UniqueBaseItem::SmallShield, 4, 5, 5725,
+    //  82 Blackoak Shield
+    udat!("Blackoak Shield", 146, UniqueBaseItem::SmallShield, 4, 5, 5725,
           ItemEffectType::Dex, 10, 10,
           ItemEffectType::VitCurse, 10, 10,
           ItemEffectType::SetAC, 18, 18,
           ItemEffectType::LightCurse, 1, 1,
           ItemEffectType::Durability, 150, 150,
           ItemEffectType::Invalid, 0, 0),
-    udat!("Holy Defender", 0, UniqueBaseItem::LargeShield, 10, 5, 13800,
+    //  83 Holy Defender
+    udat!("Holy Defender", 146, UniqueBaseItem::LargeShield, 10, 5, 13800,
           ItemEffectType::SetAC, 15, 15,
           ItemEffectType::GetHit, 2, 2,
           ItemEffectType::FireRes, 20, 20,
           ItemEffectType::Durability, 200, 200,
           ItemEffectType::FastBlock, 1, 1,
           ItemEffectType::Invalid, 0, 0),
-    udat!("Stormshield", 0, UniqueBaseItem::GothicShield, 24, 6, 49000,
+    //  84 Stormshield
+    udat!("Stormshield", 148, UniqueBaseItem::GothicShield, 24, 6, 49000,
           ItemEffectType::SetAC, 40, 40,
           ItemEffectType::GetHitCurse, 4, 4,
           ItemEffectType::Str, 10, 10,
           ItemEffectType::Indestructible, 0, 0,
           ItemEffectType::FastBlock, 1, 1,
           ItemEffectType::LightRes, 50, 50),
-    udat!("Bramble", 0, UniqueBaseItem::Ring, 1, 3, 1000,
+    //  85 Bramble
+    udat!("Bramble", 9, UniqueBaseItem::Ring, 1, 3, 1000,
           ItemEffectType::AttribsCurse, 2, 2,
           ItemEffectType::DamMod, 3, 3,
           ItemEffectType::Mana, 10, 10,
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0),
-    udat!("Ring of Regha", 0, UniqueBaseItem::Ring, 1, 5, 4175,
+    //  86 Ring of Regha
+    udat!("Ring of Regha", 11, UniqueBaseItem::Ring, 1, 5, 4175,
           ItemEffectType::Mag, 10, 10,
           ItemEffectType::MagicRes, 10, 10,
           ItemEffectType::Light, 1, 1,
           ItemEffectType::StrCurse, 3, 3,
           ItemEffectType::DexCurse, 3, 3,
           ItemEffectType::Invalid, 0, 0),
-    udat!("The Bleeder", 0, UniqueBaseItem::Ring, 2, 3, 8500,
+    //  87 The Bleeder
+    udat!("The Bleeder", 8, UniqueBaseItem::Ring, 2, 3, 8500,
           ItemEffectType::MagicRes, 20, 20,
           ItemEffectType::Mana, 30, 30,
           ItemEffectType::LifeCurse, 10, 10,
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0),
-    udat!("Constricting Ring", 0, UniqueBaseItem::Ring, 5, 2, 62000,
+    //  88 Constricting Ring
+    udat!("Constricting Ring", 14, UniqueBaseItem::Ring, 5, 2, 62000,
           ItemEffectType::AllRes, 75, 75,
           ItemEffectType::DrainLife, 0, 0,
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0),
-    udat!("Ring of Engagement", 0, UniqueBaseItem::Ring, 11, 4, 12476,
+    //  89 Ring of Engagement
+    udat!("Ring of Engagement", 13, UniqueBaseItem::Ring, 11, 4, 12476,
           ItemEffectType::GetHit, 1, 2,
           ItemEffectType::Thorns, 1, 3,
           ItemEffectType::SetAC, 5, 5,
@@ -2158,8 +2197,6 @@ pub const UNIQUE_ITEMS: [UniqueItemData; 90] = [
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0),
 ];
-
-/// Get item data by index (for base items)
 pub fn get_item_data(index: usize) -> Option<&'static ItemData> {
     if index < ITEMS_DATA.len() {
         Some(&ITEMS_DATA[index])
@@ -2267,60 +2304,72 @@ mod tests {
 
     #[test]
     fn test_unique_item_windforce() {
-        // Note: Simplified table uses sequential indices, not C++ enum values
-        // Windforce is at index 2 in our table
-        let windforce = &UNIQUE_ITEMS[2];
+        // unique_itemdat.tsv row 18 (UniqueItemId::Windforce).
+        let windforce = get_unique_item_data(UniqueItemId::Windforce).unwrap();
         assert_eq!(windforce.name, "Windforce");
-        assert_eq!(windforce.base_item_id, UniqueBaseItem::LongBow);
-        assert_eq!(windforce.min_level, 25);
-        assert_eq!(windforce.num_powers, 6);
-        assert!(windforce.value > 30000);
+        assert_eq!(windforce.base_item_id, UniqueBaseItem::WarBow);
+        assert_eq!(windforce.min_level, 17);
+        assert_eq!(windforce.num_powers, 3);
+        assert_eq!(windforce.value, 37750);
+        assert_eq!(windforce.powers[0].effect_type, ItemEffectType::Str);
+        assert_eq!(windforce.powers[0].param1, 5);
+        assert_eq!(windforce.powers[1].effect_type, ItemEffectType::Damage);
+        assert_eq!(windforce.powers[2].effect_type, ItemEffectType::Knockback);
     }
 
     #[test]
     fn test_unique_item_grandfather() {
-        // Grandfather is at index 3
-        let gf = &UNIQUE_ITEMS[3];
+        // unique_itemdat.tsv row 35 (UniqueItemId::Grandfather).
+        let gf = get_unique_item_data(UniqueItemId::Grandfather).unwrap();
         assert_eq!(gf.name, "The Grandfather");
-        assert_eq!(gf.min_level, 25);
-        assert_eq!(gf.value, 50000);
-        assert_eq!(gf.powers[0].effect_type, ItemEffectType::ToHit);
-        assert_eq!(gf.powers[1].effect_type, ItemEffectType::Damage);
+        assert_eq!(gf.base_item_id, UniqueBaseItem::GreatSword);
+        assert_eq!(gf.min_level, 27);
+        assert_eq!(gf.value, 119800);
+        assert_eq!(gf.num_powers, 5);
+        assert_eq!(gf.powers[0].effect_type, ItemEffectType::OneHand);
+        assert_eq!(gf.powers[1].effect_type, ItemEffectType::Attribs);
+        assert_eq!(gf.powers[2].effect_type, ItemEffectType::ToHit);
     }
 
     #[test]
     fn test_unique_item_arkaines_valor() {
-        // Arkaine's Valor is at index 6
-        let arkaine = &UNIQUE_ITEMS[6];
+        // unique_itemdat.tsv row 7 (UniqueItemId::ArmorOfVal).
+        let arkaine = get_unique_item_data(UniqueItemId::ArmorOfVal).unwrap();
         assert_eq!(arkaine.name, "Arkaine's Valor");
-        assert_eq!(arkaine.base_item_id, UniqueBaseItem::FullPlate);
-        assert_eq!(arkaine.min_level, 18);
+        assert_eq!(arkaine.base_item_id, UniqueBaseItem::ArmorOfValor);
+        assert_eq!(arkaine.min_level, 1);
+        assert_eq!(arkaine.value, 42000);
         assert_eq!(arkaine.num_powers, 4);
     }
 
     #[test]
     fn test_unique_item_veil_of_steel() {
-        // Veil of Steel is at index 8
-        let veil = &UNIQUE_ITEMS[8];
+        // unique_itemdat.tsv row 6 (UniqueItemId::SteelVeil).
+        let veil = get_unique_item_data(UniqueItemId::SteelVeil).unwrap();
         assert_eq!(veil.name, "Veil of Steel");
-        assert_eq!(veil.min_level, 16);
-        assert_eq!(veil.value, 12000);
+        assert_eq!(veil.base_item_id, UniqueBaseItem::SteelVeil);
+        assert_eq!(veil.min_level, 1);
+        assert_eq!(veil.value, 63800);
+        assert_eq!(veil.num_powers, 6);
     }
 
     #[test]
     fn test_unique_item_ring_of_truth() {
-        // Ring of Truth is at index 11
-        let ring = &UNIQUE_ITEMS[11];
+        // unique_itemdat.tsv row 4 (UniqueItemId::TRing).
+        let ring = get_unique_item_data(UniqueItemId::TRing).unwrap();
         assert_eq!(ring.name, "Ring of Truth");
-        assert_eq!(ring.base_item_id, UniqueBaseItem::Ring);
+        assert_eq!(ring.base_item_id, UniqueBaseItem::TRing);
+        assert_eq!(ring.value, 9100);
     }
 
     #[test]
     fn test_unique_item_optic_amulet() {
-        // Optic Amulet is at index 13
-        let amulet = &UNIQUE_ITEMS[13];
+        // unique_itemdat.tsv row 3 (UniqueItemId::OptAmulet).
+        let amulet = get_unique_item_data(UniqueItemId::OptAmulet).unwrap();
         assert_eq!(amulet.name, "Optic Amulet");
         assert_eq!(amulet.base_item_id, UniqueBaseItem::OpticAmulet);
+        assert_eq!(amulet.min_level, 1);
+        assert_eq!(amulet.value, 9750);
     }
 
     #[test]
