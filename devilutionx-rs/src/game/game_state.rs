@@ -1081,7 +1081,7 @@ impl GameState {
             // Simple AI movement (M-monsters): idle/wander in place, or chase the
             // player when within aggro range. Updates the monster's world tile so
             // the renderer follows. No attack here (combat handled above).
-            self.update_monster_movement(monster_id);
+            self.update_monster_movement(monster_id, rng);
         }
     }
 
@@ -1464,7 +1464,7 @@ impl GameState {
     ///
     /// Monsters are allowed to overlap each other (monster-monster collision is
     /// a known remaining risk — see task notes).
-    fn update_monster_movement(&mut self, monster_id: usize) {
+    fn update_monster_movement(&mut self, monster_id: usize, rng: &mut impl Rng) {
         // Snapshot the player position (owned, so the closure can capture it
         // without borrowing self).
         let player_pos = self.player.position;
@@ -1495,7 +1495,9 @@ impl GameState {
                 // ~10% chance per logic tick to nudge one tile, only if the
                 // move timer is ready. We pick a random adjacent floor tile.
                 if monster.move_timer == 0 {
-                    let mut rng = rand::rng();
+                    // Rolls come from the level-seeded gameplay RNG so monster
+                    // wandering is deterministic per level (C++ advances the
+                    // DungeonSeeds[currlevel]-seeded generator for AI rolls).
                     if rng.random_range(0..10) == 0 {
                         let dirs: [(i32, i32); 8] = [
                             (1, 0), (-1, 0), (0, 1), (0, -1),
@@ -1606,6 +1608,7 @@ impl GameState {
             self.update_monster_enemy(monster_id);
             self.check_monster_combat(monster_id, rng);
             self.process_monster_doors(monster_id);
+            self.update_monster_movement(monster_id, rng);
         }
     }
 
@@ -2545,7 +2548,8 @@ mod tests {
         let mut gs = dungeon_gs_with_corridor(MonsterType::Zombie, 10, 10);
         gs.player.position = Point::new(15, 10);
 
-        gs.update_monster_movement(0);
+        let mut rng = rand::rngs::StdRng::seed_from_u64(1);
+        gs.update_monster_movement(0, &mut rng);
 
         let m = gs.get_monster(0).expect("monster present");
         assert!(
@@ -2564,7 +2568,8 @@ mod tests {
         let mut gs = dungeon_gs_with_corridor(MonsterType::Zombie, 10, 10);
         gs.player.position = Point::new(100, 100);
 
-        gs.update_monster_movement(0);
+        let mut rng = rand::rngs::StdRng::seed_from_u64(1);
+        gs.update_monster_movement(0, &mut rng);
 
         let m = gs.get_monster(0).expect("monster present");
         assert_eq!(
@@ -2586,8 +2591,9 @@ mod tests {
         let mut gs = dungeon_gs_with_corridor(MonsterType::Zombie, 10, 10);
         gs.player.position = Point::new(11, 10); // adjacent, distance 1
 
+        let mut rng = rand::rngs::StdRng::seed_from_u64(1);
         for _ in 0..20 {
-            gs.update_monster_movement(0);
+            gs.update_monster_movement(0, &mut rng);
             let m = gs.get_monster(0).unwrap();
             assert!(
                 !(m.x == gs.player.position.x && m.y == gs.player.position.y),
