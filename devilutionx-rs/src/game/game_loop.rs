@@ -774,6 +774,7 @@ pub fn descend_to_level(game_state: &mut GameState, level: u8) -> Result<(), Str
         println!("[Descend] WARNING: no up-stair tile found in generated layout");
     }
 
+    init_dungeon_triggers(game_state, level, &layout);
     game_state.dungeon_level_data = Some(art);
     game_state.dungeon_layout = Some(layout);
     game_state.dungeon_up_stairs = up_stairs;
@@ -1165,6 +1166,30 @@ fn tick_move_target(
 ///
 /// Errors from `descend_to_dungeon` (e.g. missing L1 art) are logged and
 /// swallowed so the game loop keeps running.
+/// Build the 2D dPiece grid the trigger scanners expect and run the C++
+/// `InitL*Triggers` scan for the current level, populating the stairs/warp
+/// triggers (C++ trigs.cpp:149+).
+fn init_dungeon_triggers(
+    game_state: &mut GameState,
+    level: u8,
+    layout: &crate::game::game_state::DungeonLayout,
+) {
+    const N: usize = 112;
+    let mut grid = [[0u16; N]; N];
+    for y in 0..N {
+        for x in 0..N {
+            grid[x][y] = layout.d_piece.get(y * N + x).copied().unwrap_or(0);
+        }
+    }
+    match level {
+        1 => game_state.triggers.init_l1_triggers(&grid),
+        2 => game_state.triggers.init_l2_triggers(&grid, None),
+        3 => game_state.triggers.init_l3_triggers(&grid),
+        4 => game_state.triggers.init_l4_triggers(&grid, false),
+        _ => game_state.triggers.init_no_triggers(),
+    }
+}
+
 fn check_stairs_transition(game_state: &mut GameState) {
     // Cooldown gate: a transition fired too recently — do nothing this tick.
     if !game_state.stairs_cooldown_ready() {
@@ -1190,20 +1215,71 @@ fn check_stairs_transition(game_state: &mut GameState) {
                 println!("[Stairs] descend_to_dungeon failed: {}", e);
             }
         }
-    } else if let Some((sx, sy)) = game_state.dungeon_up_stairs {
-        // Dungeon: check the resolved Cathedral up-stair.
-        if game_state.player_tile_distance_to(sx, sy)
-            <= crate::game::game_state::STAIRS_TRIGGER_RADIUS
-        {
-            println!(
-                "[Stairs] player at ({},{}) stepped on dungeon up-stair ({},{}) — ascending",
-                game_state.player.position.x,
-                game_state.player.position.y,
-                sx,
-                sy
-            );
-            fired = true;
-            return_to_town(game_state);
+    } else if game_state.in_dungeon {
+        // Dungeon: check level-transition triggers (stairs/warps), mirroring
+        // C++ CheckTriggers (trigs.cpp). The trigger list is populated by
+        // init_dungeon_triggers from the generated layout's dPiece scan.
+        let px = game_state.player.position.x;
+        let py = game_state.player.position.y;
+        // 0 = down (next level), 1 = up (prev level / town), 2 = warp to town.
+        let mut action: Option<u8> = None;
+        for i in 0..game_state.triggers.numtrigs {
+            let t = &game_state.triggers.trigs[i];
+            if (t.position.x - px).abs() <= crate::game::game_state::STAIRS_TRIGGER_RADIUS
+                && (t.position.y - py).abs() <= crate::game::game_state::STAIRS_TRIGGER_RADIUS
+            {
+                match t.tmsg {
+                    crate::levels::trigs::TriggerMessage::NextLevel => action = Some(0),
+                    crate::levels::trigs::TriggerMessage::PrevLevel => action = Some(1),
+                    crate::levels::trigs::TriggerMessage::TwarpUp
+                    | crate::levels::trigs::TriggerMessage::TownWarp => action = Some(2),
+                    _ => {}
+                }
+            }
+        }
+        // L1 fallback: the hand-mapped EntranceStairs mega isn't matched by the
+        // tile-id scan in init_l1_triggers, so keep the TIL-mega detection.
+        if action.is_none() {
+            if let Some((sx, sy)) = game_state.dungeon_up_stairs {
+                if game_state.player_tile_distance_to(sx, sy)
+                    <= crate::game::game_state::STAIRS_TRIGGER_RADIUS
+                {
+                    action = Some(1);
+                }
+            }
+        }
+        match action {
+            Some(0) if game_state.current_dungeon_level < 4 => {
+                let next = game_state.current_dungeon_level + 1;
+                println!("[Stairs] descending to L{}", next);
+                if let Err(e) = descend_to_level(game_state, next) {
+                    println!("[Stairs] descend_to_level failed: {}", e);
+                }
+                fired = true;
+            }
+            Some(1) if game_state.current_dungeon_level <= 1 => {
+                println!(
+                    "[Stairs] player at ({},{}) ascending to town",
+                    game_state.player.position.x,
+                    game_state.player.position.y
+                );
+                fired = true;
+                return_to_town(game_state);
+            }
+            Some(1) => {
+                let prev = game_state.current_dungeon_level - 1;
+                println!("[Stairs] ascending to L{}", prev);
+                if let Err(e) = descend_to_level(game_state, prev) {
+                    println!("[Stairs] ascend failed: {}", e);
+                }
+                fired = true;
+            }
+            Some(2) => {
+                println!("[Stairs] town warp");
+                fired = true;
+                return_to_town(game_state);
+            }
+            _ => {}
         }
     }
 
@@ -4321,4 +4397,56 @@ mod tests {
         assert!(nonzero > 100, "player-light area should render lit pixels, got {nonzero}");
         assert!(zero > 10_000, "dungeon beyond the light radius should be dark, got {zero} dark px");
     }
+
+    #[test]
+    fn test_stairs_transition_descends_to_next_level() {
+        use crate::engine::dungeon::{DungeonLevelData, DungeonType, MinData, PaletteData, SolData, TilData, TilEntry};
+        use crate::game::game_state::GameState;
+        use crate::game::player_exact::Player;
+        use crate::levels::trigs::{Point as TrigPoint, TriggerManager, TriggerMessage};
+
+        // A large synthetic TIL so every generator's tile ids map to a mega.
+        let mut til_tiles = Vec::new();
+        for i in 0..300u16 {
+            til_tiles.push(TilEntry { micro1: i, micro2: i + 1, micro3: i + 2, micro4: i + 3 });
+        }
+        let art = DungeonLevelData {
+            dungeon_type: DungeonType::Cathedral,
+            palette: PaletteData::default(),
+            sol: SolData { properties: vec![] },
+            min: MinData { mega_tiles: vec![], blocks_per_tile: 10 },
+            til: TilData { tiles: til_tiles },
+            level_cel: vec![],
+        };
+
+        let mut gs = GameState::new(Player::new(), true, 12345);
+        gs.dungeon_art[1] = Some(art.clone());
+        gs.dungeon_art[2] = Some(art);
+        descend_to_level(&mut gs, 1).expect("descend to L1");
+        assert_eq!(gs.current_dungeon_level, 1);
+
+        // Let the stair cooldown elapse, then plant a NextLevel trigger under
+        // the player (simulating a down-stair in the generated layout).
+        gs.game_tick = 100;
+        let px = gs.player.position.x;
+        let py = gs.player.position.y;
+        let mut trigs = TriggerManager::new();
+        trigs.add_trigger(TrigPoint { x: px, y: py }, TriggerMessage::NextLevel, 0);
+        gs.triggers = trigs;
+
+        check_stairs_transition(&mut gs);
+        assert_eq!(gs.current_dungeon_level, 2, "stepping on down-stair descends to L2");
+
+        // An up-stair on L2 ascends back to L1.
+        gs.game_tick = 200;
+        let px = gs.player.position.x;
+        let py = gs.player.position.y;
+        let mut trigs = TriggerManager::new();
+        trigs.add_trigger(TrigPoint { x: px, y: py }, TriggerMessage::PrevLevel, 0);
+        gs.triggers = trigs;
+        check_stairs_transition(&mut gs);
+        assert_eq!(gs.current_dungeon_level, 1, "stepping on up-stair on L2 ascends to L1");
+    }
+
+
 }

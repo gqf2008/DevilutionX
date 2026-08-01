@@ -326,6 +326,10 @@ pub struct GameState {
     /// The dungeon level currently being rendered (1=L1 .. 4=L4); 0 = in town.
     pub current_dungeon_level: u8,
 
+    /// Active level-transition triggers (stairs, warps), initialised by
+    /// `descend_to_level` from the generated layout (C++ `InitL*Triggers`).
+    pub triggers: crate::levels::trigs::TriggerManager,
+
     /// Decoded stand sprites for the monster types currently in the dungeon,
     /// indexed by `MonsterType`. Built by `monster_sprites::MonsterSpriteSet`
     /// when descending. The dungeon renderer uses these to draw each living
@@ -491,6 +495,7 @@ impl GameState {
             dungeon_level_data: None,
             dungeon_art: vec![None; 5],
             current_dungeon_level: 0,
+            triggers: crate::levels::trigs::TriggerManager::new(),
             monster_sprites: None,
             pending_sfx: Vec::new(),
             towners: Self::build_towner_list(),
