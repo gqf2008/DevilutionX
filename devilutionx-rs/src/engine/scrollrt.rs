@@ -636,15 +636,18 @@ fn draw_cell(
         }
     };
 
-    // mt[0] — 左地板/叶半（C++:588-599）。
+    // mt[0] — 左地板/叶半（C++:588-599）。透明地板 tile 先渲染其 foliage
+    // 层（C++ RenderTileFoliage, dun_render.hpp:162），否则按 C++ 的
+    // getFirstTileMaskLeft 渲染。
     let block = mega.blocks[0];
     if block.has_value() {
         let tile_type = block.tile_type();
         if !is_floor || tile_type == TileType::TransparentSquare {
-            if !(is_floor && tile_type == TileType::TransparentSquare) {
+            if is_floor && tile_type == TileType::TransparentSquare {
+                dun_render::render_tile_foliage(out, tbp, &level.level_cel, block, Some(tbl));
+            } else {
                 dun_render::render_tile(out, tbp, &level.level_cel, block, first_mask_left(tile_type), Some(tbl));
             }
-            // foliage 分支跳过（活 dun_render 无 render_tile_foliage）。
         }
     }
     // mt[1] — 右地板/叶半（C++:600-611）。
@@ -652,7 +655,15 @@ fn draw_cell(
     if block.has_value() {
         let tile_type = block.tile_type();
         if !is_floor || tile_type == TileType::TransparentSquare {
-            if !(is_floor && tile_type == TileType::TransparentSquare) {
+            if is_floor && tile_type == TileType::TransparentSquare {
+                dun_render::render_tile_foliage(
+                    out,
+                    tbp + RIGHT_FRAME_DISPLACEMENT,
+                    &level.level_cel,
+                    block,
+                    Some(tbl),
+                );
+            } else {
                 dun_render::render_tile(
                     out,
                     tbp + RIGHT_FRAME_DISPLACEMENT,

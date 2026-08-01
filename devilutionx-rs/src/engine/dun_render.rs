@@ -186,13 +186,17 @@ pub fn render_square(
     }
 }
 
-/// Render a 32x32 transparent square tile (TileType::TransparentSquare).
+/// Render a transparent square tile (TileType::TransparentSquare).
+///
+/// `height` is the frame height in rows (32 for a full tile, 16 for the
+/// foliage sprite that sits on the tile's upper half).
 pub fn render_transparent_square(
     out: &mut Surface,
     position: Point,
     src: &[u8],
     light_table: Option<&[u8; 256]>,
     _mask_type: MaskType,
+    height: i32,
 ) {
     let out_w = out.w();
     let out_h = out.h();
@@ -201,7 +205,7 @@ pub fn render_transparent_square(
         position.x,
         position.y,
         DUN_FRAME_WIDTH,
-        DUN_FRAME_HEIGHT,
+        height,
         out_w,
         out_h,
     );
@@ -607,7 +611,7 @@ pub fn render_tile_frame(
             render_square(out, position, src, light_table);
         }
         TileType::TransparentSquare => {
-            render_transparent_square(out, position, src, light_table, mask_type);
+            render_transparent_square(out, position, src, light_table, mask_type, DUN_FRAME_HEIGHT);
         }
         TileType::LeftTriangle => {
             render_left_triangle(out, position, src, light_table);
@@ -643,6 +647,40 @@ pub fn render_tile(
     if let Some(src) = get_dun_frame(dungeon_cel_data, frame as u32) {
         render_tile_frame(out, position, tile_type, src, light_table, mask_type);
     }
+}
+
+/// C++ `GetDunFrameFoliage()` (dun_render.hpp:132): the foliage sprite of a
+/// dungeon frame lives `ReencodedTriangleFrameSize` bytes into the frame.
+pub fn get_dun_frame_foliage(dungeon_cel_data: &[u8], frame: u32) -> Option<&[u8]> {
+    let frame_data = get_dun_frame(dungeon_cel_data, frame)?;
+    let foliage_start = REENCODED_TRIANGLE_FRAME_SIZE.min(frame_data.len());
+    Some(&frame_data[foliage_start..])
+}
+
+/// C++ `RenderTileFoliage()` (dun_render.hpp:162): renders the 16-pixel-tall
+/// foliage sprite of a floor tile one tile-half above the floor line.
+pub fn render_tile_foliage(
+    out: &mut Surface,
+    position: Point,
+    dungeon_cel_data: &[u8],
+    level_cel_block: LevelCelBlock,
+    light_table: Option<&[u8; 256]>,
+) {
+    if !level_cel_block.has_value() {
+        return;
+    }
+    let frame = level_cel_block.frame();
+    let Some(src) = get_dun_frame_foliage(dungeon_cel_data, frame as u32) else {
+        return;
+    };
+    render_transparent_square(
+        out,
+        Point::new(position.x, position.y - 16),
+        src,
+        light_table,
+        MaskType::Solid,
+        16,
+    );
 }
 
 /// Draw a black diamond tile (64x31 pixels).
@@ -688,3 +726,52 @@ pub fn draw_black_tile(out: &mut Surface, x: i32, y: i32) {
 pub fn calculate_sprite_tile_center_x(width: i32) -> i32 {
     (width - TILE_WIDTH) / 2
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::surface::Surface;
+
+    /// Build a level CEL with a single frame: 512-byte reencoded triangle
+    /// frame followed by a 16-row foliage sprite (each row = RLE run of 32
+    /// pixels of color 200).
+    fn foliage_cel() -> Vec<u8> {
+        let mut cel = Vec::new();
+        cel.extend_from_slice(&1u32.to_le_bytes()); // num frames
+        cel.extend_from_slice(&8u32.to_le_bytes()); // frame 1 offset
+        cel.extend_from_slice(&vec![0u8; 512]); // reencoded triangle frame
+        for _ in 0..16 {
+            cel.push(32u8); // run of 32 pixels
+            cel.extend_from_slice(&[200u8; 32]);
+        }
+        cel
+    }
+
+    #[test]
+    fn test_get_dun_frame_foliage_offset() {
+        let cel = foliage_cel();
+        let fol = get_dun_frame_foliage(&cel, 1).expect("foliage present");
+        assert_eq!(fol.len(), 16 * 33);
+        assert_eq!(fol[0], 32);
+        assert_eq!(fol[1], 200);
+    }
+
+    #[test]
+    fn test_render_tile_foliage_above_floor_line() {
+        let cel = foliage_cel();
+        let mut buf = vec![0u8; 640 * 480];
+        let mut surface = Surface::new(&mut buf, 640, 640, 480);
+        let block = LevelCelBlock::new(0x0001);
+        render_tile_foliage(&mut surface, Point::new(100, 200), &cel, block, None);
+
+        // The 16-row foliage sprite sits above the floor line: rows y 184..=169
+        // (bottom-up RLE), x 100..=131.
+        assert_eq!(surface.at(100, 184).copied(), Some(200), "bottom foliage row");
+        assert_eq!(surface.at(131, 184).copied(), Some(200), "foliage row right edge");
+        assert_eq!(surface.at(100, 169).copied(), Some(200), "top foliage row");
+        // The floor line itself and the row below stay untouched.
+        assert_eq!(surface.at(100, 200).copied(), Some(0));
+        assert_eq!(surface.at(100, 168).copied(), Some(0));
+    }
+}
+
