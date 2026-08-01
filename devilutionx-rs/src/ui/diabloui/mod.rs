@@ -170,6 +170,24 @@ impl HeroClass {
             _ => None,
         }
     }
+
+    /// The C++ `Names[6][10]` table (selhero.cpp): random suggested names per
+    /// class. Bard reuses the Rogue names (C++ "Bard (uses Rogue names)").
+    pub const DEFAULT_NAMES: [&'static [&'static str]; 6] = [
+        &["Aidan", "Qarak", "Born", "Cathan", "Halbu", "Lenalas", "Maximus", "Vane", "Myrdgar", "Rothat"],
+        &["Moreina", "Akara", "Kashya", "Flavie", "Divo", "Oriana", "Iantha", "Shikha", "Basanti", "Elexa"],
+        &["Jazreth", "Drognan", "Armin", "Fauztin", "Jere", "Kazzulk", "Ranslor", "Sarnakyle", "Valthek", "Horazon"],
+        &["Akyev", "Dvorak", "Kekegi", "Kharazim", "Mikulov", "Shenlong", "Vedenin", "Vhalit", "Vylnas", "Zhota"],
+        &["Moreina", "Akara", "Kashya", "Flavie", "Divo", "Oriana", "Iantha", "Shikha", "Basanti", "Elexa"],
+        &["Alaric", "Barloc", "Egtheow", "Guthlaf", "Heorogar", "Hrothgar", "Oslaf", "Qual-Kehk", "Ragnar", "Ulf"],
+    ];
+
+    /// Suggested name for a class at the given index (C++ `GetRandomName`),
+    /// wrapping `index % 10`.
+    pub fn default_name(self, index: usize) -> &'static str {
+        let names = Self::DEFAULT_NAMES[self as usize % Self::COUNT];
+        names[index % names.len()]
+    }
 }
 
 /// Game difficulty levels
@@ -249,4 +267,20 @@ mod tests {
         assert!(!Difficulty::Hell.is_unlocked(16));
         assert!(Difficulty::Hell.is_unlocked(32));
     }
+    #[test]
+    fn test_default_names_match_cpp_table() {
+        use super::HeroClass;
+        // Warrior / Rogue / Sorcerer first names match selhero.cpp.
+        assert_eq!(HeroClass::Warrior.default_name(0), "Aidan");
+        assert_eq!(HeroClass::Rogue.default_name(0), "Moreina");
+        assert_eq!(HeroClass::Sorcerer.default_name(0), "Jazreth");
+        assert_eq!(HeroClass::Barbarian.default_name(0), "Alaric");
+        // Bard reuses Rogue names (C++ "Bard (uses Rogue names)").
+        assert_eq!(HeroClass::Bard.default_name(0), HeroClass::Rogue.default_name(0));
+        // Index wraps modulo 10.
+        assert_eq!(HeroClass::Warrior.default_name(10), "Aidan");
+        assert_eq!(HeroClass::Warrior.default_name(5), "Lenalas");
+    }
+
+
 }
