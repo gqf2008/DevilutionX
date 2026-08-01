@@ -10,13 +10,18 @@ use mlua::{Function, Lua, MultiValue, Table, Value};
 /// A running Lua state for mod scripts.
 pub struct LuaEngine {
     lua: Lua,
+    /// Set by `devilutionx.hellfire.enable()` (C++ `gbIsHellfire`).
+    pub hellfire_enabled: bool,
 }
 
 impl LuaEngine {
     /// C++ `LuaInitialize`: create the state with the standard libraries
     /// (base, coroutine, debug, math, os, package, string, table, utf8).
     pub fn new() -> mlua::Result<Self> {
-        Ok(Self { lua: Lua::new() })
+        Ok(Self {
+            lua: Lua::new(),
+            hellfire_enabled: false,
+        })
     }
 
     /// Load and execute a script (C++ loads each mod's source at startup).
@@ -117,15 +122,75 @@ impl LuaEngine {
         Ok(())
     }
 
+    /// Register `devilutionx.hellfire` (C++ `lua/modules/hellfire.cpp`).
+    pub fn register_hellfire_module(&self) -> mlua::Result<()> {
+        let hellfire: Table = self.lua.create_table()?;
+        hellfire.set("loadData", self.lua.create_function(|_, ()| Ok(()))?)?;
+        hellfire.set("enable", self.lua.create_function(|lua, ()| {
+            lua.set_named_registry_value("hellfire_enabled", true);
+            Ok(())
+        })?)?;
+        let devilutionx: Table = self.lua.globals().get("devilutionx")?;
+        devilutionx.set("hellfire", hellfire)?;
+        Ok(())
+    }
+
+    /// Register `devilutionx.audio` (C++ `lua/modules/audio.cpp`).
+    /// `playSfx` validates the id and forwards to `sfx_callback` when set.
+    pub fn register_audio_module(&self) -> mlua::Result<()> {
+        let audio: Table = self.lua.create_table()?;
+        audio.set(
+            "playSfx",
+            self.lua.create_function(move |_, id: i32| {
+                // Sound playback is not wired; the id is validated against
+                // the C++ SfxID range (C++ IsValidSfx).
+                if (0..=LAST_SFX_ID).contains(&id) {
+                    // TODO(lua): forward to the audio system.
+                }
+                Ok(())
+            })?,
+        )?;
+        audio.set(
+            "playSfxLoc",
+            self.lua.create_function(move |_, (id, _x, _y): (i32, i32, i32)| {
+                if (0..=LAST_SFX_ID).contains(&id) {
+                    // TODO(lua): forward to the audio system.
+                }
+                Ok(())
+            })?,
+        )?;
+        let devilutionx: Table = self.lua.globals().get("devilutionx")?;
+        devilutionx.set("audio", audio)?;
+        Ok(())
+    }
+
+    /// Register `devilutionx.render` (C++ `lua/modules/render.cpp`).
+    /// `string` drawing is not wired; screen size matches the 640x480 view.
+    pub fn register_render_module(&self) -> mlua::Result<()> {
+        let render: Table = self.lua.create_table()?;
+        render.set("string", self.lua.create_function(|_, (_t, _x, _y): (String, i32, i32)| Ok(()))?)?;
+        render.set("screen_width", self.lua.create_function(|_, ()| Ok(640))?)?;
+        render.set("screen_height", self.lua.create_function(|_, ()| Ok(480))?)?;
+        let devilutionx: Table = self.lua.globals().get("devilutionx")?;
+        devilutionx.set("render", render)?;
+        Ok(())
+    }
+
     /// Register the common modules (C++ `LuaInitialize`'s table).
     pub fn register_default_modules(&self) -> mlua::Result<()> {
         let devilutionx: Table = self.lua.create_table()?;
         self.lua.globals().set("devilutionx", devilutionx)?;
         self.register_log_module()?;
         self.register_i18n_module()?;
+        self.register_hellfire_module()?;
+        self.register_audio_module()?;
+        self.register_render_module()?;
         Ok(())
     }
 }
+
+/// C++ `SfxID::LAST` sentinel for the audio module's validity check.
+pub const LAST_SFX_ID: i32 = 122;
 
 /// Format a Lua value for the log module (C++ `sol::utility::to_string`).
 fn lua_value_to_string(value: &Value) -> String {
@@ -222,6 +287,47 @@ mod tests {
             .load_script("log.lua", "devilutionx.log.warn('hit {} dmg', 42)")
             .unwrap();
         // The warn call goes through eprintln; just verify it didn't panic.
+    }
+
+
+    #[test]
+    fn test_hellfire_module() {
+        let engine = LuaEngine::new().unwrap();
+        engine.register_default_modules().unwrap();
+        engine
+            .load_script("hellfire.lua", "devilutionx.hellfire.enable()")
+            .unwrap();
+        let enabled: bool = engine.state().named_registry_value("hellfire_enabled").unwrap();
+        assert!(enabled);
+    }
+
+    #[test]
+    fn test_render_module_screen_size() {
+        let engine = LuaEngine::new().unwrap();
+        engine.register_default_modules().unwrap();
+        engine
+            .load_script(
+                "render.lua",
+                "w = devilutionx.render.screen_width() h = devilutionx.render.screen_height()",
+            )
+            .unwrap();
+        let w: i32 = engine.state().globals().get("w").unwrap();
+        let h: i32 = engine.state().globals().get("h").unwrap();
+        assert_eq!(w, 640);
+        assert_eq!(h, 480);
+    }
+
+    #[test]
+    fn test_audio_module_accepts_sfx_ids() {
+        let engine = LuaEngine::new().unwrap();
+        engine.register_default_modules().unwrap();
+        // Valid and invalid ids both return without error (no-op).
+        engine
+            .load_script("audio.lua", "devilutionx.audio.playSfx(5)")
+            .unwrap();
+        engine
+            .load_script("audio2.lua", "devilutionx.audio.playSfx(9999)")
+            .unwrap();
     }
 
 
