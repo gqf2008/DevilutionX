@@ -81,6 +81,75 @@ pub fn should_autopickup(
     }
 }
 
+/// C++ `HasRoomForGold()` (autopickup.cpp): true when the inventory has an
+/// empty cell or a gold pile with room.
+pub fn has_room_for_gold(inventory: &crate::game::inventory::Inventory) -> bool {
+    for &idx in &inventory.grid {
+        if idx < 0 {
+            continue; // continuation cell
+        }
+        if idx == 0 {
+            return true; // empty cell
+        }
+        let item = inventory
+            .items
+            .get(idx as usize - 1)
+            .and_then(|cell| cell.as_ref());
+        if let Some(item) = item {
+            if item.item_type == ItemType::Gold && item.value < MAX_GOLD {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// C++ `NumMiscItemsInInv(iMiscId)` — count matching misc items in the
+/// inventory and belt.
+pub fn num_misc_items_in_inv(
+    inventory: &crate::game::inventory::Inventory,
+    belt: &crate::game::inventory::Belt,
+    misc_id: ItemMiscId,
+) -> usize {
+    let inv_count = inventory
+        .items
+        .iter()
+        .filter(|cell| cell.as_ref().map(|i| i.misc_id == misc_id).unwrap_or(false))
+        .count();
+    let belt_count = belt
+        .items
+        .iter()
+        .filter(|cell| cell.as_ref().map(|i| i.misc_id == misc_id).unwrap_or(false))
+        .count();
+    inv_count + belt_count
+}
+
+/// Simplified C++ `CanFitItemInInventory || AutoPlaceItemInBelt`: room in the
+/// inventory grid or an empty belt slot.
+pub fn can_fit_item(
+    inventory: &crate::game::inventory::Inventory,
+    belt: &crate::game::inventory::Belt,
+) -> bool {
+    !inventory.is_full() || belt.items.iter().any(Option::is_none)
+}
+
+/// C++ `AutoPickup(player)` decision for a single item, wired to the
+/// inventory/belt state.
+pub fn try_autopickup(
+    item: &Item,
+    inventory: &crate::game::inventory::Inventory,
+    belt: &crate::game::inventory::Belt,
+    options: &AutoPickupOptions,
+) -> bool {
+    should_autopickup(
+        item,
+        options,
+        has_room_for_gold(inventory),
+        can_fit_item(inventory, belt),
+        |m| num_misc_items_in_inv(inventory, belt, m),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -150,4 +219,59 @@ mod tests {
         assert!(!should_autopickup(&misc_item(ItemMiscId::Scroll), &opts, false, true, |_| 0));
         assert!(!should_autopickup(&misc_item(ItemMiscId::None), &opts, false, true, |_| 0));
     }
+    #[test]
+    fn test_has_room_for_gold_empty_cell() {
+        use crate::game::inventory::Inventory;
+        let inv = Inventory::new();
+        assert!(has_room_for_gold(&inv), "empty inventory has room");
+    }
+
+    #[test]
+    fn test_has_room_for_gold_partial_pile() {
+        use crate::game::inventory::{Inventory, INVENTORY_SIZE};
+        // Fill every cell with a full gold pile: no room anywhere.
+        let mut inv = Inventory::new();
+        for i in 0..INVENTORY_SIZE {
+            inv.items.push(Some(gold_item(MAX_GOLD)));
+            inv.grid[i] = (i + 1) as i8;
+        }
+        assert!(!has_room_for_gold(&inv), "full pile + no empty cell");
+        // A partial pile leaves room.
+        inv.items[0] = Some(gold_item(100));
+        assert!(has_room_for_gold(&inv));
+    }
+
+    #[test]
+    fn test_num_misc_items_counts_inventory_and_belt() {
+        use crate::game::inventory::{Belt, Inventory};
+        let mut inv = Inventory::new();
+        inv.items.push(Some(misc_item(ItemMiscId::Heal)));
+        inv.grid[0] = 1;
+        let mut belt = Belt::new();
+        belt.items[0] = Some(misc_item(ItemMiscId::Heal));
+        belt.items[1] = Some(misc_item(ItemMiscId::Mana));
+        assert_eq!(num_misc_items_in_inv(&inv, &belt, ItemMiscId::Heal), 2);
+        assert_eq!(num_misc_items_in_inv(&inv, &belt, ItemMiscId::Mana), 1);
+        assert_eq!(num_misc_items_in_inv(&inv, &belt, ItemMiscId::Rejuv), 0);
+    }
+
+    #[test]
+    fn test_try_autopickup_wired() {
+        use crate::game::inventory::{Belt, Inventory};
+        let opts = AutoPickupOptions::default();
+        // Empty inventory -> gold picked.
+        let inv2 = Inventory::new();
+        let belt = Belt::new();
+        assert!(try_autopickup(&gold_item(50), &inv2, &belt, &opts));
+        // Potion threshold wired through inventory counts.
+        let mut inv3 = Inventory::new();
+        inv3.items.push(Some(misc_item(ItemMiscId::Heal)));
+        inv3.grid[0] = 1;
+        let mut belt3 = Belt::new();
+        belt3.items[0] = Some(misc_item(ItemMiscId::Heal));
+        // Carrying 2 with threshold 1 -> no pickup.
+        assert!(!try_autopickup(&misc_item(ItemMiscId::Heal), &inv3, &belt3, &opts));
+    }
+
+
 }
