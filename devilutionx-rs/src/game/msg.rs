@@ -2176,5 +2176,66 @@ mod tests {
         assert_eq!(CmdId::Pong as u8, 100);
     }
 
+    /// The C++ message structs sit inside `#pragma pack(push, 1)` (msg.h:431),
+    /// so every field is byte-packed with no padding. The Rust `#[repr(C,
+    /// packed)]` mirrors must have the same sizes.
+    #[test]
+    fn test_message_struct_sizes_match_cpp_packed() {
+        assert_eq!(std::mem::size_of::<TCmd>(), 1, "TCmd {{ u8 }}");
+        assert_eq!(std::mem::size_of::<TCmdLoc>(), 3, "TCmdLoc {{ u8,u8,u8 }}");
+        assert_eq!(std::mem::size_of::<TCmdParam1>(), 3, "TCmdParam1 {{ u8,i16 }} packed");
+        assert_eq!(std::mem::size_of::<TCmdParam2>(), 5, "TCmdParam2 {{ u8,i16,i16 }} packed");
+        assert_eq!(std::mem::size_of::<TCmdLocParam1>(), 5, "TCmdLocParam1 packed");
+        assert_eq!(std::mem::size_of::<TCmdLocParam4>(), 11, "TCmdLocParam4 packed");
+    }
+
+    /// C++ wire bytes: SendWalk writes TCmdLoc{CMD_WALKXY=1, x, y} →
+    /// [1, x, y] (msg.cpp SendWalk + msg.h pack(1)).
+    #[test]
+    fn test_send_walk_wire_bytes_match_cpp() {
+        let mut net = MsgHandler::new(0, false);
+        assert!(net.send_walk(10, 20));
+        let data = net.get_send_data().expect("buffered");
+        assert_eq!(data, vec![1, 10, 20], "CMD_WALKXY x y");
+    }
+
+    /// C++ SendAttackId writes TCmdParam1{CMD_ATTACKID=15, wParam1 LE}.
+    #[test]
+    fn test_send_attack_id_wire_bytes_match_cpp() {
+        let mut net = MsgHandler::new(0, false);
+        assert!(net.send_attack_id(0x1234));
+        let data = net.get_send_data().expect("buffered");
+        assert_eq!(data, vec![15, 0x34, 0x12], "CMD_ATTACKID id_le16");
+    }
+
+    /// C++ SendSpellXY writes TCmdLocParam4{CMD_SPELLXY=12, x, y, 4×i16 LE}.
+    #[test]
+    fn test_send_spell_xy_wire_bytes_match_cpp() {
+        let mut net = MsgHandler::new(0, false);
+        assert!(net.send_spell_xy(1, 2, 3, 4, 5, 6));
+        let data = net.get_send_data().expect("buffered");
+        assert_eq!(
+            data,
+            vec![12, 1, 2, 3, 0, 4, 0, 5, 0, 6, 0],
+            "CMD_SPELLXY x y spell_id spell_type spell_level spell_from (LE)"
+        );
+    }
+
+    /// parse_command round-trips the C++ wire bytes back into (CmdId, payload).
+    #[test]
+    fn test_parse_command_round_trip() {
+        let mut net = MsgHandler::new(0, false);
+        // Feed the C++ bytes for CMD_WALKXY (1) x=5 y=9.
+        assert!(net.receive(&[1, 5, 9]));
+        let (cmd, data) = net.parse_command().expect("parsed");
+        assert_eq!(cmd, CmdId::WalkXY);
+        assert_eq!(data, &[1, 5, 9]);
+        // CMD_ATTACKID (15) wParam1 = 0x00FF LE.
+        assert!(net.receive(&[15, 0xFF, 0x00]));
+        let (cmd, data) = net.parse_command().expect("parsed");
+        assert_eq!(cmd, CmdId::AttackId);
+        assert_eq!(data, &[15, 0xFF, 0x00]);
+    }
+
 
 }
