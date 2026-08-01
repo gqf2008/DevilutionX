@@ -126,6 +126,28 @@ impl Dungeon {
         }
     }
 
+    /// Reset light/vision grids to the C++ level default.
+    ///
+    /// Mirrors `Source/levels/gendung.cpp` `InitGlobals()`:
+    /// ```cpp
+    /// uint8_t defaultLight = leveltype == DTYPE_TOWN ? 0 : 15;
+    /// memset(dLight, defaultLight, sizeof(dLight));
+    /// ```
+    /// Town is fully bright (0); every dungeon level starts fully dark (15)
+    /// and static level lights (lava, braziers, ...) later raise tiles via
+    /// `DoLighting` before `SavePreLighting()` snapshots `dPreLight`.
+    /// `trans_val` is zeroed like C++ `DRLG_InitTrans()`.
+    pub fn init_lighting_defaults(&mut self) {
+        let default_light: u8 = if self.level_type == DungeonType::Town { 0 } else { 15 };
+        for y in 0..MAXDUNY {
+            for x in 0..MAXDUNX {
+                self.light[x][y] = default_light;
+                self.pre_light[x][y] = default_light;
+                self.trans_val[x][y] = 0;
+            }
+        }
+    }
+
     /// Reset all dungeon data
     ///
     /// C++ equivalent: Part of `CreateDungeon()` initialization
@@ -137,6 +159,7 @@ impl Dungeon {
         self.trans_val = [[0; MAXDUNY]; MAXDUNX];
         self.light = [[0; MAXDUNY]; MAXDUNX];
         self.pre_light = [[0; MAXDUNY]; MAXDUNX];
+        self.init_lighting_defaults();
         self.player_layer = [[0; MAXDUNY]; MAXDUNX];
         self.monster_layer = [[0; MAXDUNY]; MAXDUNX];
         self.corpse_layer = [[0; MAXDUNY]; MAXDUNX];
@@ -593,4 +616,26 @@ mod tests {
         assert_eq!(manager.get_properties(9999), TileProperties::NONE);
         assert!(!manager.is_solid(9999));
     }
+    #[test]
+    fn test_lighting_defaults_match_cpp_default_light() {
+        // C++ gendung.cpp: `uint8_t defaultLight = leveltype == DTYPE_TOWN ? 0 : 15;`
+        let mut town = Dungeon::new(); // level_type == Town
+        town.init_lighting_defaults();
+        assert_eq!(town.light[10][10], 0, "town is fully bright (0)");
+        assert_eq!(town.pre_light[10][10], 0, "town dPreLight is fully bright");
+
+        let mut cathedral = Dungeon::new();
+        cathedral.level_type = DungeonType::Cathedral;
+        cathedral.init_lighting_defaults();
+        assert_eq!(cathedral.light[10][10], 15, "dungeon starts fully dark (15)");
+        assert_eq!(cathedral.pre_light[10][10], 15, "dungeon dPreLight starts fully dark");
+        assert_eq!(cathedral.trans_val[10][10], 0, "DRLG_InitTrans zeroes dTransVal");
+
+        // reset() re-applies the defaults for the current level type.
+        cathedral.reset();
+        assert_eq!(cathedral.light[10][10], 15);
+        assert_eq!(cathedral.trans_val[10][10], 0);
+    }
+
+
 }
