@@ -259,8 +259,17 @@ pub struct GameplayOptions {
     pub enemy_health_bar: bool,
     /// 自动拾取金币
     pub auto_gold_pickup: bool,
+    /// 自动拾取油（C++ autoOilPickup）
+    pub auto_oil_pickup: bool,
     /// 自动拾取药水
     pub auto_elixir_pickup: bool,
+    /// 自动拾取数量（C++ num*PotionPickup）
+    pub num_heal_potion_pickup: i32,
+    pub num_full_heal_potion_pickup: i32,
+    pub num_mana_potion_pickup: i32,
+    pub num_full_mana_potion_pickup: i32,
+    pub num_reju_potion_pickup: i32,
+    pub num_full_reju_potion_pickup: i32,
     /// 城镇自动拾取
     pub auto_pickup_in_town: bool,
     /// Adria 回复魔法
@@ -308,7 +317,14 @@ impl Default for GameplayOptions {
             experience_bar: false,
             enemy_health_bar: false,
             auto_gold_pickup: false,
+            auto_oil_pickup: false,
             auto_elixir_pickup: false,
+            num_heal_potion_pickup: 0,
+            num_full_heal_potion_pickup: 0,
+            num_mana_potion_pickup: 0,
+            num_full_mana_potion_pickup: 0,
+            num_reju_potion_pickup: 0,
+            num_full_reju_potion_pickup: 0,
             auto_pickup_in_town: false,
             adria_refills_mana: false,
             auto_equip_weapons: true,
@@ -547,6 +563,27 @@ impl Options {
                 }
                 "auto gold pickup" | "autogoldpickup" => {
                     self.gameplay.auto_gold_pickup = parse_bool(value);
+                }
+                "auto oil pickup" | "autooilpickup" => {
+                    self.gameplay.auto_oil_pickup = parse_bool(value);
+                }
+                "heal potion pickup" | "healpotionpickup" => {
+                    if let Ok(v) = value.parse() { self.gameplay.num_heal_potion_pickup = v; }
+                }
+                "full heal potion pickup" | "fullhealpotionpickup" => {
+                    if let Ok(v) = value.parse() { self.gameplay.num_full_heal_potion_pickup = v; }
+                }
+                "mana potion pickup" | "manapotionpickup" => {
+                    if let Ok(v) = value.parse() { self.gameplay.num_mana_potion_pickup = v; }
+                }
+                "full mana potion pickup" | "fullmanapotionpickup" => {
+                    if let Ok(v) = value.parse() { self.gameplay.num_full_mana_potion_pickup = v; }
+                }
+                "rejuvenation potion pickup" | "rejuvpotionpickup" => {
+                    if let Ok(v) = value.parse() { self.gameplay.num_reju_potion_pickup = v; }
+                }
+                "full rejuvenation potion pickup" | "fullrejuvpotionpickup" => {
+                    if let Ok(v) = value.parse() { self.gameplay.num_full_reju_potion_pickup = v; }
                 }
                 "auto equip weapons" | "autoequipweapons" => {
                     self.gameplay.auto_equip_weapons = parse_bool(value);
@@ -847,4 +884,23 @@ Height=768
         assert!(ini.contains("Width=1280"));
         assert!(ini.contains("Height=720"));
     }
+    #[test]
+    fn test_gameplay_autopickup_option_defaults_and_parse() {
+        let mut opts = super::GameplayOptions::default();
+        // C++ defaults: autoOilPickup false, num*PotionPickup 0.
+        assert!(!opts.auto_oil_pickup);
+        assert_eq!(opts.num_heal_potion_pickup, 0);
+        assert_eq!(opts.num_full_reju_potion_pickup, 0);
+
+        // Parsing the C++ ini keys updates the fields.
+        let mut ini = super::Options::default();
+        ini.set_value("gameplay", "auto oil pickup", "true");
+        ini.set_value("gameplay", "heal potion pickup", "4");
+        ini.set_value("gameplay", "full rejuvenation potion pickup", "2");
+        assert!(ini.gameplay.auto_oil_pickup);
+        assert_eq!(ini.gameplay.num_heal_potion_pickup, 4);
+        assert_eq!(ini.gameplay.num_full_reju_potion_pickup, 2);
+    }
+
+
 }
