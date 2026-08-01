@@ -23,6 +23,7 @@
 use crate::engine::dungeon::DungeonLevelData;
 use crate::game::game_state::DungeonLayout;
 use crate::levels::drlg_l1::{CathedralGenerator, Tile};
+use crate::levels::gendung::Dungeon;
 use crate::levels::types::{DMAXX, DMAXY, MAXDUNX, MAXDUNY};
 
 /// The L1 TIL index used as the "dirt background" for `DRLG_LPass3`'s first
@@ -44,6 +45,71 @@ pub fn generate_l1_cathedral(seed: u32, level: &DungeonLevelData) -> DungeonLayo
 
     // 2. Build the 112×112 dPiece grid via DRLG_LPass3-style stamping.
     build_dungeon_layout(&gen, level)
+}
+
+
+/// The L2 background mega index for `DRLG_LPass3`'s first pass. C++ L2
+/// `Pass3()` calls `DRLG_LPass3(12 - 1)`.
+pub const L2_BG_TIL_INDEX: usize = 11;
+
+/// Build a render-ready `DungeonLayout` for an L2 Catacombs level.
+///
+/// Mirrors C++ `Source/levels/drlg_l2.cpp` `Pass3()` → `DRLG_LPass3(11)`:
+/// the generated `Dungeon.tiles` already hold 1-based L2 TIL tile ids, so
+/// each logical tile maps straight to a mega index (`tile - 1`) — no logical
+/// enum remapping needed (unlike L1's Cathedral generator).
+pub fn build_catacombs_layout(dungeon: &Dungeon, level: &DungeonLevelData) -> DungeonLayout {
+    let mut layout = DungeonLayout::default();
+
+    // Background fill: stamp the L2 background mega's four micro values across
+    // the whole MAXDUN×MAXDUN grid (C++ DRLG_LPass3 first pass).
+    if let Some((m1, m2, m3, m4)) = mega_for_til_index(level, L2_BG_TIL_INDEX) {
+        let mut j = 0;
+        while j + 1 < MAXDUNY {
+            let mut i = 0;
+            while i + 1 < MAXDUNX {
+                layout.d_piece[j * MAXDUNX + i] = m1;
+                layout.d_piece[j * MAXDUNX + i + 1] = m2;
+                layout.d_piece[(j + 1) * MAXDUNX + i] = m3;
+                layout.d_piece[(j + 1) * MAXDUNX + i + 1] = m4;
+                i += 2;
+            }
+            j += 2;
+        }
+    }
+
+    // Stamp the 40×40 logical grid at offset (16, 16), expanding each tile to
+    // a 2×2 block of micro values from its L2 TIL mega (C++ DRLG_LPass3).
+    let mut yy = 16usize;
+    for j in 0..DMAXY {
+        let mut xx = 16usize;
+        for i in 0..DMAXX {
+            let tile_id = dungeon.tiles[i][j] as usize;
+            if tile_id > 0 {
+                if let Some((m1, m2, m3, m4)) = mega_for_til_index(level, tile_id - 1) {
+                    let b = yy * MAXDUNX + xx;
+                    if xx + 1 < MAXDUNX && yy + 1 < MAXDUNY {
+                        layout.d_piece[b] = m1;
+                        layout.d_piece[b + 1] = m2;
+                        layout.d_piece[b + MAXDUNX] = m3;
+                        layout.d_piece[b + MAXDUNX + 1] = m4;
+                    }
+                }
+            }
+            xx += 2;
+        }
+        yy += 2;
+    }
+
+    // Copy the generator's dTransVal (the L2 generator already runs
+    // fix_transparency; FloodTransparencyValues(3) remains a follow-up).
+    for y in 0..MAXDUNY {
+        for x in 0..MAXDUNX {
+            layout.trans_val[y * MAXDUNX + x] = dungeon.trans_val[x][y];
+        }
+    }
+
+    layout
 }
 
 /// Build the dPiece grid from a generated Cathedral grid + the L1 TIL data.
@@ -303,6 +369,59 @@ mod tests {
         // Every collected floor tile must belong to a region (non-zero).
         for &(x, y) in layout.floor_tiles.iter().take(64) {
             assert_ne!(layout.trans_val[(y as usize) * MAXDUNX + x as usize], 0, "floor tile ({},{}) has a TransVal", x, y);
+        }
+    }
+
+
+    #[test]
+    fn test_build_catacombs_layout_stamps_dpiece() {
+        use crate::engine::dungeon::{DungeonLevelData, DungeonType, MinData, PaletteData, SolData, TilData, TilEntry};
+        use crate::levels::drlg_l2::CatacombsGenerator;
+        use crate::levels::gendung::Dungeon;
+
+        // Synthetic L2 TIL table large enough for every L2 tile id (<=161).
+        let mut til_tiles = Vec::new();
+        for i in 0..200u16 {
+            til_tiles.push(TilEntry { micro1: i, micro2: i + 1, micro3: i + 2, micro4: i + 3 });
+        }
+        let level = DungeonLevelData {
+            dungeon_type: DungeonType::Catacombs,
+            palette: PaletteData::default(),
+            sol: SolData { properties: vec![] },
+            min: MinData { mega_tiles: vec![], blocks_per_tile: 10 },
+            til: TilData { tiles: til_tiles },
+            level_cel: vec![],
+        };
+
+        let mut dungeon = Dungeon::new();
+        dungeon.level_type = crate::levels::types::DungeonType::Catacombs;
+        let mut gen = CatacombsGenerator::new();
+        let ok = gen.generate(&mut dungeon, 0x13572468, 5);
+        assert!(ok, "L2 generation should succeed");
+
+        let layout = build_catacombs_layout(&dungeon, &level);
+        assert_eq!(layout.width, MAXDUNX);
+        assert_eq!(layout.height, MAXDUNY);
+        assert!(count_filled(&layout) > 0, "stamped dPiece grid is non-empty");
+
+        // Spot check every stamped logical tile: the 2x2 micro block must equal
+        // the TIL mega for `tile_id - 1` (C++ DRLG_LPass3).
+        let mut yy = 16usize;
+        for j in 0..DMAXY {
+            let mut xx = 16usize;
+            for i in 0..DMAXX {
+                let tile_id = dungeon.tiles[i][j] as usize;
+                if tile_id > 0 && tile_id - 1 < level.til.tiles.len() {
+                    let e = &level.til.tiles[tile_id - 1];
+                    let b = yy * MAXDUNX + xx;
+                    assert_eq!(layout.d_piece[b], e.micro1, "tile ({},{}) micro1", i, j);
+                    assert_eq!(layout.d_piece[b + 1], e.micro2, "tile ({},{}) micro2", i, j);
+                    assert_eq!(layout.d_piece[b + MAXDUNX], e.micro3, "tile ({},{}) micro3", i, j);
+                    assert_eq!(layout.d_piece[b + MAXDUNX + 1], e.micro4, "tile ({},{}) micro4", i, j);
+                }
+                xx += 2;
+            }
+            yy += 2;
         }
     }
 
