@@ -42,6 +42,24 @@ impl Default for AutoPickupOptions {
     }
 }
 
+impl From<&crate::utils::options::GameplayOptions> for AutoPickupOptions {
+    /// Build the pickup options from the live engine options (C++ options.cpp).
+    fn from(o: &crate::utils::options::GameplayOptions) -> Self {
+        Self {
+            auto_gold_pickup: o.auto_gold_pickup,
+            auto_elixir_pickup: o.auto_elixir_pickup,
+            auto_oil_pickup: o.auto_oil_pickup,
+            auto_pickup_in_town: o.auto_pickup_in_town,
+            num_heal_potion_pickup: o.num_heal_potion_pickup,
+            num_full_heal_potion_pickup: o.num_full_heal_potion_pickup,
+            num_mana_potion_pickup: o.num_mana_potion_pickup,
+            num_full_mana_potion_pickup: o.num_full_mana_potion_pickup,
+            num_reju_potion_pickup: o.num_reju_potion_pickup,
+            num_full_reju_potion_pickup: o.num_full_reju_potion_pickup,
+        }
+    }
+}
+
 /// C++ `DoPickup(item)` — decide whether the item is auto-picked.
 ///
 /// `has_room_for_gold` mirrors C++ `HasRoomForGold()`, `can_fit` mirrors
@@ -271,6 +289,20 @@ mod tests {
         belt3.items[0] = Some(misc_item(ItemMiscId::Heal));
         // Carrying 2 with threshold 1 -> no pickup.
         assert!(!try_autopickup(&misc_item(ItemMiscId::Heal), &inv3, &belt3, &opts));
+    }
+
+
+    #[test]
+    fn test_autopickup_from_gameplay_options() {
+        use crate::utils::options::GameplayOptions;
+        let mut opts = GameplayOptions::default();
+        opts.auto_gold_pickup = true;
+        opts.auto_oil_pickup = true;
+        opts.num_mana_potion_pickup = 4;
+        let ap: AutoPickupOptions = (&opts).into();
+        assert!(ap.auto_gold_pickup);
+        assert!(ap.auto_oil_pickup);
+        assert_eq!(ap.num_mana_potion_pickup, 4);
     }
 
 
