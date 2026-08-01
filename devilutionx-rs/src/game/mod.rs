@@ -5,6 +5,7 @@ pub mod types;
 pub mod core;
 pub mod qol;
 pub mod chatlog;
+pub mod floatingnumbers;
 pub mod player;
 pub mod monster;
 pub mod monster_exact; // Adapter: re-exports + MonsterManager (consolidation shim)
