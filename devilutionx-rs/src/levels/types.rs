@@ -49,8 +49,8 @@ pub enum DungeonType {
     Catacombs = 2,    // L5-L8
     Caves = 3,        // L9-L12
     Hell = 4,         // L13-L16
-    Crypt = 5,        // Quest levels
-    Nest = 6,         // Hellfire expansion
+    Nest = 5,         // Hellfire expansion (C++ DTYPE_NEST)
+    Crypt = 6,        // Hellfire expansion (C++ DTYPE_CRYPT)
 }
 
 impl DungeonType {
@@ -310,4 +310,18 @@ mod tests {
         assert_eq!(MAXTILES, 1379);
         assert_eq!(MAXTHEMES, 50);
     }
+    #[test]
+    fn test_dungeon_type_values_match_cpp() {
+        use super::DungeonType;
+        // C++ `dungeon_type` (gendung_defs.hpp): NEST=5, CRYPT=6.
+        assert_eq!(DungeonType::Town as u8, 0);
+        assert_eq!(DungeonType::Cathedral as u8, 1);
+        assert_eq!(DungeonType::Catacombs as u8, 2);
+        assert_eq!(DungeonType::Caves as u8, 3);
+        assert_eq!(DungeonType::Hell as u8, 4);
+        assert_eq!(DungeonType::Nest as u8, 5);
+        assert_eq!(DungeonType::Crypt as u8, 6);
+    }
+
+
 }
