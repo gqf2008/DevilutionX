@@ -11,6 +11,7 @@ pub mod stash;
 pub mod itemlabels;
 pub mod xpbar;
 pub mod lua;
+pub mod debug; // C++ Source/debug.cpp/h (debug-only helpers + automap search highlights)
 pub mod player;
 pub mod monster;
 pub mod monster_exact; // Adapter: re-exports + MonsterManager (consolidation shim)

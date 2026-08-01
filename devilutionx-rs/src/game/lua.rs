@@ -277,6 +277,258 @@ impl LuaEngine {
         Ok(())
     }
 
+    /// Register `devilutionx.dev` (C++ `lua/modules/dev.cpp`, `_DEBUG` only).
+    ///
+    /// Mirrors C++ `LuaDevModule`: sub-tables `display`, `items`, `level`,
+    /// `monsters`, `player`, `quests`, `search`, `towners` (including the
+    /// nested `level.map`/`level.warp`/`player.gold`/`player.spells`/
+    /// `player.stats`/`player.trn` tables). `search` and the `display`/`player`
+    /// toggles are wired to `game::debug` state; the remaining commands expose
+    /// the C++ API surface and report that game-state wiring is pending (see
+    /// the alignment matrix, section 4 `lua` row).
+    #[cfg(debug_assertions)]
+    pub fn register_dev_module(&self) -> mlua::Result<()> {
+        let dev: Table = self.lua.create_table()?;
+
+        // ---- display (C++ lua/modules/dev/display.cpp) ------------------
+        let display: Table = self.lua.create_table()?;
+        display.set("fps", self.lua.create_function(|_, _on: Option<bool>| {
+            Ok("FPS counter: Not wired (frameflag)".to_string())
+        })?)?;
+        display.set("fullbright", self.lua.create_function(|_, _on: Option<bool>| {
+            Ok("Fullbright: Not wired (lighting toggle)".to_string())
+        })?)?;
+        display.set("grid", self.lua.create_function(|_, on: Option<bool>| {
+            let v = toggle_debug_flag(&crate::game::debug::DEBUG_GRID, on);
+            Ok(format!("Tile grid highlighting: {}", if v { "On" } else { "Off" }))
+        })?)?;
+        display.set("path", self.lua.create_function(|_, on: Option<bool>| {
+            let v = toggle_debug_flag(&crate::game::debug::DEBUG_PATH, on);
+            Ok(format!("Path highlighting: {}", if v { "On" } else { "Off" }))
+        })?)?;
+        display.set("scrollView", self.lua.create_function(|_, on: Option<bool>| {
+            let v = toggle_debug_flag(&crate::game::debug::DEBUG_SCROLL_VIEW_ENABLED, on);
+            Ok(format!("Scroll view: {}", if v { "On" } else { "Off" }))
+        })?)?;
+        display.set("vision", self.lua.create_function(|_, on: Option<bool>| {
+            let v = toggle_debug_flag(&crate::game::debug::DEBUG_VISION, on);
+            Ok(format!("Vision highlighting: {}", if v { "On" } else { "Off" }))
+        })?)?;
+        display.set("tileData", self.lua.create_function(|_, data_type: Option<String>| {
+            const DATA_TYPES: [&str; 23] = [
+                "microTiles", "dPiece", "dTransVal", "dLight", "dPreLight",
+                "dFlags", "dPlayer", "dMonster", "missiles", "dCorpse",
+                "dObject", "dItem", "dSpecial", "coords", "cursorcoords",
+                "objectindex", "solid", "transparent", "trap", "AutomapView",
+                "dungeon", "pdungeon", "Protected",
+            ];
+            let list = || {
+                let mut s = String::from("clear");
+                for t in DATA_TYPES {
+                    s.push_str(", ");
+                    s.push_str(t);
+                }
+                s
+            };
+            match data_type {
+                None => Ok(format!("Valid values for the first argument:\n{}", list())),
+                Some(t) if t == "clear" => Ok("Tile data cleared.".to_string()),
+                Some(t) if DATA_TYPES.contains(&t.as_str()) => {
+                    // Grid-text rendering is not wired; names are validated
+                    // against the C++ DataTypes list and the toggle reported.
+                    Ok("Tile data: On".to_string())
+                }
+                Some(_) => Ok(format!("Invalid name! Valid names are:\n{}", list())),
+            }
+        })?)?;
+        dev.set("display", display)?;
+
+        // ---- items (C++ lua/modules/dev/items.cpp) ----------------------
+        let items: Table = self.lua.create_table()?;
+        items.set("get", self.lua.create_function(|_, ()| {
+            Ok("Not wired: selected-item access".to_string())
+        })?)?;
+        items.set("info", self.lua.create_function(|_, ()| {
+            Ok("Not wired: selected-item info".to_string())
+        })?)?;
+        items.set("spawn", self.lua.create_function(|_, _name: String| {
+            Ok("Not wired: item spawning".to_string())
+        })?)?;
+        items.set("spawnUnique", self.lua.create_function(|_, _name: String| {
+            Ok("Not wired: unique item spawning".to_string())
+        })?)?;
+        dev.set("items", items)?;
+
+        // ---- level (C++ lua/modules/dev/level.cpp) ----------------------
+        let level: Table = self.lua.create_table()?;
+        level.set("exportDun", self.lua.create_function(|_, ()| {
+            Ok("Not wired: dun export".to_string())
+        })?)?;
+        let map: Table = self.lua.create_table()?;
+        map.set("hide", self.lua.create_function(|_, ()| {
+            Ok("Not wired: automap hide".to_string())
+        })?)?;
+        map.set("reveal", self.lua.create_function(|_, ()| {
+            Ok("Not wired: automap reveal".to_string())
+        })?)?;
+        level.set("map", map)?;
+        level.set("reset", self.lua.create_function(|_, (_level, _seed): (i64, Option<i64>)| {
+            Ok("Not wired: level reset".to_string())
+        })?)?;
+        level.set("seed", self.lua.create_function(|_, _level: Option<i64>| {
+            Ok("Not wired: DungeonSeeds".to_string())
+        })?)?;
+        let warp: Table = self.lua.create_table()?;
+        warp.set("dungeon", self.lua.create_function(|_, _n: i64| {
+            Ok("Not wired: warp to dungeon level".to_string())
+        })?)?;
+        warp.set("map", self.lua.create_function(|_, (_path, _dun_type, _x, _y): (String, i64, i64, i64)| {
+            Ok("Not wired: warp to custom map".to_string())
+        })?)?;
+        warp.set("quest", self.lua.create_function(|_, _n: i64| {
+            Ok("Not wired: warp to quest level".to_string())
+        })?)?;
+        level.set("warp", warp)?;
+        dev.set("level", level)?;
+
+        // ---- monsters (C++ lua/modules/dev/monsters.cpp) ----------------
+        let monsters: Table = self.lua.create_table()?;
+        monsters.set("spawn", self.lua.create_function(|_, (_name, _count): (String, Option<i64>)| {
+            Ok("Not wired: monster spawning".to_string())
+        })?)?;
+        monsters.set("spawnUnique", self.lua.create_function(|_, (_name, _count): (String, Option<i64>)| {
+            Ok("Not wired: unique monster spawning".to_string())
+        })?)?;
+        dev.set("monsters", monsters)?;
+
+        // ---- player (C++ lua/modules/dev/player.cpp) --------------------
+        let player: Table = self.lua.create_table()?;
+        player.set("arrow", self.lua.create_function(|_, _effect: String| {
+            Ok("Not wired: arrow effect".to_string())
+        })?)?;
+        player.set("god", self.lua.create_function(|_, on: Option<bool>| {
+            let v = toggle_debug_flag(&crate::game::debug::DEBUG_GOD_MODE, on);
+            Ok(format!("God mode: {}", if v { "On" } else { "Off" }))
+        })?)?;
+        player.set("invisible", self.lua.create_function(|_, on: Option<bool>| {
+            let v = toggle_debug_flag(&crate::game::debug::DEBUG_INVISIBLE, on);
+            Ok(format!("Invisible: {}", if v { "On" } else { "Off" }))
+        })?)?;
+        let gold: Table = self.lua.create_table()?;
+        gold.set("give", self.lua.create_function(|_, _amount: Option<i64>| {
+            Ok("Not wired: give gold".to_string())
+        })?)?;
+        gold.set("take", self.lua.create_function(|_, _amount: Option<i64>| {
+            Ok("Not wired: take gold".to_string())
+        })?)?;
+        player.set("gold", gold)?;
+        player.set("info", self.lua.create_function(|_, _id: Option<i64>| {
+            Ok("Not wired: player info".to_string())
+        })?)?;
+        let spells: Table = self.lua.create_table()?;
+        spells.set("setLevel", self.lua.create_function(|_, _level: i64| {
+            Ok("Not wired: spell levels".to_string())
+        })?)?;
+        player.set("spells", spells)?;
+        let stats: Table = self.lua.create_table()?;
+        stats.set("adjustHealth", self.lua.create_function(|_, _amount: i64| {
+            Ok("Not wired: adjust health".to_string())
+        })?)?;
+        stats.set("adjustMana", self.lua.create_function(|_, _amount: i64| {
+            Ok("Not wired: adjust mana".to_string())
+        })?)?;
+        stats.set("levelUp", self.lua.create_function(|_, _amount: Option<i64>| {
+            Ok("Not wired: level up".to_string())
+        })?)?;
+        stats.set("rejuvenate", self.lua.create_function(|_, ()| {
+            Ok("Not wired: rejuvenate".to_string())
+        })?)?;
+        stats.set("setAttrToMax", self.lua.create_function(|_, ()| {
+            Ok("Not wired: max stats".to_string())
+        })?)?;
+        stats.set("setAttrToMin", self.lua.create_function(|_, ()| {
+            Ok("Not wired: min stats".to_string())
+        })?)?;
+        player.set("stats", stats)?;
+        let trn: Table = self.lua.create_table()?;
+        trn.set("mon", self.lua.create_function(|_, name: String| {
+            *crate::game::debug::DEBUG_TRN.lock().unwrap() = format!("monsters\\{name}.trn");
+            Ok("TRN set".to_string())
+        })?)?;
+        trn.set("plr", self.lua.create_function(|_, name: String| {
+            *crate::game::debug::DEBUG_TRN.lock().unwrap() = format!("plrgfx\\{name}.trn");
+            Ok("TRN set".to_string())
+        })?)?;
+        trn.set("clear", self.lua.create_function(|_, ()| {
+            *crate::game::debug::DEBUG_TRN.lock().unwrap() = String::new();
+            Ok("TRN unset".to_string())
+        })?)?;
+        player.set("trn", trn)?;
+        dev.set("player", player)?;
+
+        // ---- quests (C++ lua/modules/dev/quests.cpp) --------------------
+        let quests: Table = self.lua.create_table()?;
+        // QuestManager is instance-based in the Rust port and not yet exposed
+        // to Lua; the commands keep the C++ arity and report availability.
+        quests.set("activate", self.lua.create_function(|_, _id: i64| {
+            Ok("Quest state unavailable.".to_string())
+        })?)?;
+        quests.set("activateAll", self.lua.create_function(|_, ()| {
+            Ok("Quest state unavailable.".to_string())
+        })?)?;
+        quests.set("all", self.lua.create_function(|_, ()| {
+            Ok("Quest state unavailable.".to_string())
+        })?)?;
+        quests.set("info", self.lua.create_function(|_, _id: i64| {
+            Ok("Quest state unavailable.".to_string())
+        })?)?;
+        dev.set("quests", quests)?;
+
+        // ---- search (C++ lua/modules/dev/search.cpp) --------------------
+        // Fully wired: mirrors AddDebugAutomap*Highlight + ClearDebugAutomapHighlights.
+        let search: Table = self.lua.create_table()?;
+        search.set("clear", self.lua.create_function(|_, ()| {
+            crate::game::debug::clear_debug_automap_highlights();
+            Ok("Removed all automap search markers.".to_string())
+        })?)?;
+        search.set("item", self.lua.create_function(|_, name: String| {
+            if name.is_empty() {
+                return Ok("Missing item name!".to_string());
+            }
+            crate::game::debug::add_debug_automap_item_highlight(&name);
+            Ok(format!("Added automap marker for item {name}."))
+        })?)?;
+        search.set("monster", self.lua.create_function(|_, name: String| {
+            if name.is_empty() {
+                return Ok("Missing monster name!".to_string());
+            }
+            crate::game::debug::add_debug_automap_monster_highlight(&name);
+            Ok(format!("Added automap marker for monster {name}."))
+        })?)?;
+        search.set("object", self.lua.create_function(|_, name: String| {
+            if name.is_empty() {
+                return Ok("Missing object name!".to_string());
+            }
+            crate::game::debug::add_debug_automap_object_highlight(&name);
+            Ok(format!("Added automap marker for object {name}."))
+        })?)?;
+        dev.set("search", search)?;
+
+        // ---- towners (C++ lua/modules/dev/towners.cpp) ------------------
+        let towners: Table = self.lua.create_table()?;
+        towners.set("talk", self.lua.create_function(|_, _name: String| {
+            Ok("Not wired: talk to towner".to_string())
+        })?)?;
+        towners.set("visit", self.lua.create_function(|_, _name: String| {
+            Ok("Not wired: teleport to towner".to_string())
+        })?)?;
+        dev.set("towners", towners)?;
+
+        let devilutionx: Table = self.lua.globals().get("devilutionx")?;
+        devilutionx.set("dev", dev)?;
+        Ok(())
+    }
+
     /// Register the common modules (C++ `LuaInitialize`'s table).
     pub fn register_default_modules(&self) -> mlua::Result<()> {
         let devilutionx: Table = self.lua.create_table()?;
@@ -290,6 +542,8 @@ impl LuaEngine {
         self.register_player_module()?;
         self.register_towners_module()?;
         self.register_items_module()?;
+        #[cfg(debug_assertions)]
+        self.register_dev_module()?;
         Ok(())
     }
 }
@@ -351,6 +605,24 @@ fn lua_value_to_string(value: &Value) -> String {
 impl Default for LuaEngine {
     fn default() -> Self {
         Self::new().expect("Lua state creation")
+    }
+}
+
+/// Toggle a debug flag: set to `on` when given, otherwise flip it
+/// (C++ `DebugCmd*` `optional<bool>` pattern). Returns the new value.
+#[cfg(debug_assertions)]
+fn toggle_debug_flag(flag: &std::sync::atomic::AtomicBool, on: Option<bool>) -> bool {
+    use std::sync::atomic::Ordering;
+    match on {
+        Some(v) => {
+            flag.store(v, Ordering::SeqCst);
+            v
+        }
+        None => {
+            let v = !flag.load(Ordering::SeqCst);
+            flag.store(v, Ordering::SeqCst);
+            v
+        }
     }
 }
 
@@ -564,4 +836,74 @@ mod tests {
     }
 
 
+    #[cfg(debug_assertions)]
+    #[test]
+    fn test_dev_module_registered() {
+        let engine = LuaEngine::new().unwrap();
+        engine.register_default_modules().unwrap();
+        engine
+            .load_script(
+                "dev.lua",
+                r#"
+                dev = devilutionx.dev
+                assert(dev.display ~= nil)
+                assert(dev.display.grid ~= nil)
+                assert(dev.display.tileData ~= nil)
+                assert(dev.items.get ~= nil)
+                assert(dev.level.exportDun ~= nil)
+                assert(dev.level.map.hide ~= nil)
+                assert(dev.level.map.reveal ~= nil)
+                assert(dev.level.warp.dungeon ~= nil)
+                assert(dev.monsters.spawn ~= nil)
+                assert(dev.player.god ~= nil)
+                assert(dev.player.gold.give ~= nil)
+                assert(dev.player.spells.setLevel ~= nil)
+                assert(dev.player.stats.rejuvenate ~= nil)
+                assert(dev.player.trn.mon ~= nil)
+                assert(dev.quests.activate ~= nil)
+                assert(dev.search.monster ~= nil)
+                assert(dev.towners.talk ~= nil)
+                "#,
+            )
+            .unwrap();
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn test_dev_search_wires_debug_highlights() {
+        crate::game::debug::clear_debug_automap_highlights();
+        let engine = LuaEngine::new().unwrap();
+        engine.register_default_modules().unwrap();
+        engine
+            .load_script(
+                "search.lua",
+                r#"
+                msg = devilutionx.dev.search.monster("Skeleton")
+                msg2 = devilutionx.dev.search.item("Short Sword")
+                "#,
+            )
+            .unwrap();
+        assert!(crate::game::debug::is_debug_automap_highlight_needed());
+        let msg: String = engine.state().globals().get("msg").unwrap();
+        assert!(msg.contains("Skeleton"));
+        let msg2: String = engine.state().globals().get("msg2").unwrap();
+        assert!(msg2.contains("Short Sword"));
+        crate::game::debug::clear_debug_automap_highlights();
+        assert!(!crate::game::debug::is_debug_automap_highlight_needed());
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn test_dev_display_toggle_wires_debug_flag() {
+        use std::sync::atomic::Ordering;
+        crate::game::debug::DEBUG_GRID.store(false, Ordering::SeqCst);
+        let engine = LuaEngine::new().unwrap();
+        engine.register_default_modules().unwrap();
+        engine
+            .load_script("grid.lua", "state = devilutionx.dev.display.grid()")
+            .unwrap();
+        let state: String = engine.state().globals().get("state").unwrap();
+        assert!(state.contains("On"));
+        assert!(crate::game::debug::DEBUG_GRID.load(Ordering::SeqCst));
+    }
 }
