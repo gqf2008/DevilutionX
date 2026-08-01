@@ -78,39 +78,36 @@ pub enum MonsterType {
 }
 
 impl MonsterType {
-    /// Get base stats for monster type
+    /// Get base stats for monster type.
+    ///
+    /// Values are the authoritative `monstdat.tsv` rows (hitPointsMaximum,
+    /// minDamage, maxDamage, armorClass, toHit, exp) from upstream/master, keyed
+    /// by each simplified type to its closest C++ `_monster_id` (per arm).
+    /// `Lazarus` is a set-level unique boss with no base TSV row; its stats stay
+    /// as the demo approximation.
     pub fn base_stats(&self) -> MonsterStats {
         match self {
-            // L1 monsters
-            MonsterType::Zombie => MonsterStats::new(8, 2, 4, 10, 0, 50),
-            MonsterType::FallenOne => MonsterStats::new(4, 1, 3, 5, 5, 30),
-            MonsterType::Skeleton => MonsterStats::new(6, 2, 5, 8, 3, 45),
-            MonsterType::SkeletonArcher => MonsterStats::new(5, 3, 6, 5, 8, 50),
-            MonsterType::Scavenger => MonsterStats::new(5, 1, 4, 3, 10, 35),
-
-            // L2 monsters
-            MonsterType::Ghoul => MonsterStats::new(15, 4, 8, 15, 5, 80),
-            MonsterType::BlackKnight => MonsterStats::new(25, 6, 12, 25, 10, 120),
-            MonsterType::Gargoyle => MonsterStats::new(18, 5, 10, 18, 15, 100),
-            MonsterType::Overlord => MonsterStats::new(30, 8, 15, 30, 5, 150),
-
-            // L3 monsters
-            MonsterType::Golem => MonsterStats::new(40, 10, 18, 45, 0, 200),
-            MonsterType::FlayerDemon => MonsterStats::new(25, 8, 14, 20, 20, 180),
-            MonsterType::StormRider => MonsterStats::new(22, 7, 12, 15, 25, 160),
-            MonsterType::VenomSpitter => MonsterStats::new(20, 6, 10, 10, 15, 140),
-
-            // L4 monsters
-            MonsterType::SuccubusBlack => MonsterStats::new(35, 10, 18, 25, 30, 250),
-            MonsterType::Balrog => MonsterStats::new(50, 15, 25, 40, 10, 350),
-            MonsterType::VileOne => MonsterStats::new(45, 12, 20, 35, 20, 300),
-            MonsterType::MageHell => MonsterStats::new(30, 8, 15, 20, 35, 280),
-
-            // Bosses
-            MonsterType::Butcher => MonsterStats::new(100, 20, 35, 50, 0, 1000),
-            MonsterType::SkeletonKing => MonsterStats::new(150, 25, 40, 60, 15, 2000),
-            MonsterType::Lazarus => MonsterStats::new(200, 30, 50, 70, 40, 5000),
-            MonsterType::Diablo => MonsterStats::new(500, 50, 80, 100, 50, 20000),
+            MonsterType::Zombie => MonsterStats::new(7, 2, 5, 5, 10, 54), // C++ MT_NZOMBIE
+            MonsterType::FallenOne => MonsterStats::new(4, 1, 3, 0, 15, 46), // C++ MT_RFALLSP
+            MonsterType::Skeleton => MonsterStats::new(4, 1, 4, 0, 20, 64), // C++ MT_WSKELAX
+            MonsterType::SkeletonArcher => MonsterStats::new(4, 1, 2, 0, 15, 110), // C++ MT_WSKELBW
+            MonsterType::Scavenger => MonsterStats::new(6, 1, 5, 10, 20, 80), // C++ MT_NSCAV
+            MonsterType::Ghoul => MonsterStats::new(11, 3, 10, 10, 10, 58), // C++ MT_BZOMBIE
+            MonsterType::BlackKnight => MonsterStats::new(150, 15, 20, 75, 110, 3360), // C++ MT_NBLACK
+            MonsterType::Gargoyle => MonsterStats::new(90, 10, 16, 45, 65, 1205), // C++ MT_GARGOYLE
+            MonsterType::Overlord => MonsterStats::new(80, 6, 12, 55, 55, 635), // C++ MT_FAT
+            MonsterType::Golem => MonsterStats::new(1, 1, 1, 1, 0, 0), // C++ MT_GOLEM
+            MonsterType::FlayerDemon => MonsterStats::new(200, 10, 20, 70, 85, 2058), // C++ MT_FLAYED
+            MonsterType::StormRider => MonsterStats::new(120, 8, 18, 30, 80, 2391), // C++ MT_RSTORM
+            MonsterType::VenomSpitter => MonsterStats::new(85, 4, 16, 30, 45, 1248), // C++ MT_RACID
+            MonsterType::SuccubusBlack => MonsterStats::new(150, 1, 20, 60, 100, 3696), // C++ MT_SUCCUBUS
+            MonsterType::Balrog => MonsterStats::new(200, 22, 30, 75, 130, 3643), // C++ MT_BALROG
+            MonsterType::VileOne => MonsterStats::new(240, 12, 24, 75, 75, 4374), // C++ MT_HOLOWONE
+            MonsterType::MageHell => MonsterStats::new(70, 8, 20, 0, 90, 4070), // C++ MT_COUNSLR
+            MonsterType::Butcher => MonsterStats::new(320, 6, 12, 50, 50, 710), // C++ MT_CLEAVER
+            MonsterType::SkeletonKing => MonsterStats::new(140, 6, 16, 70, 60, 570), // C++ MT_SKING
+            MonsterType::Lazarus => MonsterStats::new(200, 30, 50, 70, 40, 5000), // C++ set-level boss (no monstdat row)
+            MonsterType::Diablo => MonsterStats::new(1666, 30, 60, 90, 220, 31666), // C++ MT_DIABLO
         }
     }
 
@@ -4790,6 +4787,28 @@ pub fn ai_lazarus_minion(monster: &mut Monster) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// `base_stats()` must match the authoritative monstdat.tsv rows.
+    /// (hp = hitPointsMaximum, then minDamage/maxDamage/armorClass/toHit/exp.)
+    #[test]
+    fn test_base_stats_match_monstdat_tsv() {
+        // MonstersData[MT_NZOMBIE] = Zombie: hp 4-7, dmg 2-5, ac 5, toHit 10, exp 54.
+        let z = MonsterType::Zombie.base_stats();
+        assert_eq!((z.hp, z.min_damage, z.max_damage, z.armor, z.to_hit, z.experience),
+                  (7, 2, 5, 5, 10, 54));
+        // MT_CLEAVER = The Butcher: hp 320-320, dmg 6-12, ac 50, toHit 50, exp 710.
+        let b = MonsterType::Butcher.base_stats();
+        assert_eq!((b.hp, b.min_damage, b.max_damage, b.armor, b.to_hit, b.experience),
+                  (320, 6, 12, 50, 50, 710));
+        // MT_DIABLO = The Dark Lord: hp 1666, dmg 30-60, ac 90, toHit 220, exp 31666.
+        let d = MonsterType::Diablo.base_stats();
+        assert_eq!((d.hp, d.min_damage, d.max_damage, d.armor, d.to_hit, d.experience),
+                  (1666, 30, 60, 90, 220, 31666));
+        // MT_WSKELAX = Skeleton (L1): hp 2-4, dmg 1-4, ac 0, toHit 20, exp 64.
+        let s = MonsterType::Skeleton.base_stats();
+        assert_eq!((s.hp, s.min_damage, s.max_damage, s.armor, s.to_hit, s.experience),
+                  (4, 1, 4, 0, 20, 64));
+    }
+
 
     /// Helper: Create test monster with basic settings
     fn create_test_monster(x: i32, y: i32) -> Monster {
