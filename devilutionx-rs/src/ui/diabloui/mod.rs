@@ -319,6 +319,16 @@ pub fn main_menu_action(index: usize) -> Option<MainMenuAction> {
 }
 
 
+/// C++ `_selhero_selections` (DiabloUI/diabloui.h): hero-selection actions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(u8)]
+pub enum SelHeroAction {
+    #[default]
+    NewDungeon = 0,
+    Continue = 1,
+    Connect = 2,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -427,6 +437,27 @@ mod tests {
         // Enum values match C++ _mainmenu_selections.
         assert_eq!(MainMenuAction::SinglePlayer as u8, 1);
         assert_eq!(MainMenuAction::ExitDiablo as u8, 6);
+    }
+
+
+    #[test]
+    fn test_difficulty_matches_cpp() {
+        use super::Difficulty;
+        // Values and names match C++ (gendung.h DIFF_* / discord.cpp names).
+        assert_eq!(Difficulty::Normal as u8, 0);
+        assert_eq!(Difficulty::Nightmare as u8, 1);
+        assert_eq!(Difficulty::Hell as u8, 2);
+        assert_eq!(Difficulty::Normal.name(), "Normal");
+        assert_eq!(Difficulty::Nightmare.name(), "Nightmare");
+        assert_eq!(Difficulty::Hell.name(), "Hell");
+    }
+
+    #[test]
+    fn test_selhero_actions_match_cpp() {
+        use super::SelHeroAction;
+        assert_eq!(SelHeroAction::NewDungeon as u8, 0);
+        assert_eq!(SelHeroAction::Continue as u8, 1);
+        assert_eq!(SelHeroAction::Connect as u8, 2);
     }
 
 
