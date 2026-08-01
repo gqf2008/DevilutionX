@@ -159,4 +159,78 @@ fn replay_warrior_level1to2() {
 
     // TODO(Tier 3): compare final engine save state to demo_0_reference_spawn_0.sv
     // byte-for-byte (HeroCompareResult::Same in C++).
+
+/// Byte-exact decoding against the C++ `demomode.cpp` record layout
+/// (`WriteDemoMsgHeader` + per-type payload, version 3):
+///   header: [version u8][save u32le][w u16le][h u16le][23 settings bytes]
+///   record: [type u8][progress u8][payload]  (Rendering <=127: single byte)
+///   Key:    [sym u32le][mod u16le]
+///   MouseButton: [button u8][x u16le][y u16le][mod u16le]
+///   MouseMotion: [x u16le][y u16le]
+#[test]
+fn decodes_synthetic_version3_events_byte_exactly() {
+    use devilutionx_rs::engine::demo_reader::DemoPayload;
+
+    let mut data = Vec::new();
+    // Header (version 3, save 0, 640x480, 23 settings bytes).
+    data.push(3);
+    data.extend_from_slice(&0u32.to_le_bytes());
+    data.extend_from_slice(&640u16.to_le_bytes());
+    data.extend_from_slice(&480u16.to_le_bytes());
+    data.extend_from_slice(&[0u8; 23]);
+
+    // Rendering with progress 5 (inline single byte, high bit set).
+    data.push(0x80 | 5);
+    // GameTick progress 0 (no payload).
+    data.push(0);
+    data.push(0);
+    // KeyDown type 13 progress 1: sym 0x11223344 LE, mod 0x0102 LE.
+    data.push(13);
+    data.push(1);
+    data.extend_from_slice(&0x1122_3344u32.to_le_bytes());
+    data.extend_from_slice(&0x0102u16.to_le_bytes());
+    // MouseButtonDown type 10 progress 2: button 1, x 100, y 200, mod 3.
+    data.push(10);
+    data.push(2);
+    data.push(1);
+    data.extend_from_slice(&100u16.to_le_bytes());
+    data.extend_from_slice(&200u16.to_le_bytes());
+    data.extend_from_slice(&3u16.to_le_bytes());
+    // MouseMotion type 9 progress 3: x 640, y 320.
+    data.push(9);
+    data.push(3);
+    data.extend_from_slice(&640u16.to_le_bytes());
+    data.extend_from_slice(&320u16.to_le_bytes());
+
+    let demo = parse_demo(&data).expect("synthetic version-3 demo parses");
+    assert_eq!(demo.header.version, 3);
+    assert_eq!(demo.header.graphics_width, 640);
+    assert_eq!(demo.events.len(), 5);
+
+    // [0] Rendering (inline).
+    assert_eq!(demo.events[0].event_type, DemoEventType::Rendering);
+    assert_eq!(demo.events[0].progress_to_next_game_tick, 5);
+    // [1] GameTick.
+    assert_eq!(demo.events[1].event_type, DemoEventType::GameTick);
+    // [2] KeyDown with C++ payload.
+    assert_eq!(demo.events[2].event_type, DemoEventType::KeyDown);
+    assert_eq!(
+        demo.events[2].payload,
+        DemoPayload::Key { sym: 0x1122_3344, mod_state: 0x0102 }
+    );
+    // [3] MouseButtonDown with C++ payload (button first).
+    assert_eq!(demo.events[3].event_type, DemoEventType::MouseButtonDown);
+    assert_eq!(
+        demo.events[3].payload,
+        DemoPayload::MouseButton { button: 1, x: 100, y: 200, mod_state: 3 }
+    );
+    // [4] MouseMotion.
+    assert_eq!(demo.events[4].event_type, DemoEventType::MouseMotion);
+    assert_eq!(
+        demo.events[4].payload,
+        DemoPayload::MouseMotion { x: 640, y: 320 }
+    );
+}
+
+
 }
