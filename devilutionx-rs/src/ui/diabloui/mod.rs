@@ -42,6 +42,7 @@ pub mod ui_core;
 pub mod ui_item;
 
 // Re-export commonly used types
+pub mod credits_lines;
 pub use dialogs::{DialogResult, DialogType, ProgressDialog, SelectDialog};
 pub use hero_select::{HeroInfo, HeroSelection, SelHeroResult};
 pub use mainmenu::{MainMenu, MainMenuResult, MainMenuSelection};
