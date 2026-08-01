@@ -63,6 +63,18 @@ pub enum Tile {
 
     /// C++ `Corner = 3` (wall corner; used by AddWall/FixTilesPatterns)
     Corner = 3,
+    /// C++ `DArch = 5` (door arch)
+    DArch = 5,
+    /// C++ `HArchEnd = 8` (horizontal arch end)
+    HArchEnd = 8,
+    /// C++ `VArchEnd = 9` (vertical arch end)
+    VArchEnd = 9,
+    /// C++ `HArchVWall = 10` (horizontal arch + vertical wall)
+    HArchVWall = 10,
+    /// C++ `HWallVArch = 14` (horizontal wall + vertical arch)
+    HWallVArch = 14,
+    /// C++ `Pillar = 15` (room pillar)
+    Pillar = 15,
     /// C++ `VWallEnd = 6` (vertical wall end)
     VWallEnd = 6,
     /// C++ `HWallEnd = 7` (horizontal wall end)
@@ -169,7 +181,13 @@ impl TryFrom<u8> for Tile {
             2 => Ok(Tile::HWall),
             3 => Ok(Tile::Corner),
             4 => Ok(Tile::SECorner),
+            5 => Ok(Tile::DArch),
             6 => Ok(Tile::VWallEnd),
+            8 => Ok(Tile::HArchEnd),
+            9 => Ok(Tile::VArchEnd),
+            10 => Ok(Tile::HArchVWall),
+            14 => Ok(Tile::HWallVArch),
+            15 => Ok(Tile::Pillar),
             7 => Ok(Tile::HWallEnd),
             17 => Ok(Tile::HCorner),
             18 => Ok(Tile::DirtHwall),
@@ -733,6 +751,130 @@ impl CathedralGenerator {
         count
     }
 
+    /// C++ `GenerateChamber()` (drlg_l1.cpp): fills a 10x10 chamber interior
+    /// with floor, marks the Chamber mask, places pillars, and connects to
+    /// neighbouring chambers with arch/door tiles.
+    fn generate_chamber(
+        &mut self,
+        position_x: i32,
+        position_y: i32,
+        connect_previous: bool,
+        connect_next: bool,
+        vertical_layout: bool,
+    ) {
+        let (px, py) = (position_x as usize, position_y as usize);
+        if connect_previous {
+            if vertical_layout {
+                self.dungeon[py][px + 2] = Tile::ArchH1;
+                self.dungeon[py][px + 3] = Tile::ArchH1;
+                self.dungeon[py][px + 4] = Tile::Corner;
+                self.dungeon[py][px + 7] = Tile::VArchEnd;
+                self.dungeon[py][px + 8] = Tile::ArchH1;
+                self.dungeon[py][px + 9] = Tile::HWall;
+            } else {
+                self.dungeon[py + 2][px] = Tile::ArchV1;
+                self.dungeon[py + 3][px] = Tile::ArchV1;
+                self.dungeon[py + 4][px] = Tile::Corner;
+                self.dungeon[py + 7][px] = Tile::HArchEnd;
+                self.dungeon[py + 8][px] = Tile::ArchV1;
+                self.dungeon[py + 9][px] = Tile::VWall;
+            }
+        }
+        if connect_next {
+            if vertical_layout {
+                let y = py + 11;
+                self.dungeon[y][px + 2] = Tile::HArchVWall;
+                self.dungeon[y][px + 3] = Tile::ArchH1;
+                self.dungeon[y][px + 4] = Tile::HArchEnd;
+                self.dungeon[y][px + 7] = Tile::DArch;
+                self.dungeon[y][px + 8] = Tile::ArchH1;
+                if self.dungeon[y][px + 9] != Tile::SECorner {
+                    self.dungeon[y][px + 9] = Tile::HDirtCorner;
+                }
+            } else {
+                let x = px + 11;
+                self.dungeon[py + 2][x] = Tile::HWallVArch;
+                self.dungeon[py + 3][x] = Tile::ArchV1;
+                self.dungeon[py + 4][x] = Tile::VArchEnd;
+                self.dungeon[py + 7][x] = Tile::DArch;
+                self.dungeon[py + 8][x] = Tile::ArchV1;
+                if self.dungeon[py + 9][x] != Tile::SECorner {
+                    self.dungeon[py + 9][x] = Tile::HDirtCorner;
+                }
+            }
+        }
+        for y in 1..11 {
+            for x in 1..11 {
+                self.dungeon[py + y][px + x] = Tile::Floor;
+                self.chamber[py + y][px + x] = true;
+            }
+        }
+        self.dungeon[py + 4][px + 4] = Tile::Pillar;
+        self.dungeon[py + 4][px + 7] = Tile::Pillar;
+        self.dungeon[py + 7][px + 4] = Tile::Pillar;
+        self.dungeon[py + 7][px + 7] = Tile::Pillar;
+    }
+
+    /// C++ `GenerateHall()` (drlg_l1.cpp): draws the arch rows connecting
+    /// chambers through the hallway.
+    fn generate_hall(&mut self, start_x: i32, start_y: i32, length: i32, vertical_layout: bool) {
+        if vertical_layout {
+            for i in start_y..(start_y + length) {
+                self.dungeon[i as usize][start_x as usize] = Tile::ArchV1;
+                self.dungeon[i as usize][start_x as usize + 3] = Tile::ArchV1;
+            }
+        } else {
+            for i in start_x..(start_x + length) {
+                self.dungeon[start_y as usize][i as usize] = Tile::ArchH1;
+                self.dungeon[start_y as usize + 3][i as usize] = Tile::ArchH1;
+            }
+        }
+    }
+
+    /// C++ `FillChambers()` (drlg_l1.cpp): builds the chamber walls/arches on
+    /// top of the MakeDmt output so `AddWall` can complete the dungeon. Quest
+    /// set pieces (`InitSetPiece`) are skipped — no quest wiring and the
+    /// set-piece .dun data is not loaded.
+    fn fill_chambers(&mut self) {
+        let (mut chamber1x, mut chamber1y) = (0i32, 14i32);
+        let (mut chamber3x, mut chamber3y) = (28i32, 14i32);
+        let (mut hall1x, mut hall1y) = (12i32, 18i32);
+        let (mut hall2x, mut hall2y) = (26i32, 18i32);
+        if self.vertical_layout {
+            std::mem::swap(&mut chamber1x, &mut chamber1y);
+            std::mem::swap(&mut chamber3x, &mut chamber3y);
+            std::mem::swap(&mut hall1x, &mut hall1y);
+            std::mem::swap(&mut hall2x, &mut hall2y);
+        }
+
+        if self.chamber_state.has_chamber_1 {
+            self.generate_chamber(chamber1x, chamber1y, false, true, self.vertical_layout);
+        }
+        if self.chamber_state.has_chamber_2 {
+            self.generate_chamber(
+                14,
+                14,
+                self.chamber_state.has_chamber_1,
+                self.chamber_state.has_chamber_3,
+                self.vertical_layout,
+            );
+        }
+        if self.chamber_state.has_chamber_3 {
+            self.generate_chamber(chamber3x, chamber3y, true, false, self.vertical_layout);
+        }
+
+        if self.chamber_state.has_chamber_2 {
+            if self.chamber_state.has_chamber_1 {
+                self.generate_hall(hall1x, hall1y, 2, self.vertical_layout);
+            }
+            if self.chamber_state.has_chamber_3 {
+                self.generate_hall(hall2x, hall2y, 2, self.vertical_layout);
+            }
+        } else {
+            self.generate_hall(hall1x, hall1y, 16, self.vertical_layout);
+        }
+    }
+
     /// C++ `FixTilesPatterns()` (drlg_l1.cpp) — three passes converting the
     /// raw MakeDmt walls into the dirt-wall / corner vocabulary that AddWall
     /// and the renderer expect. Tile names follow the Rust enum; values match
@@ -1182,6 +1324,7 @@ impl CathedralGenerator {
         // C++ order: MakeDmt -> FillChambers -> FixTilesPatterns -> AddWall.
         // (FillChambers is not ported yet; its chamber-mask effect is minimal
         // for the current layout.)
+        self.fill_chambers();
         self.fix_tiles_patterns();
 
         // Add walls between rooms
