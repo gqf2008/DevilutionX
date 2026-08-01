@@ -48,22 +48,24 @@ pub fn generate_l1_cathedral(seed: u32, level: &DungeonLevelData) -> DungeonLayo
 }
 
 
-/// The L2 background mega index for `DRLG_LPass3`'s first pass. C++ L2
-/// `Pass3()` calls `DRLG_LPass3(12 - 1)`.
-pub const L2_BG_TIL_INDEX: usize = 11;
+/// The background mega index for each dungeon's `DRLG_LPass3` first pass
+/// (C++ `Pass3()` per level): L1 = 8-1, L2 = 12-1, L3 = 8-1, L4 = 30-1.
+pub const DUNGEON_BG_TIL_INDEX: [usize; 5] = [0, 7, 11, 7, 29];
 
-/// Build a render-ready `DungeonLayout` for an L2 Catacombs level.
-///
-/// Mirrors C++ `Source/levels/drlg_l2.cpp` `Pass3()` → `DRLG_LPass3(11)`:
-/// the generated `Dungeon.tiles` already hold 1-based L2 TIL tile ids, so
-/// each logical tile maps straight to a mega index (`tile - 1`) — no logical
-/// enum remapping needed (unlike L1's Cathedral generator).
-pub fn build_catacombs_layout(dungeon: &Dungeon, level: &DungeonLevelData) -> DungeonLayout {
+/// Stamp a render-ready `DungeonLayout` from a generated `Dungeon` whose
+/// `tiles` hold 1-based TIL tile ids, mirroring C++ `DRLG_LPass3(bgIndex)`:
+/// the background mega fills the whole MAXDUN×MAXDUN grid, then each logical
+/// tile maps straight to its mega (`tile_id - 1`). No logical-enum remapping
+/// is needed for L2-L4 (unlike L1's Cathedral generator).
+pub fn stamp_dungeon_layout(
+    dungeon: &Dungeon,
+    level: &DungeonLevelData,
+    bg_til_index: usize,
+) -> DungeonLayout {
     let mut layout = DungeonLayout::default();
 
-    // Background fill: stamp the L2 background mega's four micro values across
-    // the whole MAXDUN×MAXDUN grid (C++ DRLG_LPass3 first pass).
-    if let Some((m1, m2, m3, m4)) = mega_for_til_index(level, L2_BG_TIL_INDEX) {
+    // Background fill (C++ DRLG_LPass3 first pass).
+    if let Some((m1, m2, m3, m4)) = mega_for_til_index(level, bg_til_index) {
         let mut j = 0;
         while j + 1 < MAXDUNY {
             let mut i = 0;
@@ -78,8 +80,7 @@ pub fn build_catacombs_layout(dungeon: &Dungeon, level: &DungeonLevelData) -> Du
         }
     }
 
-    // Stamp the 40×40 logical grid at offset (16, 16), expanding each tile to
-    // a 2×2 block of micro values from its L2 TIL mega (C++ DRLG_LPass3).
+    // Stamp the 40×40 logical grid at offset (16, 16) (C++ DRLG_LPass3).
     let mut yy = 16usize;
     for j in 0..DMAXY {
         let mut xx = 16usize;
@@ -102,7 +103,7 @@ pub fn build_catacombs_layout(dungeon: &Dungeon, level: &DungeonLevelData) -> Du
     }
 
     // Copy the generator's dTransVal (the L2 generator already runs
-    // fix_transparency; FloodTransparencyValues(3) remains a follow-up).
+    // fix_transparency; FloodTransparencyValues remains a follow-up).
     for y in 0..MAXDUNY {
         for x in 0..MAXDUNX {
             layout.trans_val[y * MAXDUNX + x] = dungeon.trans_val[x][y];
@@ -110,6 +111,24 @@ pub fn build_catacombs_layout(dungeon: &Dungeon, level: &DungeonLevelData) -> Du
     }
 
     layout
+}
+
+/// Build a render-ready `DungeonLayout` for an L2 Catacombs level
+/// (C++ `drlg_l2.cpp Pass3()` → `DRLG_LPass3(11)`).
+pub fn build_catacombs_layout(dungeon: &Dungeon, level: &DungeonLevelData) -> DungeonLayout {
+    stamp_dungeon_layout(dungeon, level, DUNGEON_BG_TIL_INDEX[2])
+}
+
+/// Build a render-ready `DungeonLayout` for an L3 Caves level
+/// (C++ `drlg_l3.cpp Pass3()` → `DRLG_LPass3(7)`).
+pub fn build_caves_layout(dungeon: &Dungeon, level: &DungeonLevelData) -> DungeonLayout {
+    stamp_dungeon_layout(dungeon, level, DUNGEON_BG_TIL_INDEX[3])
+}
+
+/// Build a render-ready `DungeonLayout` for an L4 Hell level
+/// (C++ `drlg_l4.cpp Pass3()` → `DRLG_LPass3(29)`).
+pub fn build_hell_layout(dungeon: &Dungeon, level: &DungeonLevelData) -> DungeonLayout {
+    stamp_dungeon_layout(dungeon, level, DUNGEON_BG_TIL_INDEX[4])
 }
 
 /// Build the dPiece grid from a generated Cathedral grid + the L1 TIL data.
@@ -418,6 +437,99 @@ mod tests {
                     assert_eq!(layout.d_piece[b + 1], e.micro2, "tile ({},{}) micro2", i, j);
                     assert_eq!(layout.d_piece[b + MAXDUNX], e.micro3, "tile ({},{}) micro3", i, j);
                     assert_eq!(layout.d_piece[b + MAXDUNX + 1], e.micro4, "tile ({},{}) micro4", i, j);
+                }
+                xx += 2;
+            }
+            yy += 2;
+        }
+    }
+
+
+    #[test]
+    fn test_build_caves_layout_stamps_dpiece() {
+        use crate::engine::dungeon::{DungeonLevelData, DungeonType, MinData, PaletteData, SolData, TilData, TilEntry};
+        use crate::levels::drlg_l3::CavesGenerator;
+        use crate::levels::gendung::Dungeon;
+        use crate::levels::types::LevelEntry;
+
+        let mut til_tiles = Vec::new();
+        for i in 0..200u16 {
+            til_tiles.push(TilEntry { micro1: i, micro2: i + 1, micro3: i + 2, micro4: i + 3 });
+        }
+        let level = DungeonLevelData {
+            dungeon_type: DungeonType::Caves,
+            palette: PaletteData::default(),
+            sol: SolData { properties: vec![] },
+            min: MinData { mega_tiles: vec![], blocks_per_tile: 10 },
+            til: TilData { tiles: til_tiles },
+            level_cel: vec![],
+        };
+
+        let mut dungeon = Dungeon::new();
+        dungeon.level_type = crate::levels::types::DungeonType::Caves;
+        let mut gen = CavesGenerator::new();
+        let ok = gen.generate(&mut dungeon, 0x13572468, 9, LevelEntry::MainEntry);
+        assert!(ok, "L3 generation should succeed");
+
+        let layout = build_caves_layout(&dungeon, &level);
+        assert!(count_filled(&layout) > 0, "L3 layout non-empty");
+
+        let mut yy = 16usize;
+        for j in 0..DMAXY {
+            let mut xx = 16usize;
+            for i in 0..DMAXX {
+                let tile_id = dungeon.tiles[i][j] as usize;
+                if tile_id > 0 && tile_id - 1 < level.til.tiles.len() {
+                    let e = &level.til.tiles[tile_id - 1];
+                    let b = yy * MAXDUNX + xx;
+                    assert_eq!(layout.d_piece[b], e.micro1, "L3 tile ({},{})", i, j);
+                    assert_eq!(layout.d_piece[b + MAXDUNX + 1], e.micro4, "L3 tile ({},{})", i, j);
+                }
+                xx += 2;
+            }
+            yy += 2;
+        }
+    }
+
+    #[test]
+    fn test_build_hell_layout_stamps_dpiece() {
+        use crate::engine::dungeon::{DungeonLevelData, DungeonType, MinData, PaletteData, SolData, TilData, TilEntry};
+        use crate::levels::drlg_l4::Dungeon4Generator;
+        use crate::levels::gendung::Dungeon;
+        use crate::levels::types::LevelEntry;
+
+        let mut til_tiles = Vec::new();
+        for i in 0..256u16 {
+            til_tiles.push(TilEntry { micro1: i, micro2: i + 1, micro3: i + 2, micro4: i + 3 });
+        }
+        let level = DungeonLevelData {
+            dungeon_type: DungeonType::Hell,
+            palette: PaletteData::default(),
+            sol: SolData { properties: vec![] },
+            min: MinData { mega_tiles: vec![], blocks_per_tile: 10 },
+            til: TilData { tiles: til_tiles },
+            level_cel: vec![],
+        };
+
+        let mut dungeon = Dungeon::new();
+        dungeon.level_type = crate::levels::types::DungeonType::Hell;
+        let mut gen = Dungeon4Generator::new();
+        let ok = gen.generate(&mut dungeon, 0x13572468, 13, LevelEntry::MainEntry);
+        assert!(ok, "L4 generation should succeed");
+
+        let layout = build_hell_layout(&dungeon, &level);
+        assert!(count_filled(&layout) > 0, "L4 layout non-empty");
+
+        let mut yy = 16usize;
+        for j in 0..DMAXY {
+            let mut xx = 16usize;
+            for i in 0..DMAXX {
+                let tile_id = dungeon.tiles[i][j] as usize;
+                if tile_id > 0 && tile_id - 1 < level.til.tiles.len() {
+                    let e = &level.til.tiles[tile_id - 1];
+                    let b = yy * MAXDUNX + xx;
+                    assert_eq!(layout.d_piece[b], e.micro1, "L4 tile ({},{})", i, j);
+                    assert_eq!(layout.d_piece[b + MAXDUNX + 1], e.micro4, "L4 tile ({},{})", i, j);
                 }
                 xx += 2;
             }
