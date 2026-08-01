@@ -1508,12 +1508,29 @@ impl CatacombsGenerator {
     }
 
     /// Helper: Create a door marker at position
+    /// C++ `CreateDoorType` (drlg_l2.cpp): returns if any orthogonal neighbor
+    /// is already a door or the cell is a room corner (A/B/C/E); otherwise
+    /// marks the cell 'D' regardless of what it was. The old port only set 'D'
+    /// on '#' cells, which left one door different per hall and cascaded into
+    /// the FillVoids RNG stream.
     fn create_door_type(&mut self, pos: Point) {
-        if pos.x >= 0 && pos.y >= 0 && (pos.x as usize) < DMAXX && (pos.y as usize) < DMAXY {
-            if self.get_predungeon(pos) == '#' {
-                self.set_predungeon(pos, 'D');
-            }
+        let at = |x: i32, y: i32| self.get_predungeon(Point::new(x, y));
+        if at(pos.x - 1, pos.y) == 'D' {
+            return;
         }
+        if at(pos.x + 1, pos.y) == 'D' {
+            return;
+        }
+        if at(pos.x, pos.y - 1) == 'D' {
+            return;
+        }
+        if at(pos.x, pos.y + 1) == 'D' {
+            return;
+        }
+        if matches!(at(pos.x, pos.y), 'A' | 'B' | 'C' | 'E') {
+            return;
+        }
+        self.set_predungeon(pos, 'D');
     }
 
     /// Helper: Place hall extension (for wider corridors)
@@ -2312,7 +2329,10 @@ impl CatacombsGenerator {
             let yy = self.rng.random_less_than(38) as usize + 1;
 
             if self.predungeon[xx][yy] != '#' {
-                attempts += 1;
+                // C++ `FillVoids` does NOT count non-'#' picks toward the
+                // 100-attempt budget (`continue` skips the trailing `to++`).
+                // The old code incremented here, burning ~87% of the budget
+                // on misses and reducing the void-fill far below C++.
                 continue;
             }
 
