@@ -22,7 +22,7 @@ use std::collections::VecDeque;
 // =============================================================================
 
 /// Maximum number of rooms in L2 dungeon
-const MAX_ROOMS: usize = 81;
+const MAX_ROOMS: usize = 80; // C++ drlg_l2.cpp: `nRoomCnt >= 80`
 
 /// Direction offsets (None, Up, Right, Down, Left)
 const DIR_ADD: [Displacement; 5] = [
@@ -228,6 +228,37 @@ impl Miniset {
             replace,
         }
     }
+
+    /// C++ equivalent: Miniset::matches (gendung.h:269-281).
+    /// Every non-zero search cell must equal the dungeon tile at that offset,
+    /// and no cell may be `Protected` (quest-room set pieces).
+    fn matches(&self, dungeon: &Dungeon, protected: &[[bool; DMAXY]; DMAXX], pos: (usize, usize)) -> bool {
+        for y in 0..self.height {
+            for x in 0..self.width {
+                if protected[pos.0 + x][pos.1 + y] {
+                    return false;
+                }
+                let search_val = self.search[y][x];
+                if search_val != 0 && dungeon.tiles[pos.0 + x][pos.1 + y] != search_val {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    /// C++ equivalent: Miniset::place (gendung.h:283-293).
+    /// Writes every non-zero replace cell into the dungeon tile grid.
+    fn place(&self, dungeon: &mut Dungeon, pos: (usize, usize)) {
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let replace_val = self.replace[y][x];
+                if replace_val != 0 {
+                    dungeon.tiles[pos.0 + x][pos.1 + y] = replace_val;
+                }
+            }
+        }
+    }
 }
 
 // =============================================================================
@@ -321,16 +352,17 @@ pub fn miniset_varch1() -> Miniset {
 /// Miniset: Horizontal arch sample 1 (4x2)
 /// C++ equivalent: HARCH1
 pub fn miniset_harch1() -> Miniset {
+    // C++ HARCH1 (drlg_l2.cpp): 3x2, search [[3,3,0],[2,5,9]].
     Miniset::new(
-        4,
+        3,
         2,
         vec![
-            vec![3, 3, 0, 0],
-            vec![0, 1, 7, 0],
+            vec![3, 3, 0],
+            vec![2, 5, 9],
         ],
         vec![
-            vec![49, 46, 0, 0],
-            vec![0, 40, 45, 0],
+            vec![49, 46, 0],
+            vec![40, 45, 0],
         ],
     )
 }
@@ -386,7 +418,7 @@ pub fn miniset_pancreas1() -> Miniset {
 }
 
 pub fn miniset_pancreas2() -> Miniset {
-    Miniset::new(5, 3, vec![vec![3,3,3,3,3],vec![3,3,3,3,3],vec![3,3,3,3,3]], vec![vec![0,0,0,0,0],vec![0,0,109,0,0],vec![0,0,0,0,0]])
+    Miniset::new(5, 3, vec![vec![3,3,3,3,3],vec![3,3,3,3,3],vec![3,3,3,3,3]], vec![vec![0,0,0,0,0],vec![0,0,110,0,0],vec![0,0,0,0,0]])
 }
 
 // =============================================================================
@@ -777,6 +809,14 @@ pub struct CatacombsGenerator {
     predungeon: [[char; MAXDUNY]; MAXDUNX],
     /// Current level (5-8)
     current_level: u8,
+    /// C++ `THEME_LOC themeLoc[MAXTHEMES]` — theme room origins and sizes.
+    theme_locations: Vec<(usize, usize, usize, usize)>,
+    /// C++ `Protected` bitset — tiles the generator may not overwrite
+    /// (quest-room set pieces, `forceHW` quest rooms).
+    protected: [[bool; DMAXY]; DMAXX],
+    /// C++ `SetPieceRoom` — position and size of the quest-room set piece
+    /// (blood1.dun for Q_BLOOD). `None` when no quest room was carved.
+    set_piece_room: Option<(usize, usize, usize, usize)>,
     /// C++ `Quests[Q_BLOOD]._qactive != QUEST_NOTAVAIL` — whether the
     /// Poisoned Water Supply quest room (14x20) is forced into level 5.
     /// The original code forced it unconditionally, which diverged from
@@ -805,6 +845,9 @@ impl CatacombsGenerator {
             hall_list: VecDeque::new(),
             predungeon: [[' '; MAXDUNY]; MAXDUNX],
             current_level: 5,
+            theme_locations: Vec::new(),
+            protected: [[false; DMAXY]; DMAXX],
+            set_piece_room: None,
             blood_quest_active: false,
             rng: Rng::with_default_seed(),
             #[cfg(test)]
@@ -832,7 +875,9 @@ impl CatacombsGenerator {
 
             if self.create_dungeon(dungeon) {
                 self.fix_tiles_patterns(dungeon);
-                // TODO: InitSetPiece
+                // C++ InitSetPiece — places the quest-room set piece (blood1.dun)
+                // before transparency/stairs so the RNG and tile state line up.
+                self.init_set_piece(dungeon);
                 // C++ `FloodTransparencyValues(3)`: assign a TransVal to every
                 // connected floor region before `FixTransparency()` propagates
                 // it through surrounding dirt walls/doors.
@@ -854,7 +899,10 @@ impl CatacombsGenerator {
         self.fix_doors(dungeon);
         self.fix_dirt_tiles(dungeon);
 
-        // TODO: DRLG_PlaceThemeRooms(6, 10, 3, 0, false)
+        // C++ DRLG_PlaceThemeRooms(6, 10, 3, 0, false). `freq = 0` means
+        // FlipCoin(0) always succeeds and consumes no RNG; only the per-room
+        // door FlipCoin() draws advance the stream.
+        self.place_theme_rooms(dungeon, 6, 10, 3, 0, false);
 
         // Place decorative minisets (88 total: 8 CTRDOOR + 40 VARCH + 40 HARCH)
         // CTRDOOR (Center Doors) - 8 minisets
@@ -868,6 +916,14 @@ impl CatacombsGenerator {
         self.place_miniset_random(dungeon, &miniset_ctrdoor8(), 100);
 
         // VARCH (Vertical Arches) - 40 minisets
+        self.place_miniset_random(dungeon, &miniset_varch33(), 100);
+        self.place_miniset_random(dungeon, &miniset_varch34(), 100);
+        self.place_miniset_random(dungeon, &miniset_varch35(), 100);
+        self.place_miniset_random(dungeon, &miniset_varch36(), 100);
+        self.place_miniset_random(dungeon, &miniset_varch37(), 100);
+        self.place_miniset_random(dungeon, &miniset_varch38(), 100);
+        self.place_miniset_random(dungeon, &miniset_varch39(), 100);
+        self.place_miniset_random(dungeon, &miniset_varch40(), 100);
         self.place_miniset_random(dungeon, &miniset_varch1(), 100);
         self.place_miniset_random(dungeon, &miniset_varch2(), 100);
         self.place_miniset_random(dungeon, &miniset_varch3(), 100);
@@ -900,14 +956,6 @@ impl CatacombsGenerator {
         self.place_miniset_random(dungeon, &miniset_varch30(), 100);
         self.place_miniset_random(dungeon, &miniset_varch31(), 100);
         self.place_miniset_random(dungeon, &miniset_varch32(), 100);
-        self.place_miniset_random(dungeon, &miniset_varch33(), 100);
-        self.place_miniset_random(dungeon, &miniset_varch34(), 100);
-        self.place_miniset_random(dungeon, &miniset_varch35(), 100);
-        self.place_miniset_random(dungeon, &miniset_varch36(), 100);
-        self.place_miniset_random(dungeon, &miniset_varch37(), 100);
-        self.place_miniset_random(dungeon, &miniset_varch38(), 100);
-        self.place_miniset_random(dungeon, &miniset_varch39(), 100);
-        self.place_miniset_random(dungeon, &miniset_varch40(), 100);
 
         // HARCH (Horizontal Arches) - 40 minisets
         self.place_miniset_random(dungeon, &miniset_harch1(), 100);
@@ -990,11 +1038,68 @@ impl CatacombsGenerator {
         self.room_count = 0;
         self.room_list.clear();
         self.hall_list.clear();
+        self.theme_locations.clear();
+        self.protected = [[false; DMAXY]; DMAXX];
+        self.set_piece_room = None;
         self.predungeon = [[' '; MAXDUNY]; MAXDUNX];
         #[cfg(test)]
         {
             self.test_hall_steps_total = 0;
             self.test_hall_capped_calls = 0;
+        }
+    }
+
+    /// C++ equivalent: PlaceDunTiles (gendung.cpp) for the Q_BLOOD set piece.
+    /// `blood1.dun` tile layer (10x16) from test/fixtures/levels/l2data/.
+    const BLOOD1_TILES: [[u8; 10]; 16] = [
+        [0, 0, 0, 55, 58, 57, 7, 0, 0, 0],
+        [0, 0, 3, 54, 60, 63, 1, 3, 0, 0],
+        [0, 0, 3, 53, 61, 59, 1, 3, 0, 0],
+        [87, 32, 29, 8, 157, 157, 8, 31, 30, 7],
+        [26, 3, 3, 23, 0, 0, 25, 3, 3, 24],
+        [27, 3, 3, 24, 0, 0, 27, 3, 3, 26],
+        [23, 3, 3, 27, 0, 0, 23, 3, 3, 27],
+        [156, 3, 3, 27, 0, 0, 24, 3, 3, 156],
+        [9, 32, 31, 83, 0, 0, 9, 29, 31, 6],
+        [0, 0, 3, 3, 0, 3, 0, 3, 0, 0],
+        [0, 0, 3, 3, 3, 3, 3, 3, 0, 0],
+        [0, 0, 3, 6, 0, 3, 6, 3, 0, 0],
+        [0, 0, 3, 3, 3, 0, 0, 3, 0, 0],
+        [0, 0, 3, 0, 3, 0, 0, 3, 0, 0],
+        [0, 0, 3, 6, 0, 0, 6, 3, 0, 0],
+        [0, 0, 0, 3, 3, 3, 3, 0, 0, 0],
+    ];
+
+    /// C++ equivalent: InitSetPiece (drlg_l2.cpp) for the Q_BLOOD quest room.
+    /// Places the blood1.dun tiles at SetPieceRoom.position with floorId=3 and
+    /// protects them from subsequent miniset placement.
+    fn init_set_piece(&mut self, dungeon: &mut Dungeon) {
+        if !self.blood_quest_active {
+            return;
+        }
+        let Some((px, py, _pw, _ph)) = self.set_piece_room else {
+            return;
+        };
+        for y in 0..16 {
+            for x in 0..10 {
+                let tile = Self::BLOOD1_TILES[y][x];
+                let dx = px + x;
+                let dy = py + y;
+                if tile != 0 {
+                    dungeon.tiles[dx][dy] = tile;
+                    self.protected[dx][dy] = true;
+                } else {
+                    dungeon.tiles[dx][dy] = 3; // floorId
+                }
+            }
+        }
+    }
+
+    /// C++ equivalent: `SetPieceRoom.contains({x, y})` (half-open rectangle).
+    fn in_set_piece_room(&self, x: usize, y: usize) -> bool {
+        match self.set_piece_room {
+            Some((px, py, pw, ph)) => x >= px && x < px + pw && y >= py && y < py + ph,
+            None => false,
         }
     }
 
@@ -1061,9 +1166,9 @@ impl CatacombsGenerator {
             }
         }
 
-        // Fix tile adjacency patterns
-        self.fix_tiles_patterns(dungeon);
-
+        // C++ calls FixTilesPatterns() after CreateDungeon() returns (inside
+        // GenerateLevel), so it must not run here — the extra pass diverged
+        // the dungeon state before stair placement.
         true
     }
 
@@ -1153,6 +1258,17 @@ impl CatacombsGenerator {
 
         // Define room in predungeon
         self.define_room(room_top_left, room_bottom_right, quest_size.is_some());
+
+        // C++ CreateRoom: `if (size) SetPieceRoom = { roomTopLeft + {2,2},
+        // roomSize - 1 }` — the quest room hosts the set piece.
+        if let Some((qw, qh)) = quest_size {
+            self.set_piece_room = Some((
+                room_top_left.x as usize + 2,
+                room_top_left.y as usize + 2,
+                qw - 1,
+                qh - 1,
+            ));
+        }
 
         // Add room to list (0-based vector) and compute the 1-based room id
         // matching C++ `nRid = nRoomCnt` after DefineRoom's `nRoomCnt++`.
@@ -1588,58 +1704,40 @@ impl CatacombsGenerator {
     /// Define a room in the predungeon grid
     /// C++ equivalent: DefineRoom
     fn define_room(&mut self, top_left: Point, bottom_right: Point, is_quest: bool) {
-        // Mark room interior as floor
-        for y in (top_left.y + 1)..bottom_right.y {
-            for x in (top_left.x + 1)..bottom_right.x {
-                if x >= 0 && y >= 0 && (x as usize) < DMAXX && (y as usize) < DMAXY {
-                    self.predungeon[x as usize][y as usize] = '.';
-                }
+        // C++ DefineRoom (drlg_l2.cpp): corners TL='C', BL='E', TR='B', BR='A'.
+        // ConnectHall uses these markers to redirect the hall direction, so
+        // they must not be overwritten by the wall pass below.
+        let x1 = top_left.x as usize;
+        let y1 = top_left.y as usize;
+        let x2 = bottom_right.x as usize;
+        let y2 = bottom_right.y as usize;
+        self.predungeon[x1][y1] = 'C';
+        self.predungeon[x1][y2] = 'E';
+        self.predungeon[x2][y1] = 'B';
+        self.predungeon[x2][y2] = 'A';
+
+        // C++ forceHW (quest room): buggy Protected line — sets a horizontal
+        // run on the top row from x1 up to y2. Kept for fidelity so the
+        // quest-room set piece cells stay protected from minisets.
+        if is_quest {
+            let mut i = x1;
+            while i < y2 {
+                self.protected[i][y1] = true;
+                i += 1;
             }
         }
 
-        // Mark room corners (used for hall connection logic)
-        if !is_quest {
-            // Top-left corner: 'A'
-            if top_left.x >= 0 && top_left.y >= 0
-                && (top_left.x as usize) < DMAXX && (top_left.y as usize) < DMAXY {
-                self.predungeon[top_left.x as usize][top_left.y as usize] = 'A';
-            }
-            // Top-right corner: 'B'
-            if bottom_right.x >= 0 && top_left.y >= 0
-                && (bottom_right.x as usize) < DMAXX && (top_left.y as usize) < DMAXY {
-                self.predungeon[bottom_right.x as usize][top_left.y as usize] = 'B';
-            }
-            // Bottom-left corner: 'C'
-            if top_left.x >= 0 && bottom_right.y >= 0
-                && (top_left.x as usize) < DMAXX && (bottom_right.y as usize) < DMAXY {
-                self.predungeon[top_left.x as usize][bottom_right.y as usize] = 'C';
-            }
-            // Bottom-right corner: 'E'
-            if bottom_right.x >= 0 && bottom_right.y >= 0
-                && (bottom_right.x as usize) < DMAXX && (bottom_right.y as usize) < DMAXY {
-                self.predungeon[bottom_right.x as usize][bottom_right.y as usize] = 'E';
-            }
+        // Top/bottom walls, excluding corners (C++: i in x1+1..x2-1).
+        for x in (x1 + 1)..x2 {
+            self.predungeon[x][y1] = '#';
+            self.predungeon[x][y2] = '#';
         }
-
-        // Mark room walls as '#'
-        for x in top_left.x..=bottom_right.x {
-            if x >= 0 && (x as usize) < DMAXX {
-                if top_left.y >= 0 && (top_left.y as usize) < DMAXY {
-                    self.predungeon[x as usize][top_left.y as usize] = '#';
-                }
-                if bottom_right.y >= 0 && (bottom_right.y as usize) < DMAXY {
-                    self.predungeon[x as usize][bottom_right.y as usize] = '#';
-                }
-            }
-        }
-        for y in top_left.y..=bottom_right.y {
-            if y >= 0 && (y as usize) < DMAXY {
-                if top_left.x >= 0 && (top_left.x as usize) < DMAXX {
-                    self.predungeon[top_left.x as usize][y as usize] = '#';
-                }
-                if bottom_right.x >= 0 && (bottom_right.x as usize) < DMAXX {
-                    self.predungeon[bottom_right.x as usize][y as usize] = '#';
-                }
+        // Left/right walls (excluding corners) + room interior.
+        for y in (y1 + 1)..y2 {
+            self.predungeon[x1][y] = '#';
+            self.predungeon[x2][y] = '#';
+            for x in (x1 + 1)..x2 {
+                self.predungeon[x][y] = '.';
             }
         }
     }
@@ -1908,8 +2006,11 @@ impl CatacombsGenerator {
 
     /// Fix door lockout issues
     /// C++ equivalent: FixLockout
-    fn fix_lockout(&self, dungeon: &mut Dungeon) {
-        // First pass: Fix door tiles without proper adjacency
+    fn fix_lockout(&mut self, dungeon: &mut Dungeon) {
+        // First pass: Fix door tiles without proper adjacency.
+        // C++ reads dungeon[i-1][j] / dungeon[i][j-1] at the border (UB); the
+        // border is background (12) in practice, so the in-bounds guard is
+        // equivalent for generated maps.
         for j in 0..DMAXY {
             for i in 0..DMAXX {
                 if i > 0 && dungeon.tiles[i][j] == 4 && dungeon.tiles[i - 1][j] != 3 {
@@ -1921,81 +2022,67 @@ impl CatacombsGenerator {
             }
         }
 
-        // Second pass: Ensure horizontal door corridors have at least one door (tile 5)
+        // Second pass: Ensure horizontal door corridors have at least one door
+        // (tile 5). C++ scans with the outer loop variable `i` itself, so the
+        // outer loop skips the rest of the corridor after one pass; a separate
+        // cursor would re-enter the corridor and misplace doors.
         for j in 1..(DMAXY - 1) {
-            for i in 1..(DMAXX - 1) {
-                // Skip protected areas (if implemented)
-                // if dungeon.protected.test(i, j) { continue; }
-
-                if (dungeon.tiles[i][j] == 2 || dungeon.tiles[i][j] == 5)
+            let mut i = 1;
+            while i < DMAXX - 1 {
+                if !self.protected[i][j]
+                    && (dungeon.tiles[i][j] == 2 || dungeon.tiles[i][j] == 5)
                     && dungeon.tiles[i][j - 1] == 3
-                    && dungeon.tiles[i][j + 1] == 3 {
-
+                    && dungeon.tiles[i][j + 1] == 3
+                {
                     let mut doorok = false;
-                    let mut scan_i = i;
-
-                    // Scan horizontally while in corridor
-                    loop {
-                        if scan_i >= DMAXX - 1 {
+                    while i < DMAXX {
+                        if dungeon.tiles[i][j] != 2 && dungeon.tiles[i][j] != 5 {
                             break;
                         }
-                        if dungeon.tiles[scan_i][j] != 2 && dungeon.tiles[scan_i][j] != 5 {
+                        if dungeon.tiles[i][j - 1] != 3 || dungeon.tiles[i][j + 1] != 3 {
                             break;
                         }
-                        if dungeon.tiles[scan_i][j - 1] != 3 || dungeon.tiles[scan_i][j + 1] != 3 {
-                            break;
-                        }
-                        if dungeon.tiles[scan_i][j] == 5 {
+                        if dungeon.tiles[i][j] == 5 {
                             doorok = true;
                         }
-                        scan_i += 1;
+                        i += 1;
                     }
-
-                    // If no door found, place one at end
-                    if !doorok && scan_i > 0 && scan_i - 1 < DMAXX {
-                        // if !dungeon.protected.test(scan_i - 1, j)
-                        dungeon.tiles[scan_i - 1][j] = 5;
+                    if !doorok && i > 0 && !self.protected[i - 1][j] {
+                        dungeon.tiles[i - 1][j] = 5;
                     }
                 }
+                i += 1;
             }
         }
 
-        // Third pass: Ensure vertical door corridors have at least one door (tile 4)
-        for j in 1..(DMAXX - 1) {  // Note: C++ has j/i flipped here (likely a bug)
-            for i in 1..(DMAXY - 1) {
-                // Skip protected areas (if implemented)
-                // if dungeon.protected.test(j, i) { continue; }
-
-                if (dungeon.tiles[j][i] == 1 || dungeon.tiles[j][i] == 4)
+        // Third pass: vertical door corridors (tile 4). C++ keeps the
+        // j/i-flipped indexing (`dungeon[j][i]`) — replicate it as-is.
+        for j in 1..(DMAXX - 1) {
+            let mut i = 1;
+            while i < DMAXY - 1 {
+                if !self.protected[j][i]
+                    && (dungeon.tiles[j][i] == 1 || dungeon.tiles[j][i] == 4)
                     && dungeon.tiles[j - 1][i] == 3
-                    && dungeon.tiles[j + 1][i] == 3 {
-
+                    && dungeon.tiles[j + 1][i] == 3
+                {
                     let mut doorok = false;
-                    let mut scan_i = i;
-
-                    // Scan vertically while in corridor
-                    loop {
-                        if scan_i >= DMAXY - 1 {
+                    while i < DMAXY {
+                        if dungeon.tiles[j][i] != 1 && dungeon.tiles[j][i] != 4 {
                             break;
                         }
-                        if dungeon.tiles[j][scan_i] != 1 && dungeon.tiles[j][scan_i] != 4 {
+                        if dungeon.tiles[j - 1][i] != 3 || dungeon.tiles[j + 1][i] != 3 {
                             break;
                         }
-                        if dungeon.tiles[j - 1][scan_i] != 3 || dungeon.tiles[j + 1][scan_i] != 3 {
-                            break;
-                        }
-                        if dungeon.tiles[j][scan_i] == 4 {
+                        if dungeon.tiles[j][i] == 4 {
                             doorok = true;
                         }
-                        scan_i += 1;
+                        i += 1;
                     }
-
-                    // If no door found, place one at end
-                    if !doorok && scan_i > 0 && scan_i - 1 < DMAXY {
-                        // if !dungeon.protected.test(j, scan_i - 1)
-                        dungeon.tiles[j][scan_i - 1] = 4;
+                    if !doorok && i > 0 && !self.protected[j][i - 1] {
+                        dungeon.tiles[j][i - 1] = 4;
                     }
                 }
+                i += 1;
             }
         }
     }
@@ -2434,169 +2521,238 @@ impl CatacombsGenerator {
         true
     }
 
-    /// Place a miniset by searching for valid location
+    /// Place a miniset using the C++ `PlaceMiniSet` scan algorithm
+    /// (gendung.cpp:646-683): random start position, then scan with
+    /// wrap-around until the miniset matches. Used for stairs.
     /// C++ equivalent: PlaceMiniSet
     fn place_miniset(&mut self, dungeon: &mut Dungeon, miniset: &Miniset) -> bool {
-        // Try random locations until one works
-        const MAX_ATTEMPTS: usize = 1000;
-
-        for _ in 0..MAX_ATTEMPTS {
-            let x = self.random_range(0, (DMAXX - miniset.width) as usize) as i32;
-            let y = self.random_range(0, (DMAXY - miniset.height) as usize) as i32;
-            let pos = Point::new(x, y);
-
-            if self.try_place_miniset(dungeon, miniset, pos) {
+        let sw = miniset.width as i32;
+        let sh = miniset.height as i32;
+        // C++ default `tries = 199`.
+        let mut x = self.random_range(0, (DMAXX as i32 - sw) as usize) as i32;
+        let mut y = self.random_range(0, (DMAXY as i32 - sh) as usize) as i32;
+        for _ in 0..199 {
+            if x == DMAXX as i32 - sw {
+                x = 0;
+                y += 1;
+                if y == DMAXY as i32 - sh {
+                    y = 0;
+                }
+            }
+            // SetPieceRoom is empty for quest-free generation.
+            if self.in_set_piece_room(x as usize, y as usize) {
+                continue;
+            }
+            if miniset.matches(dungeon, &self.protected, (x as usize, y as usize)) {
+                miniset.place(dungeon, (x as usize, y as usize));
                 return true;
             }
+            x += 1;
         }
-
         false
     }
 
-    /// Try to place miniset at specific position
-    fn try_place_miniset(&mut self, dungeon: &mut Dungeon, miniset: &Miniset, pos: Point) -> bool {
-        // Check bounds
-        if pos.x + miniset.width as i32 > DMAXX as i32
-            || pos.y + miniset.height as i32 > DMAXY as i32 {
-            return false;
-        }
-
-        // Check if search pattern matches
-        for y in 0..miniset.height {
-            for x in 0..miniset.width {
-                let search_val = miniset.search[y][x];
-                if search_val == 0 {
-                    continue; // 0 = wildcard
-                }
-
-                let dungeon_x = pos.x as usize + x;
-                let dungeon_y = pos.y as usize + y;
-                let predungeon_char = self.predungeon[dungeon_x][dungeon_y];
-
-                // Map predungeon characters to search values
-                let matches = match search_val {
-                    1 => predungeon_char == '#',  // Wall
-                    2 => predungeon_char == '.',  // Floor
-                    3 => predungeon_char == '.',  // Floor (room)
-                    4 => predungeon_char == ' ',  // Void
-                    7 => predungeon_char == '#' || predungeon_char == 'D', // Wall or door
-                    _ => false,
-                };
-
-                if !matches {
-                    return false;
-                }
-            }
-        }
-
-        // Pattern matches, apply replacement to dungeon
-        for y in 0..miniset.height {
-            for x in 0..miniset.width {
-                let replace_val = miniset.replace[y][x];
-                if replace_val == 0 {
-                    continue; // 0 = no change
-                }
-
-                let dungeon_x = pos.x as usize + x;
-                let dungeon_y = pos.y as usize + y;
-
-                // Update dungeon tiles
-                dungeon.tiles[dungeon_x][dungeon_y] = replace_val;
-            }
-        }
-
-        true
-    }
-
-    /// Place a miniset randomly on the predungeon
+    /// Place a miniset everywhere it matches, using the C++ grid-scan
+    /// algorithm (drlg_l2.cpp:1599-1626). Each candidate cell consumes one
+    /// `GenerateRnd(100)` draw; the overlap guard prevents placing a miniset
+    /// next to its own `replace[0][0]` tile.
     /// C++ equivalent: PlaceMiniSetRandom
-    /// Place a miniset randomly with probability check
-    /// C++ equivalent: PlaceMiniSetRandom
-    ///
-    /// # Arguments
-    /// * `dungeon` - The dungeon to modify
-    /// * `miniset` - The miniset to place
-    /// * `rnd_per` - Success probability out of 100 (e.g., 100 = 100% success)
     fn place_miniset_random(&mut self, dungeon: &mut Dungeon, miniset: &Miniset, rnd_per: u32) -> bool {
-        // Check probability
-        if self.random_range(0, 100) >= rnd_per as usize {
-            return false;
+        let sw = miniset.width;
+        let sh = miniset.height;
+        let mut placed = false;
+        for sy in 0..(DMAXY - sh) {
+            for sx in 0..(DMAXX - sw) {
+                // SetPieceRoom is empty for quest-free generation.
+                if self.in_set_piece_room(sx, sy) {
+                    continue;
+                }
+                if !miniset.matches(dungeon, &self.protected, (sx, sy)) {
+                    continue;
+                }
+                // C++ overlap guard: no `replace[0][0]` tile within the
+                // (2*sh) x (2*sw) neighbourhood of the candidate.
+                let mut found = true;
+                let yy_lo = sy.saturating_sub(sh);
+                let yy_hi = (sy + 2 * sh).min(DMAXY);
+                let xx_lo = sx.saturating_sub(sw);
+                let xx_hi = (sx + 2 * sw).min(DMAXX);
+                'overlap: for yy in yy_lo..yy_hi {
+                    for xx in xx_lo..xx_hi {
+                        if dungeon.tiles[xx][yy] == miniset.replace[0][0] {
+                            found = false;
+                            break 'overlap;
+                        }
+                    }
+                }
+                if !found {
+                    continue;
+                }
+                if self.random_range(0, 100) >= rnd_per as usize {
+                    continue;
+                }
+                miniset.place(dungeon, (sx, sy));
+                placed = true;
+            }
         }
-
-        // Try to place the miniset
-        self.place_miniset(dungeon, miniset)
+        placed
     }
 
-    /// Place a 1x1 miniset randomly (tile substitution)
-    /// C++ equivalent: PlaceMiniSetRandom1x1
+    /// Place a 1x1 miniset randomly (tile substitution).
+    /// C++ equivalent: PlaceMiniSetRandom1x1 (drlg_l2.cpp:1628)
     fn place_miniset_random_1x1(&mut self, dungeon: &mut Dungeon, search: u8, replace: u8, rnd_per: u32) -> bool {
-        // Create temporary 1x1 miniset
-        let miniset = Miniset::new(
-            1,
-            1,
-            vec![vec![search]],
-            vec![vec![replace]]
-        );
-
-        // Use existing place_miniset_random logic
+        let miniset = Miniset::new(1, 1, vec![vec![search]], vec![vec![replace]]);
         self.place_miniset_random(dungeon, &miniset, rnd_per)
     }
 
-    /// Place a miniset at a specific location if pattern matches
-    /// C++ equivalent: PlaceMiniSet
-    fn place_miniset_at(&mut self, miniset: &Miniset, pos: Point) -> bool {
-        // Check bounds
-        if pos.x + miniset.width as i32 > DMAXX as i32
-            || pos.y + miniset.height as i32 > DMAXY as i32 {
-            return false;
+    /// True when the tile is within (or within 2 tiles of) an existing theme
+    /// room. C++ equivalent: IsNearThemeRoom (gendung.cpp:803-813)
+    fn is_near_theme_room(&self, tx: usize, ty: usize) -> bool {
+        for &(x, y, w, h) in &self.theme_locations {
+            let rx = x as isize - 2;
+            let ry = y as isize - 2;
+            let rw = w as isize + 5;
+            let rh = h as isize + 5;
+            if (tx as isize) >= rx
+                && (tx as isize) < rx + rw
+                && (ty as isize) >= ry
+                && (ty as isize) < ry + rh
+            {
+                return true;
+            }
         }
+        false
+    }
 
-        // Check if search pattern matches
-        for y in 0..miniset.height {
-            for x in 0..miniset.width {
-                let search_val = miniset.search[y][x];
-                if search_val == 0 {
-                    continue; // 0 = wildcard
+    /// Find the largest available rectangle of `floor` tiles.
+    /// C++ equivalent: GetSizeForThemeRoom (gendung.cpp:116-160)
+    fn get_size_for_theme_room(
+        &self,
+        dungeon: &Dungeon,
+        floor: u8,
+        ox: usize,
+        oy: usize,
+        min_size: usize,
+        max_size: usize,
+    ) -> Option<(usize, usize)> {
+        if ox + max_size > DMAXX && oy + max_size > DMAXY {
+            return None; // C++ broken bounds check (avoids lower-right corner)
+        }
+        if self.is_near_theme_room(ox, oy) {
+            return None;
+        }
+        let max_width = max_size.min(DMAXX - ox);
+        let max_height = max_size.min(DMAXY - oy);
+        let mut room_w = max_width;
+        let mut room_h = max_height;
+        for i in 0..max_size {
+            let mut width = if i < room_h { i } else { 0 };
+            if i < max_height {
+                while width < room_w {
+                    if dungeon.tiles[ox + width][oy + i] != floor {
+                        break;
+                    }
+                    width += 1;
                 }
+            }
+            let mut height = if i < room_w { i } else { 0 };
+            if i < max_width {
+                while height < room_h {
+                    if dungeon.tiles[ox + i][oy + height] != floor {
+                        break;
+                    }
+                    height += 1;
+                }
+            }
+            if width < min_size || height < min_size {
+                if i < min_size {
+                    return None;
+                }
+                break;
+            }
+            room_w = room_w.min(width);
+            room_h = room_h.min(height);
+        }
+        Some((room_w - 2, room_h - 2))
+    }
 
-                let dungeon_x = pos.x as usize + x;
-                let dungeon_y = pos.y as usize + y;
-                let predungeon_char = self.predungeon[dungeon_x][dungeon_y];
+    /// Draw the theme room frame (Catacombs): 2/1/3 border, corner 8/7/9/6,
+    /// and a random door (4 vertical / 5 horizontal).
+    /// C++ equivalent: CreateThemeRoom (gendung.cpp:163-221, DTYPE_CATACOMBS)
+    fn create_theme_room(&mut self, dungeon: &mut Dungeon, idx: usize) {
+        let (lx, ly, w, h) = self.theme_locations[idx];
+        let hx = lx + w;
+        let hy = ly + h;
+        for yy in ly..hy {
+            for xx in lx..hx {
+                if yy == ly || yy == hy - 1 {
+                    dungeon.tiles[xx][yy] = 2;
+                } else if xx == lx || xx == hx - 1 {
+                    dungeon.tiles[xx][yy] = 1;
+                } else {
+                    dungeon.tiles[xx][yy] = 3;
+                }
+            }
+        }
+        dungeon.tiles[lx][ly] = 8;
+        dungeon.tiles[hx - 1][ly] = 7;
+        dungeon.tiles[lx][hy - 1] = 9;
+        dungeon.tiles[hx - 1][hy - 1] = 6;
+        if self.random_range(0, 2) == 0 {
+            dungeon.tiles[hx - 1][(ly + hy) / 2] = 4;
+        } else {
+            dungeon.tiles[(lx + hx) / 2][hy - 1] = 5;
+        }
+    }
 
-                // Map predungeon characters to search values
-                let matches = match search_val {
-                    1 => predungeon_char == '#',  // Wall
-                    2 => predungeon_char == '.',  // Floor
-                    3 => predungeon_char == '.',  // Floor (room)
-                    4 => predungeon_char == ' ',  // Void
-                    7 => predungeon_char == '#' || predungeon_char == 'D', // Wall or door
-                    _ => false,
+    /// Place theme room frames (walls/doors only).
+    /// C++ equivalent: DRLG_PlaceThemeRooms (gendung.cpp:709-753).
+    /// `freq == 0` means `FlipCoin(0)` — always true, no RNG draw.
+    fn place_theme_rooms(
+        &mut self,
+        dungeon: &mut Dungeon,
+        min_size: usize,
+        max_size: usize,
+        floor: u8,
+        freq: usize,
+        rnd_size: bool,
+    ) {
+        self.theme_locations.clear();
+        for j in 0..DMAXY {
+            for i in 0..DMAXX {
+                if dungeon.tiles[i][j] != floor || self.random_range(0, freq) != 0 {
+                    continue;
+                }
+                let Some((rw, rh)) =
+                    self.get_size_for_theme_room(dungeon, floor, i, j, min_size, max_size)
+                else {
+                    continue;
                 };
-
-                if !matches {
-                    return false;
+                if rnd_size {
+                    // Not used for Catacombs (rndSize=false); kept for parity
+                    // with the C++ rndSize branch.
+                    let min = min_size - 2;
+                    let max = max_size - 2;
+                    let inner_w = self.random_range(0, rw - min + 1);
+                    let mut rw2 = min + self.random_range(0, inner_w);
+                    if rw2 < min || rw2 > max {
+                        rw2 = min;
+                    }
+                    let inner_h = self.random_range(0, rh - min + 1);
+                    let mut rh2 = min + self.random_range(0, inner_h);
+                    if rh2 < min || rh2 > max {
+                        rh2 = min;
+                    }
+                    // C++: theme.room.position = { i, j } + Direction::South
+                    self.theme_locations.push((i + 1, j + 1, rw2, rh2));
+                } else {
+                    // C++: theme.room.position = { i, j } + Direction::South
+                    self.theme_locations.push((i + 1, j + 1, rw, rh));
                 }
+                let idx = self.theme_locations.len() - 1;
+                self.create_theme_room(dungeon, idx);
             }
         }
-
-        // Pattern matches, apply replacement
-        for y in 0..miniset.height {
-            for x in 0..miniset.width {
-                let replace_val = miniset.replace[y][x];
-                if replace_val == 0 {
-                    continue; // 0 = no change
-                }
-
-                let dungeon_x = pos.x as usize + x;
-                let dungeon_y = pos.y as usize + y;
-
-                // Mark the tile (in real implementation, would update dungeon tiles)
-                // For now, just mark in predungeon for testing
-                self.predungeon[dungeon_x][dungeon_y] = 'M'; // 'M' for miniset
-            }
-        }
-
-        true
     }
 }
 
@@ -2792,10 +2948,13 @@ mod tests {
     #[test]
     fn test_miniset_harch1() {
         let arch = miniset_harch1();
-        assert_eq!(arch.width, 4);
+        // C++ HARCH1 (drlg_l2.cpp): 3x2, search [[3,3,0],[2,5,9]].
+        assert_eq!(arch.width, 3);
         assert_eq!(arch.height, 2);
-        assert_eq!(arch.search[0][0], 3);
-        assert_eq!(arch.replace[0][0], 49);
+        assert_eq!(arch.search[0], vec![3, 3, 0]);
+        assert_eq!(arch.search[1], vec![2, 5, 9]);
+        assert_eq!(arch.replace[0], vec![49, 46, 0]);
+        assert_eq!(arch.replace[1], vec![40, 45, 0]);
     }
 
     #[test]
@@ -2808,38 +2967,70 @@ mod tests {
     }
 
     #[test]
-    fn test_place_miniset_at_simple() {
-        let mut gen = CatacombsGenerator::new();
-
-        // Setup a simple floor pattern
+    fn test_miniset_matches_and_place() {
+        let mut d = Dungeon::new();
+        // Open room interior: tile 3 (the Catacombs theme-room floor).
         for y in 5..9 {
             for x in 5..9 {
-                gen.predungeon[x][y] = '.';
+                d.tiles[x][y] = 3;
             }
         }
-
         let stairs = miniset_ustairs();
-        let placed = gen.place_miniset_at(&stairs, Point::new(5, 5));
-        assert!(placed);
-
-        // Check that miniset was marked
-        assert_eq!(gen.predungeon[6][6], 'M'); // Center should be marked
+        assert!(stairs.matches(&d, &[[false; DMAXY]; DMAXX], (5, 5)));
+        stairs.place(&mut d, (5, 5));
+        // Replace cells: USTAIRS row 2 = { 0, 72, 77, 0 }, row 3 = { 0, 76, 0, 0 }.
+        assert_eq!(d.tiles[6][6], 72);
+        assert_eq!(d.tiles[7][6], 77);
+        assert_eq!(d.tiles[6][7], 76);
+        // After placement the search pattern no longer matches at (5,5).
+        assert!(!stairs.matches(&d, &[[false; DMAXY]; DMAXX], (5, 5)));
     }
 
     #[test]
-    fn test_place_miniset_at_pattern_mismatch() {
-        let mut gen = CatacombsGenerator::new();
-
-        // Setup wrong pattern (walls instead of floor)
+    fn test_miniset_matches_pattern_mismatch() {
+        let mut d = Dungeon::new();
+        // Wrong pattern: walls (tile 1) instead of floor (tile 3).
         for y in 5..9 {
             for x in 5..9 {
-                gen.predungeon[x][y] = '#';
+                d.tiles[x][y] = 1;
             }
         }
-
         let stairs = miniset_ustairs();
-        let placed = gen.place_miniset_at(&stairs, Point::new(5, 5));
-        assert!(!placed); // Should fail - pattern doesn't match
+        assert!(!stairs.matches(&d, &[[false; DMAXY]; DMAXX], (5, 5)));
+    }
+
+    #[test]
+    fn test_place_miniset_random_grid_scan_deterministic() {
+        // A uniform floor grid: the 1x1 miniset (3 -> 80) is a C++-style
+        // full-grid scan with per-candidate GenerateRnd(100). rnd_per = 100
+        // always places when the overlap guard allows, so the same seed must
+        // produce the same output (regression for RNG-order changes).
+        let seed = 68685319u32;
+        let mut d1 = Dungeon::new();
+        let mut gen1 = CatacombsGenerator::new();
+        gen1.rng.set_seed(seed);
+        for y in 0..40 {
+            for x in 0..40 {
+                d1.tiles[x][y] = 3;
+            }
+        }
+        gen1.place_miniset_random_1x1(&mut d1, 3, 80, 100);
+
+        let mut d2 = Dungeon::new();
+        let mut gen2 = CatacombsGenerator::new();
+        gen2.rng.set_seed(seed);
+        for y in 0..40 {
+            for x in 0..40 {
+                d2.tiles[x][y] = 3;
+            }
+        }
+        gen2.place_miniset_random_1x1(&mut d2, 3, 80, 100);
+
+        assert_eq!(d1.tiles, d2.tiles);
+        let placed = d1.tiles.iter().flatten().filter(|&&t| t == 80).count();
+        // Uniform floor + rnd_per = 100: every (even, even) cell is placed
+        // and the 3x3 overlap guard skips the rest — exactly 400 cells.
+        assert_eq!(placed, 400, "placed {placed}");
     }
 
     #[test]
