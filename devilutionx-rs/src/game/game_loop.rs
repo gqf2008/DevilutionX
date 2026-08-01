@@ -1319,6 +1319,13 @@ impl crate::engine::scrollrt::DPieceGrid for crate::game::game_state::DungeonLay
         }
         Some(self.trans_val[(y as usize) * 112 + x as usize])
     }
+
+    fn pre_light(&self, x: i32, y: i32) -> Option<u8> {
+        if x < 0 || y < 0 || x >= 112 || y >= 112 {
+            return None;
+        }
+        Some(self.pre_light[(y as usize) * 112 + x as usize])
+    }
 }
 
 /// Render floor + walls to the 8-bit palette backbuffer via the faithful C++
@@ -1341,7 +1348,20 @@ fn render_world_pipeline(
     lm.make_light_table();
     let mut dlight = vec![0u8; 112 * 112];
     if level.dungeon_type != crate::engine::dungeon::DungeonType::Town {
-        dlight.fill(crate::engine::lighting::LIGHTS_MAX as u8);
+        // dLight base = dPreLight from the layout when present (e.g. L3 lava
+        // glow), else fully dark (15) — mirroring C++ `memcpy(dLight,dPreLight)`.
+        let mut any_pre_light = false;
+        for y in 0..112 {
+            for x in 0..112 {
+                if let Some(v) = grid.pre_light(x, y) {
+                    dlight[(y * 112 + x) as usize] = v;
+                    any_pre_light = true;
+                }
+            }
+        }
+        if !any_pre_light {
+            dlight.fill(crate::engine::lighting::LIGHTS_MAX as u8);
+        }
         const PLAYER_LIGHT_RADIUS: u8 = 9;
         lm.do_lighting(
             &mut dlight,
@@ -4376,6 +4396,7 @@ mod tests {
             width: 112,
             height: 112,
             trans_val: vec![0; 112 * 112],
+            pre_light: vec![15; 112 * 112],
             floor_tiles: Vec::new(),
         };
 

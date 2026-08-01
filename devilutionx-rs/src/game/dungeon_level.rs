@@ -110,7 +110,38 @@ pub fn stamp_dungeon_layout(
         }
     }
 
+    // Bake per-level static lights into dPreLight (C++ calls DoLighting during
+    // level generation, then SavePreLighting() snapshots dLight -> dPreLight).
+    apply_static_lights(level, &mut layout);
+
     layout
+}
+
+/// C++ `PlaceCaveLights()` (drlg_l3.cpp): every lava dPiece tile (MIN mega
+/// index ranges 55-146, 153-160 and 149/151) casts a radius-7 light, which the
+/// C++ engine snapshots into dPreLight. L1/L2/L4 have no baked static lights.
+fn apply_static_lights(level: &DungeonLevelData, layout: &mut DungeonLayout) {
+    if level.dungeon_type != crate::engine::dungeon::DungeonType::Caves {
+        return;
+    }
+    let mut lm = crate::engine::lighting::LightManager::new();
+    for y in 0..MAXDUNY {
+        for x in 0..MAXDUNX {
+            let piece = layout.d_piece[y * MAXDUNX + x] as i32;
+            let is_lava = (55..=146).contains(&piece)
+                || (153..=160).contains(&piece)
+                || piece == 149
+                || piece == 151;
+            if is_lava {
+                lm.do_lighting(
+                    &mut layout.pre_light,
+                    MAXDUNX,
+                    crate::engine::lighting::Point::new(x as i32, y as i32),
+                    7,
+                );
+            }
+        }
+    }
 }
 
 /// Build a render-ready `DungeonLayout` for an L2 Catacombs level
@@ -619,6 +650,65 @@ mod tests {
 
         assert!(generate_dungeon_layout(0, 1, &art).is_err());
         assert!(generate_dungeon_layout(5, 1, &art).is_err());
+    }
+
+
+    #[test]
+    fn test_caves_layout_bakes_lava_pre_light() {
+        use crate::engine::dungeon::{DungeonLevelData, DungeonType, MinData, PaletteData, SolData, TilData, TilEntry};
+        use crate::levels::gendung::Dungeon;
+
+        // TIL entry 59 has micro1 = 60 — a C++ L3 lava MIN mega index.
+        let mut til_tiles = Vec::new();
+        for _ in 0..200u16 {
+            til_tiles.push(TilEntry { micro1: 1, micro2: 2, micro3: 3, micro4: 4 });
+        }
+        til_tiles[59] = TilEntry { micro1: 60, micro2: 60, micro3: 60, micro4: 60 };
+        let level = DungeonLevelData {
+            dungeon_type: DungeonType::Caves,
+            palette: PaletteData::default(),
+            sol: SolData { properties: vec![] },
+            min: MinData { mega_tiles: vec![], blocks_per_tile: 10 },
+            til: TilData { tiles: til_tiles },
+            level_cel: vec![],
+        };
+
+        let mut dungeon = Dungeon::new();
+        dungeon.level_type = crate::levels::types::DungeonType::Caves;
+        dungeon.tiles[20][20] = 60; // logical tile -> TIL 59 -> lava micros 60
+        let layout = stamp_dungeon_layout(&dungeon, &level, DUNGEON_BG_TIL_INDEX[3]);
+
+        // The lava micro tile at (16+20*2, 16+20*2) = (56, 56) is lit by
+        // PlaceCaveLights (radius 7): dPreLight drops below the ambient 15.
+        let lit = layout.pre_light[56 * MAXDUNX + 56];
+        assert!(lit < 15, "lava tile pre_light {} should be < 15", lit);
+        // A far-away tile keeps the fully-dark dungeon default.
+        assert_eq!(layout.pre_light[80 * MAXDUNX + 80], 15);
+    }
+
+    #[test]
+    fn test_non_caves_layout_keeps_dark_pre_light() {
+        use crate::engine::dungeon::{DungeonLevelData, DungeonType, MinData, PaletteData, SolData, TilData, TilEntry};
+        use crate::levels::gendung::Dungeon;
+
+        let mut til_tiles = Vec::new();
+        for _ in 0..200u16 {
+            til_tiles.push(TilEntry { micro1: 60, micro2: 60, micro3: 60, micro4: 60 });
+        }
+        let level = DungeonLevelData {
+            dungeon_type: DungeonType::Catacombs,
+            palette: PaletteData::default(),
+            sol: SolData { properties: vec![] },
+            min: MinData { mega_tiles: vec![], blocks_per_tile: 10 },
+            til: TilData { tiles: til_tiles },
+            level_cel: vec![],
+        };
+        let mut dungeon = Dungeon::new();
+        dungeon.level_type = crate::levels::types::DungeonType::Catacombs;
+        dungeon.tiles[20][20] = 60;
+        let layout = stamp_dungeon_layout(&dungeon, &level, DUNGEON_BG_TIL_INDEX[2]);
+        // L2 has no baked static lights: everything stays fully dark.
+        assert!(layout.pre_light.iter().all(|&v| v == 15));
     }
 
 

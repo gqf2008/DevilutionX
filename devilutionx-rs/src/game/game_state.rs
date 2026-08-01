@@ -403,6 +403,12 @@ pub struct DungeonLayout {
     /// to. Populated by `flood_transparency_values` during generation; the
     /// renderer looks it up through the per-frame `TransList`.
     pub trans_val: Vec<i8>,
+
+    /// Pre-calculated static light per micro-tile (C++ dPreLight), 0 = fully
+    /// lit .. 15 = fully dark. Populated by level static lights (e.g. L3 lava)
+    /// during generation; the renderer uses it as the dLight base before
+    /// applying dynamic lights.
+    pub pre_light: Vec<u8>,
     /// Micro-tile coordinates of walkable *floor* tiles inside the active
     /// dungeon region, populated by `generate_l1_cathedral`. Used by monster
     /// spawning to pick valid, open spawn positions away from walls. Each entry
@@ -419,6 +425,7 @@ impl Default for DungeonLayout {
             width: MAXDUNX,
             height: MAXDUNY,
             trans_val: vec![0; MAXDUNX * MAXDUNY],
+            pre_light: vec![15; MAXDUNX * MAXDUNY],
             floor_tiles: Vec::new(),
         }
     }

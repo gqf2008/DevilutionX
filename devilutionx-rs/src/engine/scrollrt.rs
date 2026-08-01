@@ -425,6 +425,13 @@ pub trait DPieceGrid {
     fn trans_val(&self, _x: i32, _y: i32) -> Option<i8> {
         None
     }
+
+    /// Per-tile pre-calculated static light (C++ `dPreLight`, 0 lit .. 15
+    /// dark). `None` = fall back to the level default (town bright / dungeon
+    /// dark).
+    fn pre_light(&self, _x: i32, _y: i32) -> Option<u8> {
+        None
+    }
 }
 
 #[inline]
