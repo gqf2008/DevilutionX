@@ -493,6 +493,9 @@ pub struct CavesGenerator {
     predungeon: [[u8; MAXDUNY]; MAXDUNX],
     /// Lockout counter (for door placement)
     lockout_count: i32,
+
+    /// Theme room rectangles (x, y, width, height) placed by DRLG_PlaceThemeRooms
+    theme_locations: Vec<(usize, usize, usize, usize)>,
 }
 
 impl CavesGenerator {
@@ -501,8 +504,10 @@ impl CavesGenerator {
             rng: Rng::with_default_seed(),
             predungeon: [[0; MAXDUNY]; MAXDUNX],
             lockout_count: 0,
+            theme_locations: Vec::new(),
         }
     }
+
 
     /// Generate L3 cave dungeon
     /// C++ equivalent: GenerateLevel
@@ -584,7 +589,9 @@ impl CavesGenerator {
             // C++ calls River() after HallOfHeroes.
             self.river(dungeon);
 
-            // TODO: DRLG_PlaceThemeRooms(5, 10, 7, 0, false) + Fence()
+            // C++ DRLG_PlaceThemeRooms(5, 10, 7, 0, false) + Fence()
+            self.place_theme_rooms(dungeon, 5, 10, 7, 0, false);
+            self.fence(dungeon);
 
             // Place TITE minisets (stalactites)
             self.place_miniset_random(dungeon, &miniset_l3_tite1(), 10);
@@ -1165,25 +1172,31 @@ impl CavesGenerator {
         true
     }
 
-    /// Try to place a miniset at random valid location
-    /// C++ equivalent: PlaceMiniSet (simplified)
+    /// Try to place a miniset using the C++ `PlaceMiniSet` scan algorithm.
+    /// C++ equivalent: PlaceMiniSet (gendung.cpp) — random start + wrap scan,
+    /// exactly 2 GenerateRnd draws per call (the old port drew per attempt).
     fn try_place_miniset(&mut self, dungeon: &mut Dungeon, miniset: &Miniset) -> bool {
         let sw = miniset.width;
         let sh = miniset.height;
-
-        // Try random locations
-        for _attempt in 0..100 {
-            let sx = self.random_range(0, DMAXX - sw);
-            let sy = self.random_range(0, DMAXY - sh);
-
-            // Check if miniset matches
-            if self.miniset_matches(dungeon, miniset, sx, sy) {
-                // Place miniset
-                self.place_miniset_at(dungeon, miniset, sx, sy);
+        let mut x = self.random_range(0, DMAXX - sw) as i32;
+        let mut y = self.random_range(0, DMAXY - sh) as i32;
+        let mut i = 0usize;
+        // C++ PlaceMiniSet default tries = 199 (gendung.h)
+        while i < 199 {
+            if x == DMAXX as i32 - sw as i32 {
+                x = 0;
+                y += 1;
+                if y == DMAXY as i32 - sh as i32 {
+                    y = 0;
+                }
+            }
+            if self.miniset_matches(dungeon, miniset, x as usize, y as usize) {
+                self.place_miniset_at(dungeon, miniset, x as usize, y as usize);
                 return true;
             }
+            i += 1;
+            x += 1;
         }
-
         false
     }
 
@@ -1217,202 +1230,740 @@ impl CavesGenerator {
 
     /// Generate river/lava system
     /// C++ equivalent: River
+    /// C++ row-major OOB accessor: dungeon[x][y] on a uint8_t[40][40] array.
+    /// y==40 wraps to (x+1, 0); x==39,y==40 or x==40 reads the next global
+    /// (Protected) — reproduced for byte-exact river fidelity.
+    fn riv_get(&self, dungeon: &Dungeon, x: i32, y: i32) -> u8 {
+        if y >= DMAXY as i32 {
+            if x < DMAXX as i32 - 1 {
+                return dungeon.tiles[(x + 1) as usize][0];
+            }
+            return if dungeon.protected[0][0] { 1 } else { 0 };
+        }
+        if x >= DMAXX as i32 {
+            return if dungeon.protected[0][y as usize] { 1 } else { 0 };
+        }
+        dungeon.tiles[x as usize][y as usize]
+    }
+
+    fn riv_set(&self, dungeon: &mut Dungeon, x: i32, y: i32, tile: u8) {
+        if y >= DMAXY as i32 {
+            if x < DMAXX as i32 - 1 {
+                dungeon.tiles[(x + 1) as usize][0] = tile;
+            } else {
+                dungeon.protected[0][0] = tile != 0;
+            }
+            return;
+        }
+        if x >= DMAXX as i32 {
+            dungeon.protected[0][y as usize] = tile != 0;
+            return;
+        }
+        dungeon.tiles[x as usize][y as usize] = tile;
+    }
+
+    /// Generate river/lava system
+    /// C++ equivalent: River (drlg_l3.cpp:1013-1263)
     fn river(&mut self, dungeon: &mut Dungeon) {
-        let mut river_count = 0;
-        let mut tries = 0;
-        let mut pdir = -1i32; // Previous direction
+        let mut rivercnt = 0i32;
+        let mut tries = 0i32;
+        let mut pdir = -1i32; // C++ BUGFIX: pdir initialized
 
-        while tries < 200 && river_count < 4 {
-            tries += 1;
-
-            // Find starting point (tiles 25-28: directional edge tiles)
-            let mut rx = 0usize;
-            let mut ry = 0usize;
-            let mut i = 0;
-
-            // Find valid starting tile
-            while i < 100 {
-                rx = self.random_range(0, DMAXX);
-                ry = self.random_range(0, DMAXY);
-                i += 1;
-
-                // Scan horizontally if needed
-                while ry < DMAXY && (dungeon.tiles[rx][ry] < 25 || dungeon.tiles[rx][ry] > 28) {
-                    rx += 1;
-                    if rx >= DMAXX {
-                        rx = 0;
+        while tries < 200 && rivercnt < 4 {
+            let mut bail = false;
+            while !bail && tries < 200 {
+                tries += 1;
+                let mut rx = 0i32;
+                let mut ry = 0i32;
+                let mut i = 0i32;
+                // BUGFIX: (ry >= DMAXY || tile out of 25..28) && i < 100
+                while (ry >= DMAXY as i32
+                    || self.riv_get(dungeon, rx, ry) < 25
+                    || self.riv_get(dungeon, rx, ry) > 28)
+                    && i < 100
+                {
+                    rx = self.random_range(0, DMAXX) as i32;
+                    ry = self.random_range(0, DMAXY) as i32;
+                    i += 1;
+                    // BUGFIX: ry < DMAXY check before dungeon access
+                    while ry < DMAXY as i32
+                        && (self.riv_get(dungeon, rx, ry) < 25 || self.riv_get(dungeon, rx, ry) > 28)
+                    {
+                        rx += 1;
+                        if rx >= DMAXX as i32 {
+                            rx = 0;
+                            ry += 1;
+                        }
+                    }
+                }
+                if ry >= DMAXY as i32 {
+                    continue;
+                }
+                if i >= 100 {
+                    return;
+                }
+                let mut river = [[0i32; 100]; 3];
+                let mut dir;
+                let nodir;
+                match self.riv_get(dungeon, rx, ry) {
+                    25 => {
+                        dir = 3;
+                        nodir = 2;
+                        river[2][0] = 40;
+                    }
+                    26 => {
+                        dir = 0;
+                        nodir = 1;
+                        river[2][0] = 38;
+                    }
+                    27 => {
+                        dir = 1;
+                        nodir = 0;
+                        river[2][0] = 41;
+                    }
+                    28 => {
+                        dir = 2;
+                        nodir = 3;
+                        river[2][0] = 39;
+                    }
+                    _ => continue,
+                }
+                river[0][0] = rx;
+                river[1][0] = ry;
+                let mut riveramt = 1usize;
+                let mut nodir2 = 4i32;
+                let mut dircheck = 0i32;
+                while dircheck < 4 && riveramt < 100 {
+                    let px = rx;
+                    let py = ry;
+                    if dircheck == 0 {
+                        dir = self.random_range(0, 4) as i32;
+                    } else {
+                        dir = (dir + 1) & 3;
+                    }
+                    dircheck += 1;
+                    while dir == nodir || dir == nodir2 {
+                        dir = (dir + 1) & 3;
+                        dircheck += 1;
+                    }
+                    if dir == 0 && ry > 0 {
+                        ry -= 1;
+                    }
+                    if dir == 1 && ry < DMAXY as i32 {
                         ry += 1;
                     }
-                }
-
-                if ry < DMAXY && dungeon.tiles[rx][ry] >= 25 && dungeon.tiles[rx][ry] <= 28 {
-                    break;
-                }
-            }
-
-            if ry >= DMAXY || i >= 100 {
-                continue;
-            }
-
-            // Initialize river path based on starting tile
-            let mut river_x = [0usize; 100];
-            let mut river_y = [0usize; 100];
-            let mut river_tile = [0u8; 100];
-            let mut riveramt = 0usize;
-
-            let (mut dir, nodir) = match dungeon.tiles[rx][ry] {
-                25 => (3, 2),
-                26 => (0, 1),
-                27 => (1, 0),
-                28 => (2, 3),
-                _ => continue,
-            };
-
-            // Set starting endpoint tile
-            river_tile[0] = match dungeon.tiles[rx][ry] {
-                25 => 40,
-                26 => 38,
-                27 => 41,
-                28 => 39,
-                _ => 0,
-            };
-            river_x[0] = rx;
-            river_y[0] = ry;
-            riveramt = 1;
-
-            let mut nodir2 = 4; // Secondary blocked direction
-            let mut dircheck = 0;
-
-            // Trace river path
-            while dircheck < 4 && riveramt < 100 {
-                let px = rx;
-                let py = ry;
-
-                if dircheck == 0 {
-                    dir = self.random_range(0, 4) as i32;
-                } else {
-                    dir = (dir + 1) & 3;
-                }
-                dircheck += 1;
-
-                // Skip blocked directions
-                while dir == nodir || dir == nodir2 {
-                    dir = (dir + 1) & 3;
-                    dircheck += 1;
-                }
-
-                // Move in direction
-                match dir {
-                    0 if ry > 0 => ry -= 1,
-                    1 if ry < DMAXY - 1 => ry += 1,
-                    2 if rx < DMAXX - 1 => rx += 1,
-                    3 if rx > 0 => rx -= 1,
-                    _ => {}
-                }
-
-                // Check if we hit floor tile
-                if dungeon.tiles[rx][ry] == 7 {
-                    dircheck = 0;
-
-                    // Choose straight river tile based on direction
-                    if dir < 2 {
-                        river_tile[riveramt] = if self.flip_coin() { 17 } else { 18 };
+                    if dir == 2 && rx < DMAXX as i32 {
+                        rx += 1;
+                    }
+                    if dir == 3 && rx > 0 {
+                        rx -= 1;
+                    }
+                    if self.riv_get(dungeon, rx, ry) == 7 {
+                        dircheck = 0;
+                        if dir < 2 {
+                            river[2][riveramt] = if self.random_range(0, 2) == 0 { 17 } else { 18 };
+                        }
+                        if dir > 1 {
+                            river[2][riveramt] = if self.random_range(0, 2) == 0 { 15 } else { 16 };
+                        }
+                        river[0][riveramt] = rx;
+                        river[1][riveramt] = ry;
+                        riveramt += 1;
+                        if (dir == 0 && pdir == 2) || (dir == 3 && pdir == 1) {
+                            if riveramt > 2 {
+                                river[2][riveramt - 2] = 22;
+                            }
+                            nodir2 = if dir == 0 { 1 } else { 2 };
+                        }
+                        if (dir == 0 && pdir == 3) || (dir == 2 && pdir == 1) {
+                            if riveramt > 2 {
+                                river[2][riveramt - 2] = 21;
+                            }
+                            nodir2 = if dir == 0 { 1 } else { 3 };
+                        }
+                        if (dir == 1 && pdir == 2) || (dir == 3 && pdir == 0) {
+                            if riveramt > 2 {
+                                river[2][riveramt - 2] = 20;
+                            }
+                            nodir2 = if dir == 1 { 0 } else { 2 };
+                        }
+                        if (dir == 1 && pdir == 3) || (dir == 2 && pdir == 0) {
+                            if riveramt > 2 {
+                                river[2][riveramt - 2] = 19;
+                            }
+                            nodir2 = if dir == 1 { 0 } else { 3 };
+                        }
+                        pdir = dir;
                     } else {
-                        river_tile[riveramt] = if self.flip_coin() { 15 } else { 16 };
+                        rx = px;
+                        ry = py;
                     }
+                }
+                // BUGFIX: ry >= 2
+                if dir == 0
+                    && ry >= 2
+                    && self.riv_get(dungeon, rx, ry - 1) == 10
+                    && self.riv_get(dungeon, rx, ry - 2) == 8
+                {
+                    river[0][riveramt] = rx;
+                    river[1][riveramt] = ry - 1;
+                    river[2][riveramt] = 24;
+                    if pdir == 2 {
+                        river[2][riveramt - 1] = 22;
+                    }
+                    if pdir == 3 {
+                        river[2][riveramt - 1] = 21;
+                    }
+                    bail = true;
+                }
+                // BUGFIX: ry + 2 < DMAXY
+                if dir == 1
+                    && ry + 2 < DMAXY as i32
+                    && self.riv_get(dungeon, rx, ry + 1) == 2
+                    && self.riv_get(dungeon, rx, ry + 2) == 8
+                {
+                    river[0][riveramt] = rx;
+                    river[1][riveramt] = ry + 1;
+                    river[2][riveramt] = 42;
+                    if pdir == 2 {
+                        river[2][riveramt - 1] = 20;
+                    }
+                    if pdir == 3 {
+                        river[2][riveramt - 1] = 19;
+                    }
+                    bail = true;
+                }
+                // BUGFIX: rx + 2 < DMAXX
+                if dir == 2
+                    && rx + 2 < DMAXX as i32
+                    && self.riv_get(dungeon, rx + 1, ry) == 4
+                    && self.riv_get(dungeon, rx + 2, ry) == 8
+                {
+                    river[0][riveramt] = rx + 1;
+                    river[1][riveramt] = ry;
+                    river[2][riveramt] = 43;
+                    if pdir == 0 {
+                        river[2][riveramt - 1] = 19;
+                    }
+                    if pdir == 1 {
+                        river[2][riveramt - 1] = 21;
+                    }
+                    bail = true;
+                }
+                // BUGFIX: rx >= 2
+                if dir == 3
+                    && rx >= 2
+                    && self.riv_get(dungeon, rx - 1, ry) == 9
+                    && self.riv_get(dungeon, rx - 2, ry) == 8
+                {
+                    river[0][riveramt] = rx - 1;
+                    river[1][riveramt] = ry;
+                    river[2][riveramt] = 23;
+                    if pdir == 0 {
+                        river[2][riveramt - 1] = 20;
+                    }
+                    if pdir == 1 {
+                        river[2][riveramt - 1] = 22;
+                    }
+                    bail = true;
+                }
+                if bail && riveramt < 7 {
+                    bail = false;
+                }
+                if bail {
+                    let mut found = 0i32;
+                    let mut lpcnt = 0i32;
+                    let mut bridge = 0i32;
+                    while found == 0 && lpcnt < 30 {
+                        lpcnt += 1;
+                        bridge = self.random_range(0, riveramt) as i32;
+                        if (river[2][bridge as usize] == 15 || river[2][bridge as usize] == 16)
+                            && self.riv_get(dungeon, river[0][bridge as usize], river[1][bridge as usize] - 1) == 7
+                            && self.riv_get(dungeon, river[0][bridge as usize], river[1][bridge as usize] + 1) == 7
+                        {
+                            found = 1;
+                        }
+                        if (river[2][bridge as usize] == 17 || river[2][bridge as usize] == 18)
+                            && self.riv_get(dungeon, river[0][bridge as usize] - 1, river[1][bridge as usize]) == 7
+                            && self.riv_get(dungeon, river[0][bridge as usize] + 1, river[1][bridge as usize]) == 7
+                        {
+                            found = 2;
+                        }
+                        for ii in 0..riveramt {
+                            if found == 1
+                                && (river[1][bridge as usize] - 1 == river[1][ii]
+                                    || river[1][bridge as usize] + 1 == river[1][ii])
+                                && river[0][bridge as usize] == river[0][ii]
+                            {
+                                found = 0;
+                            }
+                            if found == 2
+                                && (river[0][bridge as usize] - 1 == river[0][ii]
+                                    || river[0][bridge as usize] + 1 == river[0][ii])
+                                && river[1][bridge as usize] == river[1][ii]
+                            {
+                                found = 0;
+                            }
+                        }
+                    }
+                    if found != 0 {
+                        river[2][bridge as usize] = if found == 1 { 44 } else { 45 };
+                        rivercnt += 1;
+                        for bb in 0..=riveramt {
+                            self.riv_set(dungeon, river[0][bb], river[1][bb], river[2][bb] as u8);
+                        }
+                    } else {
+                        bail = false;
+                    }
+                }
+            }
+        }
+    }
+    /// C++ equivalent: PoolFix
+    /// Check if a position is near an already-placed theme room.
+    /// C++ equivalent: IsNearThemeRoom (gendung.cpp)
+    fn is_near_theme_room(&self, tx: usize, ty: usize) -> bool {
+        for &(x, y, w, h) in &self.theme_locations {
+            let rx = x as isize - 2;
+            let ry = y as isize - 2;
+            let rw = w as isize + 5;
+            let rh = h as isize + 5;
+            if (tx as isize) >= rx
+                && (tx as isize) < rx + rw
+                && (ty as isize) >= ry
+                && (ty as isize) < ry + rh
+            {
+                return true;
+            }
+        }
+        false
+    }
 
-                    river_x[riveramt] = rx;
-                    river_y[riveramt] = ry;
-                    riveramt += 1;
+    /// Find the largest available rectangle of floor tiles.
+    /// C++ equivalent: GetSizeForThemeRoom (gendung.cpp:118-160)
+    fn get_size_for_theme_room(
+        &self,
+        dungeon: &Dungeon,
+        floor: u8,
+        ox: usize,
+        oy: usize,
+        min_size: usize,
+        max_size: usize,
+    ) -> Option<(usize, usize)> {
+        if ox + max_size > DMAXX && oy + max_size > DMAXY {
+            return None; // C++ broken bounds check (avoids lower-right corner)
+        }
+        if self.is_near_theme_room(ox, oy) {
+            return None;
+        }
+        let max_width = max_size.min(DMAXX - ox);
+        let max_height = max_size.min(DMAXY - oy);
+        let mut room_w = max_width;
+        let mut room_h = max_height;
+        for i in 0..max_size {
+            let mut width = if i < room_h { i } else { 0 };
+            if i < max_height {
+                while width < room_w {
+                    if dungeon.tiles[ox + width][oy + i] != floor {
+                        break;
+                    }
+                    width += 1;
+                }
+            }
+            let mut height = if i < room_w { i } else { 0 };
+            if i < max_width {
+                while height < room_h {
+                    if dungeon.tiles[ox + i][oy + height] != floor {
+                        break;
+                    }
+                    height += 1;
+                }
+            }
+            if width < min_size || height < min_size {
+                if i < min_size {
+                    return None;
+                }
+                break;
+            }
+            room_w = room_w.min(width);
+            room_h = room_h.min(height);
+        }
+        Some((room_w - 2, room_h - 2))
+    }
 
-                    // Detect corners and update previous tile
-                    if (dir == 0 && pdir == 2) || (dir == 3 && pdir == 1) {
-                        if riveramt > 2 {
-                            river_tile[riveramt - 2] = 22;
-                        }
-                        nodir2 = if dir == 0 { 1 } else { 2 };
-                    }
-                    if (dir == 0 && pdir == 3) || (dir == 2 && pdir == 1) {
-                        if riveramt > 2 {
-                            river_tile[riveramt - 2] = 21;
-                        }
-                        nodir2 = if dir == 0 { 1 } else { 3 };
-                    }
-                    if (dir == 1 && pdir == 2) || (dir == 3 && pdir == 0) {
-                        if riveramt > 2 {
-                            river_tile[riveramt - 2] = 20;
-                        }
-                        nodir2 = if dir == 1 { 0 } else { 2 };
-                    }
-                    if (dir == 1 && pdir == 3) || (dir == 2 && pdir == 0) {
-                        if riveramt > 2 {
-                            river_tile[riveramt - 2] = 19;
-                        }
-                        nodir2 = if dir == 1 { 0 } else { 3 };
-                    }
-
-                    pdir = dir;
+    /// Draw the cave theme room frame (walls + door).
+    /// C++ equivalent: CreateThemeRoom (gendung.cpp, DTYPE_CAVES branch)
+    fn create_theme_room(&mut self, dungeon: &mut Dungeon, idx: usize) {
+        let (lx, ly, w, h) = self.theme_locations[idx];
+        let hx = lx + w;
+        let hy = ly + h;
+        for yy in ly..hy {
+            for xx in lx..hx {
+                if yy == ly || yy == hy - 1 {
+                    dungeon.tiles[xx][yy] = 134;
+                } else if xx == lx || xx == hx - 1 {
+                    dungeon.tiles[xx][yy] = 137;
                 } else {
-                    // Revert position if not floor
-                    rx = px;
-                    ry = py;
+                    dungeon.tiles[xx][yy] = 7;
                 }
             }
+        }
+        dungeon.tiles[lx][ly] = 150;
+        dungeon.tiles[hx - 1][ly] = 151;
+        dungeon.tiles[lx][hy - 1] = 152;
+        dungeon.tiles[hx - 1][hy - 1] = 138;
+        if self.flip_coin() {
+            dungeon.tiles[hx - 1][(ly + hy) / 2] = 147;
+        } else {
+            dungeon.tiles[(lx + hx) / 2][hy - 1] = 146;
+        }
+    }
 
-            // Check if river reached an endpoint
-            let mut valid_endpoint = false;
-            if dir == 0 && ry >= 2 && dungeon.tiles[rx][ry - 1] == 10 && dungeon.tiles[rx][ry - 2] == 8 {
-                river_x[riveramt] = rx;
-                river_y[riveramt] = ry - 1;
-                river_tile[riveramt] = 24;
-                riveramt += 1;
-                valid_endpoint = true;
-            }
-            if dir == 1 && ry < DMAXY - 2 && dungeon.tiles[rx][ry + 1] == 10 && dungeon.tiles[rx][ry + 2] == 8 {
-                river_x[riveramt] = rx;
-                river_y[riveramt] = ry + 1;
-                river_tile[riveramt] = 23;
-                riveramt += 1;
-                valid_endpoint = true;
-            }
-            if dir == 2 && rx < DMAXX - 2 && dungeon.tiles[rx + 1][ry] == 10 && dungeon.tiles[rx + 2][ry] == 8 {
-                river_x[riveramt] = rx + 1;
-                river_y[riveramt] = ry;
-                river_tile[riveramt] = if self.flip_coin() { 42 } else { 43 };
-                riveramt += 1;
-                valid_endpoint = true;
-            }
-            if dir == 3 && rx >= 2 && dungeon.tiles[rx - 1][ry] == 10 && dungeon.tiles[rx - 2][ry] == 8 {
-                river_x[riveramt] = rx - 1;
-                river_y[riveramt] = ry;
-                river_tile[riveramt] = if self.flip_coin() { 38 } else { 39 };
-                riveramt += 1;
-                valid_endpoint = true;
-            }
-
-            // Only place river if valid and long enough
-            if valid_endpoint && riveramt >= 7 {
-                // Place river tiles
-                for k in 0..riveramt {
-                    dungeon.tiles[river_x[k]][river_y[k]] = river_tile[k];
+    /// Place cave theme room frames.
+    /// C++ equivalent: DRLG_PlaceThemeRooms (gendung.cpp:706-753)
+    fn place_theme_rooms(
+        &mut self,
+        dungeon: &mut Dungeon,
+        min_size: usize,
+        max_size: usize,
+        floor: u8,
+        freq: usize,
+        rnd_size: bool,
+    ) {
+        self.theme_locations.clear();
+        for j in 0..DMAXY {
+            for i in 0..DMAXX {
+                // C++ FlipCoin(0) = GenRnd(0)==0 = true without drawing
+                if dungeon.tiles[i][j] != floor || !self.flip_coin_n(freq) {
+                    continue;
                 }
-
-                // Randomly place a bridge on one river segment
-                if riveramt > 3 {
-                    let bridge_idx = self.random_range(1, riveramt - 1);
-                    let tile = river_tile[bridge_idx];
-                    if (tile >= 15 && tile <= 18) || (tile >= 19 && tile <= 22) {
-                        dungeon.tiles[river_x[bridge_idx]][river_y[bridge_idx]] = if tile <= 18 { 44 } else { 45 };
+                let Some((mut rw, mut rh)) =
+                    self.get_size_for_theme_room(dungeon, floor, i, j, min_size, max_size)
+                else {
+                    continue;
+                };
+                if rnd_size {
+                    let min = min_size - 2;
+                    let max = max_size - 2;
+                    let inner_w = self.random_range(0, rw - min + 1);
+                    rw = min + self.random_range(0, inner_w);
+                    if rw < min || rw > max {
+                        rw = min;
+                    }
+                    let inner_h = self.random_range(0, rh - min + 1);
+                    rh = min + self.random_range(0, inner_h);
+                    if rh < min || rh > max {
+                        rh = min;
                     }
                 }
-
-                river_count += 1;
+                // C++: theme.room.position = {i,j} + Direction::South = {1,1}
+                self.theme_locations.push((i + 1, j + 1, rw, rh));
+                let idx = self.theme_locations.len() - 1;
+                self.create_theme_room(dungeon, idx);
             }
         }
     }
 
-    /// Fix pool edges (convert isolated ceiling tiles near lava to lava)
-    /// C++ equivalent: PoolFix
+    fn fence_vertical_up(&self, dungeon: &Dungeon, i: usize, y: usize) -> bool {
+        if (dungeon.tiles[i + 1][y] > 152 || dungeon.tiles[i + 1][y] < 130)
+            && (dungeon.tiles[i - 1][y] > 152 || dungeon.tiles[i - 1][y] < 130)
+        {
+            if matches!(dungeon.tiles[i][y], 7 | 10 | 126 | 129 | 134 | 136) {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn fence_vertical_down(&self, dungeon: &Dungeon, i: usize, y: usize) -> bool {
+        if (dungeon.tiles[i + 1][y] > 152 || dungeon.tiles[i + 1][y] < 130)
+            && (dungeon.tiles[i - 1][y] > 152 || dungeon.tiles[i - 1][y] < 130)
+        {
+            if matches!(dungeon.tiles[i][y], 2 | 7 | 134 | 136) {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn fence_horizontal_left(&self, dungeon: &Dungeon, x: usize, j: usize) -> bool {
+        if (dungeon.tiles[x][j + 1] > 152 || dungeon.tiles[x][j + 1] < 130)
+            && (dungeon.tiles[x][j - 1] > 152 || dungeon.tiles[x][j - 1] < 130)
+        {
+            if matches!(dungeon.tiles[x][j], 7 | 9 | 121 | 124 | 135 | 137) {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn fence_horizontal_right(&self, dungeon: &Dungeon, x: usize, j: usize) -> bool {
+        if (dungeon.tiles[x][j + 1] > 152 || dungeon.tiles[x][j + 1] < 130)
+            && (dungeon.tiles[x][j - 1] > 152 || dungeon.tiles[x][j - 1] < 130)
+        {
+            if matches!(dungeon.tiles[x][j], 4 | 7 | 135 | 137) {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn add_fence_doors(&mut self, dungeon: &mut Dungeon) {
+        for j in 0..DMAXY {
+            for i in 0..DMAXX {
+                if dungeon.tiles[i][j] == 130 {
+                    let found = if dungeon.tiles[i][j - 1] == 141 && dungeon.tiles[i][j + 1] == 141 {
+                        1
+                    } else if dungeon.tiles[i - 1][j] == 141 && dungeon.tiles[i + 1][j] == 141 {
+                        2
+                    } else {
+                        0
+                    };
+                    if found != 0 {
+                        let dir = if found == 1 {
+                            if self.flip_coin() { 1 } else { 0 } // South(1,1)/North(-1,-1)
+                        } else if self.flip_coin() {
+                            2 // East
+                        } else {
+                            3 // West
+                        };
+                        if found == 1 {
+                            if dir == 1 {
+                                dungeon.tiles[i][j + 1] = 7;
+                            } else {
+                                dungeon.tiles[i][j - 1] = 7;
+                            }
+                        } else if dir == 2 {
+                            dungeon.tiles[i + 1][j] = 7;
+                        } else {
+                            dungeon.tiles[i - 1][j] = 7;
+                        }
+                        dungeon.tiles[i][j] = 7;
+                    }
+                }
+            }
+        }
+    }
+
+    fn fence_door_fix(&mut self, dungeon: &mut Dungeon) {
+        for j in 0..DMAXY {
+            for i in 0..DMAXX {
+                if dungeon.tiles[i][j] == 146 {
+                    if dungeon.tiles[i + 1][j] > 152
+                        || dungeon.tiles[i + 1][j] < 130
+                        || dungeon.tiles[i - 1][j] > 152
+                        || dungeon.tiles[i - 1][j] < 130
+                    {
+                        dungeon.tiles[i][j] = 7;
+                        continue;
+                    }
+                    if !matches!(dungeon.tiles[i + 1][j], 130 | 132 | 133 | 134 | 136 | 138 | 140)
+                        && !matches!(dungeon.tiles[i - 1][j], 130 | 132 | 133 | 134 | 136 | 138 | 140)
+                    {
+                        dungeon.tiles[i][j] = 7;
+                        continue;
+                    }
+                }
+                if dungeon.tiles[i][j] == 147 {
+                    if dungeon.tiles[i][j + 1] > 152
+                        || dungeon.tiles[i][j + 1] < 130
+                        || dungeon.tiles[i][j - 1] > 152
+                        || dungeon.tiles[i][j - 1] < 130
+                    {
+                        dungeon.tiles[i][j] = 7;
+                        continue;
+                    }
+                    if !matches!(dungeon.tiles[i][j + 1], 131 | 132 | 133 | 135 | 137 | 138 | 139)
+                        && !matches!(dungeon.tiles[i][j - 1], 131 | 132 | 133 | 135 | 137 | 138 | 139)
+                    {
+                        dungeon.tiles[i][j] = 7;
+                    }
+                }
+            }
+        }
+    }
+
+    /// C++ equivalent: Fence (drlg_l3.cpp:1634-1800)
+    fn fence(&mut self, dungeon: &mut Dungeon) {
+        // Pass 1: fence line starts (tiles 10/9 horizontal/vertical + corner 11)
+        for j in 1..(DMAXY - 1) {
+            for i in 1..(DMAXX - 1) {
+                if dungeon.tiles[i][j] == 10 && !self.flip_coin() {
+                    let mut x = i;
+                    while dungeon.tiles[x][j] == 10 {
+                        x += 1;
+                    }
+                    x -= 1;
+                    if x - i > 0 {
+                        dungeon.tiles[i][j] = 127;
+                        for xx in (i + 1)..x {
+                            dungeon.tiles[xx][j] = if self.random_range(0, 2) == 0 { 129 } else { 126 };
+                        }
+                        dungeon.tiles[x][j] = 128;
+                    }
+                }
+                if dungeon.tiles[i][j] == 9 && !self.flip_coin() {
+                    let mut y = j;
+                    while dungeon.tiles[i][y] == 9 {
+                        y += 1;
+                    }
+                    y -= 1;
+                    if y - j > 0 {
+                        dungeon.tiles[i][j] = 123;
+                        for yy in (j + 1)..y {
+                            dungeon.tiles[i][yy] = if self.random_range(0, 2) == 0 { 124 } else { 121 };
+                        }
+                        dungeon.tiles[i][y] = 122;
+                    }
+                }
+                if dungeon.tiles[i][j] == 11
+                    && dungeon.tiles[i + 1][j] == 10
+                    && dungeon.tiles[i][j + 1] == 9
+                    && !self.flip_coin()
+                {
+                    dungeon.tiles[i][j] = 125;
+                    let mut x = i + 1;
+                    while dungeon.tiles[x][j] == 10 {
+                        x += 1;
+                    }
+                    x -= 1;
+                    for xx in (i + 1)..x {
+                        dungeon.tiles[xx][j] = if self.random_range(0, 2) == 0 { 129 } else { 126 };
+                    }
+                    dungeon.tiles[x][j] = 128;
+                    let mut y = j + 1;
+                    while dungeon.tiles[i][y] == 9 {
+                        y += 1;
+                    }
+                    y -= 1;
+                    for yy in (j + 1)..y {
+                        dungeon.tiles[i][yy] = if self.random_range(0, 2) == 0 { 124 } else { 121 };
+                    }
+                    dungeon.tiles[i][y] = 122;
+                }
+            }
+        }
+
+        // Pass 2: vertical/horizontal fence runs on floor tiles
+        // (C++ uses int so y2/y1 can dip negative; use i32)
+        for j in 1..DMAXY {
+            for i in 1..DMAXX {
+                if dungeon.tiles[i][j] != 7 {
+                    continue;
+                }
+                let _ = self.random_range(0, 1); // C++ DiscardRandomValues(1)
+                if self.is_near_theme_room(i, j) {
+                    continue;
+                }
+                if self.flip_coin() {
+                    let mut y1 = j as i32;
+                    while y1 > 0 && self.fence_vertical_up(dungeon, i, y1 as usize) {
+                        y1 -= 1;
+                    }
+                    y1 += 1;
+                    let mut y2 = j as i32;
+                    while y2 < DMAXY as i32 && self.fence_vertical_down(dungeon, i, y2 as usize) {
+                        y2 += 1;
+                    }
+                    y2 -= 1;
+                    let mut skip = true;
+                    if y1 >= 0 && dungeon.tiles[i][y1 as usize] == 7 {
+                        skip = false;
+                    }
+                    if y2 >= 0 && dungeon.tiles[i][y2 as usize] == 7 {
+                        skip = false;
+                    }
+                    if y2 - y1 > 1 && skip {
+                        let rp = self.random_range(0, (y2 - y1 - 1) as usize) as i32 + y1 + 1;
+                        for y in y1..=y2 {
+                            if y == rp {
+                                continue;
+                            }
+                            if y < 0 {
+                                continue;
+                            }
+                            if dungeon.tiles[i][y as usize] == 7 {
+                                dungeon.tiles[i][y as usize] = if self.random_range(0, 2) == 0 { 137 } else { 135 };
+                            }
+                            if dungeon.tiles[i][y as usize] == 10 {
+                                dungeon.tiles[i][y as usize] = 131;
+                            }
+                            if dungeon.tiles[i][y as usize] == 126 {
+                                dungeon.tiles[i][y as usize] = 133;
+                            }
+                            if dungeon.tiles[i][y as usize] == 129 {
+                                dungeon.tiles[i][y as usize] = 133;
+                            }
+                            if dungeon.tiles[i][y as usize] == 2 {
+                                dungeon.tiles[i][y as usize] = 139;
+                            }
+                            if dungeon.tiles[i][y as usize] == 134 {
+                                dungeon.tiles[i][y as usize] = 138;
+                            }
+                            if dungeon.tiles[i][y as usize] == 136 {
+                                dungeon.tiles[i][y as usize] = 138;
+                            }
+                        }
+                    }
+                } else {
+                    let mut x1 = i as i32;
+                    while x1 > 0 && self.fence_horizontal_left(dungeon, x1 as usize, j) {
+                        x1 -= 1;
+                    }
+                    x1 += 1;
+                    let mut x2 = i as i32;
+                    while x2 < DMAXX as i32 && self.fence_horizontal_right(dungeon, x2 as usize, j) {
+                        x2 += 1;
+                    }
+                    x2 -= 1;
+                    let mut skip = true;
+                    if x1 >= 0 && dungeon.tiles[x1 as usize][j] == 7 {
+                        skip = false;
+                    }
+                    if x2 >= 0 && dungeon.tiles[x2 as usize][j] == 7 {
+                        skip = false;
+                    }
+                    if x2 - x1 > 1 && skip {
+                        let rp = self.random_range(0, (x2 - x1 - 1) as usize) as i32 + x1 + 1;
+                        for x in x1..=x2 {
+                            if x == rp {
+                                continue;
+                            }
+                            if x < 0 {
+                                continue;
+                            }
+                            if dungeon.tiles[x as usize][j] == 7 {
+                                dungeon.tiles[x as usize][j] = if self.random_range(0, 2) == 0 { 136 } else { 134 };
+                            }
+                            if dungeon.tiles[x as usize][j] == 9 {
+                                dungeon.tiles[x as usize][j] = 130;
+                            }
+                            if dungeon.tiles[x as usize][j] == 121 {
+                                dungeon.tiles[x as usize][j] = 132;
+                            }
+                            if dungeon.tiles[x as usize][j] == 124 {
+                                dungeon.tiles[x as usize][j] = 132;
+                            }
+                            if dungeon.tiles[x as usize][j] == 4 {
+                                dungeon.tiles[x as usize][j] = 140;
+                            }
+                            if dungeon.tiles[x as usize][j] == 135 {
+                                dungeon.tiles[x as usize][j] = 138;
+                            }
+                            if dungeon.tiles[x as usize][j] == 137 {
+                                dungeon.tiles[x as usize][j] = 138;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        self.add_fence_doors(dungeon);
+        self.fence_door_fix(dungeon);
+    }
+
+
     fn pool_fix(&self, dungeon: &mut Dungeon) {
         for j in 1..(DMAXY - 2) {
             for i in 1..(DMAXX - 2) {
@@ -1449,9 +2000,9 @@ impl CavesGenerator {
     }
 
     /// SpawnEdge helper for Spawn (checks boundaries and specific tiles)
-    /// C++ equivalent: SpawnEdge
+    /// C++ equivalent: SpawnEdge (drlg_l3.cpp:1266-1313)
     fn spawn_edge(&self, dungeon: &mut Dungeon, x: i32, y: i32, totarea: &mut i32) -> bool {
-        const SPAWN_TABLE: [u8; 15] = [0x00, 0x0A, 0x03, 0x05, 0x0C, 0x06, 0x09, 0x00, 0x00, 0x0C, 0x03, 0x06, 0x09, 0x0A, 0x05];
+        const SPAWN_TABLE: [u8; 15] = [0x00, 0x0A, 0x43, 0x05, 0x2c, 0x06, 0x09, 0x00, 0x00, 0x1c, 0x83, 0x06, 0x09, 0x0A, 0x05];
 
         if *totarea > 40 {
             return true;
@@ -1463,7 +2014,7 @@ impl CavesGenerator {
             return false;
         }
         if dungeon.tiles[x as usize][y as usize] > 15 {
-            return false;
+            return true;
         }
 
         let i = dungeon.tiles[x as usize][y as usize];
@@ -1471,16 +2022,29 @@ impl CavesGenerator {
         *totarea += 1;
 
         let st = SPAWN_TABLE[i as usize];
-        if (st & 0x80) != 0 && self.spawn_edge(dungeon, x, y - 1, totarea) {
+        // C++: low bits recurse into SpawnEdge, high bits switch to Spawn.
+        if (st & 8) != 0 && self.spawn_edge(dungeon, x, y - 1, totarea) {
             return true;
         }
-        if (st & 0x40) != 0 && self.spawn_edge(dungeon, x, y + 1, totarea) {
+        if (st & 4) != 0 && self.spawn_edge(dungeon, x, y + 1, totarea) {
             return true;
         }
-        if (st & 0x20) != 0 && self.spawn_edge(dungeon, x + 1, y, totarea) {
+        if (st & 2) != 0 && self.spawn_edge(dungeon, x + 1, y, totarea) {
             return true;
         }
-        if (st & 0x10) != 0 && self.spawn_edge(dungeon, x - 1, y, totarea) {
+        if (st & 1) != 0 && self.spawn_edge(dungeon, x - 1, y, totarea) {
+            return true;
+        }
+        if (st & 0x80) != 0 && self.spawn(dungeon, x, y - 1, totarea) {
+            return true;
+        }
+        if (st & 0x40) != 0 && self.spawn(dungeon, x, y + 1, totarea) {
+            return true;
+        }
+        if (st & 0x20) != 0 && self.spawn(dungeon, x + 1, y, totarea) {
+            return true;
+        }
+        if (st & 0x10) != 0 && self.spawn(dungeon, x - 1, y, totarea) {
             return true;
         }
 
@@ -1490,7 +2054,8 @@ impl CavesGenerator {
     /// Spawn: flood fill for pool generation
     /// C++ equivalent: Spawn
     fn spawn(&self, dungeon: &mut Dungeon, x: i32, y: i32, totarea: &mut i32) -> bool {
-        const SPAWN_TABLE: [u8; 15] = [0x00, 0x0A, 0x03, 0x05, 0x0C, 0x06, 0x09, 0x00, 0x00, 0x0C, 0x03, 0x06, 0x09, 0x0A, 0x05];
+        // C++ SpawnEdge spawntable (drlg_l3.cpp:1267) has high bits 0x43/0x2c/0x1c/0x83
+        const SPAWN_TABLE: [u8; 15] = [0x00, 0x0A, 0x03, 0x05, 0x0C, 0x06, 0x09, 0x00, 0x00, 0x0C, 0x03, 0x06, 0x09, 0x0A, 0x05]; // C++ Spawn table
 
         if *totarea > 40 {
             return true;
