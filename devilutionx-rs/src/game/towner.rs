@@ -513,7 +513,7 @@ const TOWNER_DATA: [TownerDataEntry; TownerType::COUNT] = [
     TownerDataEntry {
         towner_type: TownerType::DeadGuy,
         name: "Wounded Townsman",
-        default_position: Point { x: 25, y: 19 },
+        default_position: Point { x: 24, y: 32 },
         anim_width: 96,
         anim_frames: 8,
         anim_delay: 6,
@@ -533,7 +533,7 @@ const TOWNER_DATA: [TownerDataEntry; TownerType::COUNT] = [
     TownerDataEntry {
         towner_type: TownerType::Story,
         name: "Deckard Cain",
-        default_position: Point { x: 25, y: 29 },
+        default_position: Point { x: 62, y: 71 },
         anim_width: 96,
         anim_frames: 18,
         anim_delay: 3,
@@ -543,7 +543,7 @@ const TOWNER_DATA: [TownerDataEntry; TownerType::COUNT] = [
     TownerDataEntry {
         towner_type: TownerType::Drunk,
         name: "Farnham",
-        default_position: Point { x: 55, y: 71 },
+        default_position: Point { x: 71, y: 84 },
         anim_width: 96,
         anim_frames: 16,
         anim_delay: 3,
@@ -553,7 +553,7 @@ const TOWNER_DATA: [TownerDataEntry; TownerType::COUNT] = [
     TownerDataEntry {
         towner_type: TownerType::Witch,
         name: "Adria",
-        default_position: Point { x: 80, y: 62 },
+        default_position: Point { x: 80, y: 20 },
         anim_width: 96,
         anim_frames: 18,
         anim_delay: 6,
@@ -563,7 +563,7 @@ const TOWNER_DATA: [TownerDataEntry; TownerType::COUNT] = [
     TownerDataEntry {
         towner_type: TownerType::Barmaid,
         name: "Gillian",
-        default_position: Point { x: 43, y: 78 },
+        default_position: Point { x: 43, y: 66 },
         anim_width: 96,
         anim_frames: 18,
         anim_delay: 3,
@@ -573,7 +573,7 @@ const TOWNER_DATA: [TownerDataEntry; TownerType::COUNT] = [
     TownerDataEntry {
         towner_type: TownerType::PegBoy,
         name: "Wirt",
-        default_position: Point { x: 75, y: 68 },
+        default_position: Point { x: 11, y: 53 },
         anim_width: 96,
         anim_frames: 16,
         anim_delay: 5,
@@ -1074,6 +1074,28 @@ mod tests {
     // Day 91 Tests: TownerData Config + Initialization
     // ========================================================================
 
+    /// towners.tsv rows (townerdat.cpp:113-114 loads position_x/y): the
+    /// factory defaults must match the authoritative upstream data.
+    #[test]
+    fn test_towner_positions_match_tsv() {
+        let expected: &[(TownerType, i32, i32)] = &[
+            (TownerType::Smith, 62, 63),
+            (TownerType::Healer, 55, 79),
+            (TownerType::DeadGuy, 24, 32),
+            (TownerType::Tavern, 55, 62),
+            (TownerType::Story, 62, 71),
+            (TownerType::Drunk, 71, 84),
+            (TownerType::Witch, 80, 20),
+            (TownerType::Barmaid, 43, 66),
+            (TownerType::PegBoy, 11, 53),
+            (TownerType::Cow, 58, 16),
+        ];
+        for (ty, x, y) in expected.iter().copied() {
+            let d = TownerFactory::get_data(ty);
+            assert_eq!((d.default_position.x, d.default_position.y), (x, y), "towner {:?}", ty);
+        }
+    }
+
     #[test]
     fn test_towner_data_lookup() {
         let smith_data = TownerFactory::get_data(TownerType::Smith);
@@ -1086,7 +1108,9 @@ mod tests {
 
         let story_data = TownerFactory::get_data(TownerType::Story);
         assert_eq!(story_data.name, "Deckard Cain");
-        assert_eq!(story_data.default_position.x, 25);
+        // towners.tsv row TOWN_STORY: position (62, 71).
+        assert_eq!(story_data.default_position.x, 62);
+        assert_eq!(story_data.default_position.y, 71);
     }
 
     #[test]
