@@ -38,60 +38,60 @@ pub enum Tile {
     VWall = 1,
     /// Horizontal wall (top side)
     HWall = 2,
-    /// Top-left corner wall
-    NWCorner = 3,
-    /// Top-right corner wall
-    NECorner = 4,
-    /// Bottom-left corner wall
-    SWCorner = 5,
-    /// Bottom-right corner wall
-    SECorner = 6,
-    /// Vertical wall with door
-    VWallDoor = 7,
-    /// Horizontal wall with door
-    HWallDoor = 8,
-    /// Archway horizontal top
-    ArchH1 = 9,
-    /// Archway horizontal bottom
-    ArchH2 = 10,
-    /// Archway vertical left
+    /// Diagonal-corner wall written by MakeDmt (C++ `VCorner = 16`).
+    NWCorner = 16,
+    /// Top-right corner wall (minisets only; no C++ L1 equivalent)
+    NECorner = 41,
+    /// Bottom-left corner wall (minisets only; no C++ L1 equivalent)
+    SWCorner = 42,
+    /// Wall written by MakeDmt for the diagonal branch (C++ `DWall = 4`).
+    SECorner = 4,
+    /// Vertical wall with door (C++ `VDoor = 25`)
+    VWallDoor = 25,
+    /// Horizontal wall with door (C++ `HDoor = 26`)
+    HWallDoor = 26,
+    /// Archway horizontal (C++ `HArch = 12`)
+    ArchH1 = 12,
+    /// Archway horizontal bottom (unused in generation)
+    ArchH2 = 43,
+    /// Archway vertical (C++ `VArch = 11`)
     ArchV1 = 11,
-    /// Archway vertical right
-    ArchV2 = 12,
+    /// Archway vertical right (unused in generation)
+    ArchV2 = 44,
     /// Floor tile
     Floor = 13,
 
-    /// T-junction to south (wall blocks north)
-    DirtVWallToSouth = 14,
-    /// T-junction to north (wall blocks south)
-    DirtVWallToNorth = 15,
-    /// T-junction to east (wall blocks west)
-    DirtHWallToEast = 16,
-    /// T-junction to west (wall blocks east)
-    DirtHWallToWest = 17,
-    /// Dirt top-left corner
-    DirtNWCorner = 18,
-    /// Dirt top-right corner
-    DirtNECorner = 19,
-    /// Dirt bottom-left corner
-    DirtSWCorner = 20,
-    /// Dirt bottom-right corner
-    DirtSECorner = 21,
-    /// Cross junction (4-way intersection)
-    DirtCross = 22,
-    /// Horizontal wall (dirt variant)
-    DirtHWall = 23,
-    /// Vertical wall (dirt variant)
-    DirtVWall = 24,
+    /// T-junction to south (self-invented; unused in generation)
+    DirtVWallToSouth = 45,
+    /// T-junction to north (self-invented; unused in generation)
+    DirtVWallToNorth = 46,
+    /// T-junction to east (self-invented; unused in generation)
+    DirtHWallToEast = 47,
+    /// T-junction to west (self-invented; unused in generation)
+    DirtHWallToWest = 48,
+    /// Dirt top-left corner (self-invented; unused in generation)
+    DirtNWCorner = 49,
+    /// Dirt top-right corner (self-invented; unused in generation)
+    DirtNECorner = 50,
+    /// Dirt bottom-left corner (self-invented; unused in generation)
+    DirtSWCorner = 51,
+    /// Dirt bottom-right corner (self-invented; unused in generation)
+    DirtSECorner = 52,
+    /// Cross junction (self-invented; unused in generation)
+    DirtCross = 53,
+    /// Horizontal wall dirt variant (self-invented; unused in generation)
+    DirtHWall = 54,
+    /// Vertical wall dirt variant (self-invented; unused in generation)
+    DirtVWall = 55,
 
     /// Lava pool (crypt only)
-    Lava = 25,
-    /// Entrance stairs
-    EntranceStairs = 26,
-    /// Dirt floor
-    Dirt = 27,
+    Lava = 56,
+    /// Entrance stairs (C++ `EntranceStairs = 64`)
+    EntranceStairs = 64,
+    /// Dirt floor (C++ `Dirt = 22` — the Cathedral background tile)
+    Dirt = 22,
     /// Invalid/empty tile
-    Invalid = 28,
+    Invalid = 57,
 
     // Crypt-specific tiles (not used in Cathedral)
     /// Crypt archway horizontal top
@@ -142,46 +142,45 @@ impl TryFrom<u8> for Tile {
         match value {
             1 => Ok(Tile::VWall),
             2 => Ok(Tile::HWall),
-            3 => Ok(Tile::NWCorner),
-            4 => Ok(Tile::NECorner),
-            5 => Ok(Tile::SWCorner),
-            6 => Ok(Tile::SECorner),
-            7 => Ok(Tile::VWallDoor),
-            8 => Ok(Tile::HWallDoor),
-            9 => Ok(Tile::ArchH1),
-            10 => Ok(Tile::ArchH2),
+            4 => Ok(Tile::SECorner),
             11 => Ok(Tile::ArchV1),
-            12 => Ok(Tile::ArchV2),
+            12 => Ok(Tile::ArchH1),
             13 => Ok(Tile::Floor),
-            14 => Ok(Tile::DirtVWallToSouth),
-            15 => Ok(Tile::DirtVWallToNorth),
-            16 => Ok(Tile::DirtHWallToEast),
-            17 => Ok(Tile::DirtHWallToWest),
-            18 => Ok(Tile::DirtNWCorner),
-            19 => Ok(Tile::DirtNECorner),
-            20 => Ok(Tile::DirtSWCorner),
-            21 => Ok(Tile::DirtSECorner),
-            22 => Ok(Tile::DirtCross),
-            23 => Ok(Tile::DirtHWall),
-            24 => Ok(Tile::DirtVWall),
-            25 => Ok(Tile::Lava),
-            26 => Ok(Tile::EntranceStairs),
-            27 => Ok(Tile::Dirt),
-            28 => Ok(Tile::Invalid),
-            29 => Ok(Tile::CryptArchH1),
-            30 => Ok(Tile::CryptArchH2),
-            31 => Ok(Tile::CryptArchV1),
-            32 => Ok(Tile::CryptArchV2),
-            33 => Ok(Tile::CryptHWallDoor),
-            34 => Ok(Tile::CryptVWallDoor),
-            35 => Ok(Tile::CryptNWCorner),
-            36 => Ok(Tile::CryptNECorner),
-            37 => Ok(Tile::CryptSWCorner),
-            38 => Ok(Tile::CryptSECorner),
-            39 => Ok(Tile::CryptHWall),
-            40 => Ok(Tile::CryptVWall),
-            _ => Err(()),
-        }
+            16 => Ok(Tile::NWCorner),
+            22 => Ok(Tile::Dirt),
+            25 => Ok(Tile::VWallDoor),
+            26 => Ok(Tile::HWallDoor),
+            41 => Ok(Tile::NECorner),
+            42 => Ok(Tile::SWCorner),
+            43 => Ok(Tile::ArchH2),
+            44 => Ok(Tile::ArchV2),
+            45 => Ok(Tile::DirtVWallToSouth),
+            46 => Ok(Tile::DirtVWallToNorth),
+            47 => Ok(Tile::DirtHWallToEast),
+            48 => Ok(Tile::DirtHWallToWest),
+            49 => Ok(Tile::DirtNWCorner),
+            50 => Ok(Tile::DirtNECorner),
+            51 => Ok(Tile::DirtSWCorner),
+            52 => Ok(Tile::DirtSECorner),
+            53 => Ok(Tile::DirtCross),
+            54 => Ok(Tile::DirtHWall),
+            55 => Ok(Tile::DirtVWall),
+            56 => Ok(Tile::Lava),
+            57 => Ok(Tile::Invalid),
+            64 => Ok(Tile::EntranceStairs),
+            58 => Ok(Tile::CryptArchH1),
+            59 => Ok(Tile::CryptArchH2),
+            60 => Ok(Tile::CryptArchV1),
+            61 => Ok(Tile::CryptArchV2),
+            62 => Ok(Tile::CryptHWallDoor),
+            63 => Ok(Tile::CryptVWallDoor),
+            65 => Ok(Tile::CryptNWCorner),
+            66 => Ok(Tile::CryptNECorner),
+            67 => Ok(Tile::CryptSWCorner),
+            68 => Ok(Tile::CryptSECorner),
+            69 => Ok(Tile::CryptHWall),
+            70 => Ok(Tile::CryptVWall),
+            _ => Err(()),}
     }
 }
 
@@ -1053,15 +1052,24 @@ mod tests {
         assert_eq!(Tile::VWall as u8, 1);
         assert_eq!(Tile::HWall as u8, 2);
         assert_eq!(Tile::Floor as u8, 13);
-        assert_eq!(Tile::Dirt as u8, 27);
-        assert_eq!(Tile::Invalid as u8, 28);
+        assert_eq!(Tile::Dirt as u8, 22); // C++ Dirt=22
+        assert_eq!(Tile::NWCorner as u8, 16); // C++ VCorner
+        assert_eq!(Tile::SECorner as u8, 4); // C++ DWall
+        assert_eq!(Tile::VWallDoor as u8, 25); // C++ VDoor
+        assert_eq!(Tile::HWallDoor as u8, 26); // C++ HDoor
+        assert_eq!(Tile::ArchH1 as u8, 12); // C++ HArch
+        assert_eq!(Tile::EntranceStairs as u8, 64); // C++ EntranceStairs
+        assert_eq!(Tile::Invalid as u8, 57);
     }
 
     #[test]
     fn test_tile_try_from() {
         assert_eq!(Tile::try_from(1), Ok(Tile::VWall));
         assert_eq!(Tile::try_from(13), Ok(Tile::Floor));
-        assert_eq!(Tile::try_from(28), Ok(Tile::Invalid));
+        assert_eq!(Tile::try_from(16), Ok(Tile::NWCorner));
+        assert_eq!(Tile::try_from(4), Ok(Tile::SECorner));
+        assert_eq!(Tile::try_from(64), Ok(Tile::EntranceStairs));
+        assert_eq!(Tile::try_from(57), Ok(Tile::Invalid));
         assert_eq!(Tile::try_from(255), Err(()));
     }
 
