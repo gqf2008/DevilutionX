@@ -423,17 +423,6 @@ impl TilePropertyManager {
         self.get_properties(tile_id).contains(TileProperties::BLOCK_MISSILE)
     }
 
-    /// Check if a tile blocks players
-    #[inline]
-    pub fn blocks_player(&self, tile_id: u16) -> bool {
-        self.get_properties(tile_id).contains(TileProperties::BLOCK_PLAYER)
-    }
-
-    /// Check if a tile blocks monsters
-    #[inline]
-    pub fn blocks_monster(&self, tile_id: u16) -> bool {
-        self.get_properties(tile_id).contains(TileProperties::BLOCK_MONSTER)
-    }
 }
 
 impl Default for TilePropertyManager {
@@ -771,27 +760,26 @@ mod tests {
         assert!(manager.is_solid(100));
         assert!(manager.blocks_light(100));
         assert!(!manager.blocks_missile(100));
-        assert!(!manager.blocks_player(100));
     }
 
     #[test]
     fn test_tile_property_queries() {
         let mut manager = TilePropertyManager::new();
 
-        // Wall tile: solid, blocks everything
+        // Wall tile: solid, blocks light and missiles, transparent, trap
         manager.set_properties(1,
             TileProperties::SOLID |
             TileProperties::BLOCK_LIGHT |
-            TileProperties::BLOCK_PLAYER |
-            TileProperties::BLOCK_MONSTER |
-            TileProperties::BLOCK_MISSILE
+            TileProperties::BLOCK_MISSILE |
+            TileProperties::TRANSPARENT |
+            TileProperties::TRAP
         );
 
         assert!(manager.is_solid(1));
         assert!(manager.blocks_light(1));
-        assert!(manager.blocks_player(1));
-        assert!(manager.blocks_monster(1));
         assert!(manager.blocks_missile(1));
+        assert!(manager.get_properties(1).contains(TileProperties::TRANSPARENT));
+        assert!(manager.get_properties(1).contains(TileProperties::TRAP));
 
         // Floor tile: walkable
         manager.set_properties(2, TileProperties::NONE);

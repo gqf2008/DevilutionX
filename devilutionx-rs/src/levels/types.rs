@@ -146,14 +146,19 @@ pub enum Difficulty {
 // ============================================================================
 
 /// How the player enters a level
+///
+/// C++ authoritative source: `lvl_entry` (`Source/levels/gendung_defs.hpp`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum LevelEntry {
-    MainEntry = 0,   // Town entrance or new game
-    StairsUp = 1,    // Coming from level below
-    StairsDown = 2,  // Coming from level above
-    Portal = 3,      // Through a portal
-    TownWarp = 4,    // Town portal
+    Main = 0,         // ENTRY_MAIN — Town entrance or new game
+    Prev = 1,         // ENTRY_PREV — coming from the level below
+    SetLevel = 2,     // ENTRY_SETLVL — entering a quest/set level
+    ReturnLevel = 3,  // ENTRY_RTNLVL — returning from a quest level
+    Load = 4,         // ENTRY_LOAD — loading a saved game
+    WarpLevel = 5,    // ENTRY_WARPLVL — warp to a level
+    TownWarpDown = 6, // ENTRY_TWARPDN — town portal going down
+    TownWarpUp = 7,   // ENTRY_TWARPUP — town portal going up
 }
 
 // ============================================================================
@@ -206,16 +211,19 @@ pub struct MegaTile {
 
 bitflags! {
     /// Properties of a dungeon tile
+    ///
+    /// Bit layout matches C++ `TileProperties` exactly
+    /// (`Source/levels/dun_tile.hpp`); `.sol` files store these raw bytes.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
     pub struct TileProperties: u8 {
-        const NONE           = 0;
-        const SOLID          = 1 << 0;  // Cannot walk through
-        const BLOCK_LIGHT    = 1 << 1;  // Blocks light
-        const BLOCK_PLAYER   = 1 << 2;  // Player cannot pass
-        const BLOCK_MONSTER  = 1 << 3;  // Monster cannot pass
-        const BLOCK_MISSILE  = 1 << 4;  // Missile cannot pass
-        const TRAP           = 1 << 5;  // Trap tile
-        const TRANSPARENT    = 1 << 6;  // Transparent (for rendering)
+        const NONE              = 0;
+        const SOLID             = 1 << 0;  // Cannot walk through
+        const BLOCK_LIGHT       = 1 << 1;  // Blocks light
+        const BLOCK_MISSILE     = 1 << 2;  // Missile cannot pass
+        const TRANSPARENT       = 1 << 3;  // Transparent tile (rendering)
+        const TRANSPARENT_LEFT  = 1 << 4;  // Transparent on the left half
+        const TRANSPARENT_RIGHT = 1 << 5;  // Transparent on the right half
+        const TRAP              = 1 << 7;  // Trap tile
     }
 }
 
@@ -299,6 +307,14 @@ mod tests {
         assert!(props.contains(TileProperties::SOLID));
         assert!(props.contains(TileProperties::BLOCK_LIGHT));
         assert!(!props.contains(TileProperties::TRANSPARENT));
+        // Bit layout must match C++ `TileProperties` (dun_tile.hpp).
+        assert_eq!(TileProperties::SOLID.bits(), 1 << 0);
+        assert_eq!(TileProperties::BLOCK_LIGHT.bits(), 1 << 1);
+        assert_eq!(TileProperties::BLOCK_MISSILE.bits(), 1 << 2);
+        assert_eq!(TileProperties::TRANSPARENT.bits(), 1 << 3);
+        assert_eq!(TileProperties::TRANSPARENT_LEFT.bits(), 1 << 4);
+        assert_eq!(TileProperties::TRANSPARENT_RIGHT.bits(), 1 << 5);
+        assert_eq!(TileProperties::TRAP.bits(), 1 << 7);
     }
 
     #[test]
@@ -310,6 +326,20 @@ mod tests {
         assert_eq!(MAXTILES, 1379);
         assert_eq!(MAXTHEMES, 50);
     }
+    #[test]
+    fn test_level_entry_values_match_cpp() {
+        use super::LevelEntry;
+        // C++ `lvl_entry` (gendung_defs.hpp): ENTRY_MAIN..ENTRY_TWARPUP.
+        assert_eq!(LevelEntry::Main as u8, 0);
+        assert_eq!(LevelEntry::Prev as u8, 1);
+        assert_eq!(LevelEntry::SetLevel as u8, 2);
+        assert_eq!(LevelEntry::ReturnLevel as u8, 3);
+        assert_eq!(LevelEntry::Load as u8, 4);
+        assert_eq!(LevelEntry::WarpLevel as u8, 5);
+        assert_eq!(LevelEntry::TownWarpDown as u8, 6);
+        assert_eq!(LevelEntry::TownWarpUp as u8, 7);
+    }
+
     #[test]
     fn test_dungeon_type_values_match_cpp() {
         use super::DungeonType;

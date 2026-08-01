@@ -199,7 +199,7 @@ pub fn generate_dungeon_layout(
             let mut dungeon = Dungeon::new();
             dungeon.level_type = LvType::Caves;
             let mut gen = CavesGenerator::new();
-            gen.generate(&mut dungeon, seed, 9, LevelEntry::MainEntry)
+            gen.generate(&mut dungeon, seed, 9, LevelEntry::Main)
                 .then_some(())
                 .ok_or_else(|| "L3 Caves generation failed".to_string())?;
             Ok(build_caves_layout(&dungeon, art))
@@ -208,7 +208,7 @@ pub fn generate_dungeon_layout(
             let mut dungeon = Dungeon::new();
             dungeon.level_type = LvType::Hell;
             let mut gen = Dungeon4Generator::new();
-            gen.generate(&mut dungeon, seed, 13, LevelEntry::MainEntry)
+            gen.generate(&mut dungeon, seed, 13, LevelEntry::Main)
                 .then_some(())
                 .ok_or_else(|| "L4 Hell generation failed".to_string())?;
             Ok(build_hell_layout(&dungeon, art))
@@ -554,7 +554,7 @@ mod tests {
         let mut dungeon = Dungeon::new();
         dungeon.level_type = crate::levels::types::DungeonType::Caves;
         let mut gen = CavesGenerator::new();
-        let ok = gen.generate(&mut dungeon, 0x13572468, 9, LevelEntry::MainEntry);
+        let ok = gen.generate(&mut dungeon, 0x13572468, 9, LevelEntry::Main);
         assert!(ok, "L3 generation should succeed");
 
         let layout = build_caves_layout(&dungeon, &level);
@@ -600,7 +600,7 @@ mod tests {
         let mut dungeon = Dungeon::new();
         dungeon.level_type = crate::levels::types::DungeonType::Hell;
         let mut gen = Dungeon4Generator::new();
-        let ok = gen.generate(&mut dungeon, 0x13572468, 13, LevelEntry::MainEntry);
+        let ok = gen.generate(&mut dungeon, 0x13572468, 13, LevelEntry::Main);
         assert!(ok, "L4 generation should succeed");
 
         let layout = build_hell_layout(&dungeon, &level);

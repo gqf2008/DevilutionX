@@ -830,7 +830,7 @@ impl CatacombsGenerator {
                 self.fix_transparency(dungeon);
 
                 // Place stairs - retry if failed
-                if !self.place_stairs(dungeon, LevelEntry::MainEntry) {
+                if !self.place_stairs(dungeon, LevelEntry::Main) {
                     continue;
                 }
 

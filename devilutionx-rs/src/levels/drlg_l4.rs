@@ -2242,7 +2242,7 @@ impl Dungeon4Generator {
             self.load_diablo_quads(dungeon, true);
 
             // Day 78: Place stairs
-            if self.place_stairs(dungeon, 16, LevelEntry::MainEntry) {
+            if self.place_stairs(dungeon, 16, LevelEntry::Main) {
                 break;
             }
         }
@@ -3059,7 +3059,7 @@ mod tests {
         let mut dungeon = Dungeon::new();
 
         // Test Level 13 generation
-        let result = generator.generate(&mut dungeon, 54321, 13, LevelEntry::MainEntry);
+        let result = generator.generate(&mut dungeon, 54321, 13, LevelEntry::Main);
         assert!(result);
 
         // Verify some basic properties

@@ -816,7 +816,7 @@ impl CavesGenerator {
 
     /// Place stairs (up, down, and town warp)
     /// C++ equivalent: PlaceCaveStairs / PlaceNestStairs
-    fn place_stairs(&mut self, dungeon: &mut Dungeon, level: u8, entry: LevelEntry) -> bool {
+    fn place_stairs(&mut self, dungeon: &mut Dungeon, level: u8, _entry: LevelEntry) -> bool {
         // Determine if this is Hive/Nest level (15-16) or regular Caves (9-12)
         let is_hive = level == 15 || level == 16;
 
@@ -844,8 +844,10 @@ impl CavesGenerator {
             }
         }
 
-        // Place town warp on level 9
-        if level == 9 && matches!(entry, LevelEntry::TownWarp) {
+        // Place town warp on level 9 (C++: unconditional on currlevel == 9;
+        // `entry` only selects the spawn ViewPosition, which is handled
+        // outside the layout generators).
+        if level == 9 {
             let warp = miniset_l3_holdwarp();
             if !self.try_place_miniset(dungeon, &warp) {
                 return false;
@@ -1753,11 +1755,11 @@ mod tests {
 
         let mut a = CavesGenerator::new();
         let mut da = Dungeon::new();
-        a.generate(&mut da, seed, level, LevelEntry::MainEntry);
+        a.generate(&mut da, seed, level, LevelEntry::Main);
 
         let mut b = CavesGenerator::new();
         let mut db = Dungeon::new();
-        b.generate(&mut db, seed, level, LevelEntry::MainEntry);
+        b.generate(&mut db, seed, level, LevelEntry::Main);
 
         assert_eq!(da.tiles, db.tiles, "same seed must yield identical tiles");
     }
@@ -1794,11 +1796,11 @@ mod tests {
     fn test_different_seeds_drive_rng_differently() {
         let mut a = CavesGenerator::new();
         let mut da = Dungeon::new();
-        a.generate(&mut da, 1, 9, LevelEntry::MainEntry);
+        a.generate(&mut da, 1, 9, LevelEntry::Main);
 
         let mut b = CavesGenerator::new();
         let mut db = Dungeon::new();
-        b.generate(&mut db, 2, 9, LevelEntry::MainEntry);
+        b.generate(&mut db, 2, 9, LevelEntry::Main);
 
         assert_ne!(
             a.rng.get_seed(),
