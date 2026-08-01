@@ -107,170 +107,337 @@ pub fn miniset_l6_holdwarp() -> Miniset {
 /// Stalactite variant 1 (4x4)
 pub fn miniset_l3_tite1() -> Miniset {
     Miniset::new(4, 4,
-        vec![vec![7,7,7,7],vec![7,7,7,7],vec![7,7,7,7],vec![7,7,7,7]],
-        vec![vec![0,0,0,0],vec![0,57,58,0],vec![0,56,55,0],vec![0,0,0,0]])
+        vec![
+        vec![7,7,7,7],
+        vec![7,7,7,7],
+        vec![7,7,7,7],
+        vec![7,7,7,7]
+        ],
+        vec![
+        vec![0,0,0,0],
+        vec![0,57,58,0],
+        vec![0,56,55,0],
+        vec![0,0,0,0]
+        ])
 }
-
 /// Stalactite variant 2 (4x4)
 pub fn miniset_l3_tite2() -> Miniset {
     Miniset::new(4, 4,
-        vec![vec![7,7,7,7],vec![7,7,7,7],vec![7,7,7,7],vec![7,7,7,7]],
-        vec![vec![0,0,0,0],vec![0,61,62,0],vec![0,60,59,0],vec![0,0,0,0]])
+        vec![
+        vec![7,7,7,7],
+        vec![7,7,7,7],
+        vec![7,7,7,7],
+        vec![7,7,7,7]
+        ],
+        vec![
+        vec![0,0,0,0],
+        vec![0,61,62,0],
+        vec![0,60,59,0],
+        vec![0,0,0,0]
+        ])
 }
-
 /// Stalactite variant 3 (4x4)
 pub fn miniset_l3_tite3() -> Miniset {
     Miniset::new(4, 4,
-        vec![vec![7,7,7,7],vec![7,7,7,7],vec![7,7,7,7],vec![7,7,7,7]],
-        vec![vec![0,0,0,0],vec![0,65,66,0],vec![0,64,63,0],vec![0,0,0,0]])
+        vec![
+        vec![7,7,7,7],
+        vec![7,7,7,7],
+        vec![7,7,7,7],
+        vec![7,7,7,7]
+        ],
+        vec![
+        vec![0,0,0,0],
+        vec![0,65,66,0],
+        vec![0,64,63,0],
+        vec![0,0,0,0]
+        ])
 }
-
 // Stalactite variants 6-13 (similar structure, different tiles)
 pub fn miniset_l3_tite6() -> Miniset {
-    Miniset::new(4, 4,
-        vec![vec![7,7,7,7],vec![7,7,7,7],vec![7,7,7,7],vec![7,7,7,7]],
-        vec![vec![0,0,0,0],vec![0,69,70,0],vec![0,68,67,0],vec![0,0,0,0]])
+    Miniset::new(5, 4,
+        vec![
+        vec![7,7,7,7,7],
+        vec![7,7,7,0,7],
+        vec![7,7,7,0,7],
+        vec![7,7,7,7,7]
+        ],
+        vec![
+        vec![0,0,0,0,0],
+        vec![0,77,78,0,0],
+        vec![0,76,74,75,0],
+        vec![0,0,0,0,0]
+        ])
 }
-
 pub fn miniset_l3_tite7() -> Miniset {
-    Miniset::new(5, 5,
-        vec![vec![7,7,7,7,7],vec![7,7,7,7,7],vec![7,7,7,7,7],vec![7,7,7,7,7],vec![7,7,7,7,7]],
-        vec![vec![0,0,0,0,0],vec![0,0,0,0,0],vec![0,0,72,73,0],vec![0,0,71,74,0],vec![0,0,0,0,0]])
+    Miniset::new(4, 5,
+        vec![
+        vec![7,7,7,7],
+        vec![7,7,0,7],
+        vec![7,7,7,7],
+        vec![7,7,7,7],
+        vec![7,7,7,7]
+        ],
+        vec![
+        vec![0,0,0,0],
+        vec![0,83,0,0],
+        vec![0,82,80,0],
+        vec![0,81,79,0],
+        vec![0,0,0,0]
+        ])
 }
-
 pub fn miniset_l3_tite8() -> Miniset {
     Miniset::new(3, 3,
-        vec![vec![7,7,7],vec![7,7,7],vec![7,7,7]],
-        vec![vec![0,0,0],vec![0,77,0],vec![0,0,0]])
+        vec![
+        vec![7,7,7],
+        vec![7,7,7],
+        vec![7,7,7]
+        ],
+        vec![
+        vec![0,0,0],
+        vec![0,52,0],
+        vec![0,0,0]
+        ])
 }
-
 pub fn miniset_l3_tite9() -> Miniset {
     Miniset::new(3, 3,
-        vec![vec![7,7,7],vec![7,7,7],vec![7,7,7]],
-        vec![vec![0,0,0],vec![0,79,0],vec![0,0,0]])
+        vec![
+        vec![7,7,7],
+        vec![7,7,7],
+        vec![7,7,7]
+        ],
+        vec![
+        vec![0,0,0],
+        vec![0,53,0],
+        vec![0,0,0]
+        ])
 }
-
 pub fn miniset_l3_tite10() -> Miniset {
     Miniset::new(3, 3,
-        vec![vec![7,7,7],vec![7,7,7],vec![7,7,7]],
-        vec![vec![0,0,0],vec![0,80,0],vec![0,0,0]])
+        vec![
+        vec![7,7,7],
+        vec![7,7,7],
+        vec![7,7,7]
+        ],
+        vec![
+        vec![0,0,0],
+        vec![0,54,0],
+        vec![0,0,0]
+        ])
 }
-
 pub fn miniset_l3_tite11() -> Miniset {
     Miniset::new(3, 3,
-        vec![vec![7,7,7],vec![7,7,7],vec![7,7,7]],
-        vec![vec![0,0,0],vec![0,81,0],vec![0,0,0]])
+        vec![
+        vec![7,7,7],
+        vec![7,7,7],
+        vec![7,7,7]
+        ],
+        vec![
+        vec![0,0,0],
+        vec![0,67,0],
+        vec![0,0,0]
+        ])
 }
-
 pub fn miniset_l3_tite12() -> Miniset {
-    Miniset::new(2, 2,
-        vec![vec![7,7],vec![7,7]],
-        vec![vec![0,0],vec![0,83]])
+    Miniset::new(2, 1,
+        vec![
+        vec![9,7]
+        ],
+        vec![
+        vec![68,0]
+        ])
 }
-
 pub fn miniset_l3_tite13() -> Miniset {
-    Miniset::new(3, 3,
-        vec![vec![7,7,7],vec![7,7,7],vec![7,7,7]],
-        vec![vec![0,0,0],vec![0,0,0],vec![0,0,167]])
+    Miniset::new(1, 2,
+        vec![
+        vec![10],
+        vec![7]
+        ],
+        vec![
+        vec![69],
+        vec![0]
+        ])
 }
-
 // =============================================================================
 // Crevice Minisets (L3CREV1-11)
 // =============================================================================
 
 pub fn miniset_l3_crev1() -> Miniset {
-    Miniset::new(2, 2, vec![vec![7,7],vec![7,7]], vec![vec![0,0],vec![0,85]])
+    Miniset::new(2, 1,
+        vec![
+        vec![8,7]
+        ],
+        vec![
+        vec![84,85]
+        ])
 }
-
 pub fn miniset_l3_crev2() -> Miniset {
-    Miniset::new(2, 2, vec![vec![7,7],vec![7,7]], vec![vec![0,0],vec![0,87]])
+    Miniset::new(2, 1,
+        vec![
+        vec![8,11]
+        ],
+        vec![
+        vec![86,87]
+        ])
 }
-
 pub fn miniset_l3_crev3() -> Miniset {
-    Miniset::new(3, 2,
-        vec![vec![7,7,7],vec![7,7,7]],
-        vec![vec![0,0,0],vec![0,89,0]])
+    Miniset::new(1, 2,
+        vec![
+        vec![8],
+        vec![10]
+        ],
+        vec![
+        vec![89],
+        vec![88]
+        ])
 }
-
 pub fn miniset_l3_crev4() -> Miniset {
-    Miniset::new(2, 2, vec![vec![7,7],vec![7,7]], vec![vec![0,0],vec![0,91]])
+    Miniset::new(2, 1,
+        vec![
+        vec![8,7]
+        ],
+        vec![
+        vec![90,91]
+        ])
 }
-
 pub fn miniset_l3_crev5() -> Miniset {
-    Miniset::new(3, 2,
-        vec![vec![7,7,7],vec![7,7,7]],
-        vec![vec![0,0,0],vec![0,93,0]])
+    Miniset::new(1, 2,
+        vec![
+        vec![8],
+        vec![11]
+        ],
+        vec![
+        vec![92],
+        vec![93]
+        ])
 }
-
 pub fn miniset_l3_crev6() -> Miniset {
-    Miniset::new(3, 2,
-        vec![vec![7,7,7],vec![7,7,7]],
-        vec![vec![0,0,0],vec![0,95,0]])
+    Miniset::new(1, 2,
+        vec![
+        vec![8],
+        vec![10]
+        ],
+        vec![
+        vec![95],
+        vec![94]
+        ])
 }
-
 pub fn miniset_l3_crev7() -> Miniset {
-    Miniset::new(2, 2, vec![vec![7,7],vec![7,7]], vec![vec![0,0],vec![0,97]])
+    Miniset::new(2, 1,
+        vec![
+        vec![8,7]
+        ],
+        vec![
+        vec![96,101]
+        ])
 }
-
 pub fn miniset_l3_crev8() -> Miniset {
-    Miniset::new(3, 2,
-        vec![vec![7,7,7],vec![7,7,7]],
-        vec![vec![0,0,0],vec![0,99,0]])
+    Miniset::new(1, 2,
+        vec![
+        vec![2],
+        vec![8]
+        ],
+        vec![
+        vec![102],
+        vec![97]
+        ])
 }
-
 pub fn miniset_l3_crev9() -> Miniset {
-    Miniset::new(2, 2, vec![vec![7,7],vec![7,7]], vec![vec![0,0],vec![0,101]])
+    Miniset::new(2, 1,
+        vec![
+        vec![3,8]
+        ],
+        vec![
+        vec![103,98]
+        ])
 }
-
 pub fn miniset_l3_crev10() -> Miniset {
-    Miniset::new(2, 2, vec![vec![7,7],vec![7,7]], vec![vec![0,0],vec![0,103]])
+    Miniset::new(2, 1,
+        vec![
+        vec![4,8]
+        ],
+        vec![
+        vec![104,99]
+        ])
 }
-
 pub fn miniset_l3_crev11() -> Miniset {
-    Miniset::new(3, 2,
-        vec![vec![7,7,7],vec![7,7,7]],
-        vec![vec![0,0,0],vec![0,105,0]])
+    Miniset::new(1, 2,
+        vec![
+        vec![6],
+        vec![8]
+        ],
+        vec![
+        vec![105],
+        vec![100]
+        ])
 }
-
 // =============================================================================
 // Island Minisets (L3ISLE1-5, L6ISLE1-5)
 // =============================================================================
 
 /// Island variant 1 for L3 (3x3)
 pub fn miniset_l3_isle1() -> Miniset {
-    Miniset::new(3, 3,
-        vec![vec![15,15,15],vec![15,7,15],vec![15,15,15]],
-        vec![vec![0,0,0],vec![0,143,0],vec![0,0,0]])
+    Miniset::new(2, 3,
+        vec![
+        vec![5,14],
+        vec![4,9],
+        vec![13,12]
+        ],
+        vec![
+        vec![7,7],
+        vec![7,7],
+        vec![7,7]
+        ])
 }
-
 /// Island variant 2 for L3 (3x3)
 pub fn miniset_l3_isle2() -> Miniset {
     Miniset::new(3, 2,
-        vec![vec![15,15,15],vec![15,7,15]],
-        vec![vec![0,0,0],vec![0,145,0]])
+        vec![
+        vec![5,2,14],
+        vec![13,10,12]
+        ],
+        vec![
+        vec![7,7,7],
+        vec![7,7,7]
+        ])
 }
-
 /// Island variant 3 for L3 (3x3)
 pub fn miniset_l3_isle3() -> Miniset {
-    Miniset::new(3, 3,
-        vec![vec![15,15,15],vec![7,7,15],vec![15,15,15]],
-        vec![vec![0,0,0],vec![0,147,0],vec![0,0,0]])
+    Miniset::new(2, 3,
+        vec![
+        vec![5,14],
+        vec![4,9],
+        vec![13,12]
+        ],
+        vec![
+        vec![29,30],
+        vec![25,28],
+        vec![31,32]
+        ])
 }
-
 /// Island variant 4 for L3 (3x3)
 pub fn miniset_l3_isle4() -> Miniset {
     Miniset::new(3, 2,
-        vec![vec![15,15,7],vec![15,7,15]],
-        vec![vec![0,0,0],vec![0,149,0]])
+        vec![
+        vec![5,2,14],
+        vec![13,10,12]
+        ],
+        vec![
+        vec![29,26,30],
+        vec![31,27,32]
+        ])
 }
-
 /// Island variant 5 for L3 (3x2)
 pub fn miniset_l3_isle5() -> Miniset {
-    Miniset::new(2, 3,
-        vec![vec![15,15],vec![7,15],vec![15,15]],
-        vec![vec![0,0],vec![151,0],vec![0,0]])
+    Miniset::new(2, 2,
+        vec![
+        vec![5,14],
+        vec![13,12]
+        ],
+        vec![
+        vec![7,7],
+        vec![7,7]
+        ])
 }
-
 // =============================================================================
 // Island Minisets for Hive/Nest (L6ISLE1-5)
 // =============================================================================
@@ -1546,19 +1713,23 @@ mod tests {
 
     #[test]
     fn test_miniset_l3_crev1() {
+        // C++ L3CREV1: {2,1}, search {{8,7}}, replace {{84,85}}.
         let miniset = miniset_l3_crev1();
         assert_eq!(miniset.width, 2);
-        assert_eq!(miniset.height, 2);
-        assert_eq!(miniset.replace[1][1], 85);
+        assert_eq!(miniset.height, 1);
+        assert_eq!(miniset.search[0], vec![8, 7]);
+        assert_eq!(miniset.replace[0], vec![84, 85]);
     }
 
     #[test]
     fn test_miniset_l3_isle1() {
+        // C++ L3ISLE1: {2,3}, search {{5,14},{4,9},{13,12}}, replace 7s.
         let miniset = miniset_l3_isle1();
-        assert_eq!(miniset.width, 3);
+        assert_eq!(miniset.width, 2);
         assert_eq!(miniset.height, 3);
-        assert_eq!(miniset.search[1][1], 7);
-        assert_eq!(miniset.replace[1][1], 143);
+        assert_eq!(miniset.search[0], vec![5, 14]);
+        assert_eq!(miniset.search[2], vec![13, 12]);
+        assert_eq!(miniset.replace[0], vec![7, 7]);
     }
 
     #[test]
