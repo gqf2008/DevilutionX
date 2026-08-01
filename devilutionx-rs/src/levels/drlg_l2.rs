@@ -826,7 +826,10 @@ impl CatacombsGenerator {
             if self.create_dungeon(dungeon) {
                 self.fix_tiles_patterns(dungeon);
                 // TODO: InitSetPiece
-                // TODO: FloodTransparencyValues(3)
+                // C++ `FloodTransparencyValues(3)`: assign a TransVal to every
+                // connected floor region before `FixTransparency()` propagates
+                // it through surrounding dirt walls/doors.
+                dungeon.flood_transparency_values(3);
                 self.fix_transparency(dungeon);
 
                 // Place stairs - retry if failed
@@ -2997,6 +3000,35 @@ mod tests {
             da.trans_val, db.trans_val,
             "same seed must yield identical trans_val"
         );
+    }
+
+    /// C++ L2 `GenerateLevel` calls `FloodTransparencyValues(3)` before
+    /// `FixTransparency()`. Verify the wiring on a synthetic C++-L2 grid
+    /// (floor tile id 3): the flood assigns one TransVal id to the connected
+    /// floor region, and `fix_transparency` preserves it (no dirt walls to
+    /// propagate in a pure floor room).
+    #[test]
+    fn test_flood_then_fix_transparency_on_floor_region() {
+        let mut dungeon = Dungeon::new();
+        // 2x2 logical floor room (tile 3 = C++ L2 floor).
+        for y in 18..22 {
+            for x in 18..22 {
+                dungeon.tiles[x][y] = 3;
+            }
+        }
+
+        dungeon.flood_transparency_values(3);
+        // Floor micro at logical (19,19) -> micro (54,54).
+        let floor_micro = dungeon.trans_val[54][54];
+        assert_ne!(floor_micro, 0, "floor region must receive a TransVal id");
+        // Contiguous floor shares the same region id (logical (20,19) -> (56,54)).
+        assert_eq!(dungeon.trans_val[56][54], floor_micro);
+
+        // C++ FixTransparency must not disturb the floor region values.
+        let mut gen = CatacombsGenerator::new();
+        gen.fix_transparency(&mut dungeon);
+        assert_eq!(dungeon.trans_val[54][54], floor_micro);
+        assert_eq!(dungeon.trans_val[56][54], floor_micro);
     }
 
     /// Different seeds must drive the RNG into different end states.
