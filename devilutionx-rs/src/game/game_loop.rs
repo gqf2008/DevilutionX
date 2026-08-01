@@ -434,7 +434,10 @@ fn game_logic(game_state: &mut GameState) -> Result<()> {
     // Use the unified GameState update
     // This replaces the individual process calls with the centralized logic
     // found in game_state.rs
-    let mut rng = rand::rngs::StdRng::seed_from_u64(0); // TODO: Use game seed
+    // C++ `SetRndSeedForDungeonLevel` (Source/diablo.cpp:3025-3034) seeds the
+    // gameplay RNG with `DungeonSeeds[currlevel]` (town = index 0).
+    let rng_seed = game_state.dungeon_seeds[game_state.current_dungeon_level as usize] as u64;
+    let mut rng = rand::rngs::StdRng::seed_from_u64(rng_seed);
     game_state.update(&mut rng);
 
     if level_type.is_town() {
@@ -749,8 +752,10 @@ pub fn descend_to_level(game_state: &mut GameState, level: u8) -> Result<(), Str
         }
     };
 
-    // Generate + map to dPiece grid. Use the game seed so the level is stable.
-    let seed = (game_state.game_tick as u32).wrapping_add(0xC0FFEE);
+    // Generate + map to dPiece grid. C++ `CreateLevel` passes
+    // `DungeonSeeds[currlevel]` to `CreateDungeon` (diablo.cpp:1430); the Rust
+    // port uses the same per-level seed so layouts are stable and reproducible.
+    let seed = game_state.dungeon_seeds[level as usize];
     let layout = crate::game::dungeon_level::generate_dungeon_layout(level, seed, &art)?;
     let filled = crate::game::dungeon_level::count_filled(&layout);
     println!(
@@ -902,7 +907,9 @@ fn place_dungeon_monsters(game_state: &mut GameState, spawn_x: i32, spawn_y: i32
         MonsterType::SkeletonArcher,
     ];
 
-    let mut rng = rand::rng();
+    // Deterministic per-level spawns: C++ places monsters through the gameplay
+    // RNG seeded by `SetRndSeedForDungeonLevel` (DungeonSeeds[currlevel]).
+    let mut rng = rand::rngs::StdRng::seed_from_u64(game_state.dungeon_seeds[game_state.current_dungeon_level as usize] as u64);
     let mut placed = 0usize;
     let mut used_types: Vec<MonsterType> = Vec::new();
     let mut occupied: Vec<(i32, i32)> = Vec::new();

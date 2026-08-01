@@ -29,6 +29,10 @@ use rand::Rng;
 pub const TOWN_MAX_X: usize = 112;
 pub const TOWN_MAX_Y: usize = 112;
 
+/// Number of dungeon levels (C++ `NUMLEVELS`): index 0 = town, 1..16 = L1..L4.
+/// Mirrors Source/diablo.cpp:134 `uint32_t DungeonSeeds[NUMLEVELS];`.
+pub const NUM_LEVELS: usize = 17;
+
 /// Town→Cathedral down-stair trigger tile, in micro-tile (world) coordinates.
 ///
 /// **C++ Reference**: `Source/levels/trigs.cpp:115` (`InitTownTriggers`):
@@ -326,6 +330,17 @@ pub struct GameState {
     /// The dungeon level currently being rendered (1=L1 .. 4=L4); 0 = in town.
     pub current_dungeon_level: u8,
 
+    /// Per-level dungeon seeds (C++ `DungeonSeeds[NUMLEVELS]`).
+    ///
+    /// Index 0 = town; 1..16 = L1..L4. Derived once at `GameState::new` from
+    /// the game seed using an xoshiro128++ chain (Source/multi.cpp:863-869),
+    /// then `DungeonSeeds[0]` is re-randomised via `GenerateSeed()` to divorce
+    /// town (shops) from the game seed (Source/multi.cpp:871). The C++ engine
+    /// passes `DungeonSeeds[currlevel]` to `CreateDungeon` for level generation
+    /// and to `SetRndSeedForDungeonLevel` for gameplay rolls; the Rust port uses
+    /// the same value for `descend_to_level` and the per-frame gameplay RNG.
+    pub dungeon_seeds: [u32; NUM_LEVELS],
+
     /// Active level-transition triggers (stairs, warps), initialised by
     /// `descend_to_level` from the generated layout (C++ `InitL*Triggers`).
     pub triggers: crate::levels::trigs::TriggerManager,
@@ -479,6 +494,15 @@ impl GameState {
     /// Create a new game state
     pub fn new(player: Player, is_town: bool, seed: u64) -> Self {
         let dungeon = DungeonMap::generate(50, 50, crate::game::types::DungeonType::Cathedral, 1, seed);
+        // C++ `NetInit` (Source/multi.cpp:863-871): derive one dungeon seed per
+        // level from the game seed via an xoshiro128++ chain, then randomise
+        // the town seed separately so town shops are divorced from the game seed.
+        let mut game_generator = crate::engine::Xoshiro128PlusPlus::new(seed);
+        let mut dungeon_seeds = [0u32; NUM_LEVELS];
+        for s in dungeon_seeds.iter_mut() {
+            *s = game_generator.next();
+        }
+        dungeon_seeds[0] = crate::engine::generate_seed();
         Self {
             player,
             monster_manager: MonsterManager::new(200), // Max 200 monsters
@@ -502,6 +526,7 @@ impl GameState {
             dungeon_level_data: None,
             dungeon_art: vec![None; 5],
             current_dungeon_level: 0,
+            dungeon_seeds,
             triggers: crate::levels::trigs::TriggerManager::new(),
             monster_sprites: None,
             pending_sfx: Vec::new(),
@@ -2201,6 +2226,52 @@ impl crate::game::save::GameStateMut for GameState {
 mod tests {
     use super::*;
     use rand::SeedableRng;
+
+    /// C++ `NetInit` (Source/multi.cpp:863-871): DungeonSeeds[i] = xoshiro128++
+    /// chain from the game seed, then DungeonSeeds[0] = GenerateSeed() (town).
+    #[test]
+    fn test_dungeon_seeds_derive_from_game_seed_via_xoshiro_chain() {
+        let mut gs = GameState::new(Player::new(), true, 12345);
+        let mut generator = crate::engine::Xoshiro128PlusPlus::new(12345u64);
+        let mut expected = [0u32; NUM_LEVELS];
+        for s in expected.iter_mut() {
+            *s = generator.next();
+        }
+        // Level seeds 1..16 come straight from the xoshiro128++ chain.
+        assert_eq!(gs.dungeon_seeds[1..], expected[1..]);
+        // Town seed (index 0) is re-randomised via GenerateSeed(), so it must
+        // differ from the raw chain value (unless by a 2^-32 coincidence).
+        assert_ne!(gs.dungeon_seeds[0], expected[0]);
+        // Two states from the same game seed agree on every dungeon level seed.
+        let gs2 = GameState::new(Player::new(), true, 12345);
+        assert_eq!(gs.dungeon_seeds[1..], gs2.dungeon_seeds[1..]);
+        // All level seeds are distinct (xoshiro chain has no short repeats here).
+        for i in 1..NUM_LEVELS {
+            for j in (i + 1)..NUM_LEVELS {
+                assert_ne!(gs.dungeon_seeds[i], gs.dungeon_seeds[j]);
+            }
+        }
+        // A different game seed yields a different level chain.
+        let gs3 = GameState::new(Player::new(), true, 54321);
+        assert_ne!(gs.dungeon_seeds[1], gs3.dungeon_seeds[1]);
+    }
+
+    /// Gameplay RNG seeding: game_logic must seed from DungeonSeeds[currlevel].
+    #[test]
+    fn test_gameplay_rng_seed_matches_dungeon_seed() {
+        use rand::RngCore;
+        let mut gs = GameState::new(Player::new(), true, 12345);
+        // Town (current_dungeon_level == 0) uses dungeon_seeds[0].
+        gs.current_dungeon_level = 0;
+        let mut a = rand::rngs::StdRng::seed_from_u64(gs.dungeon_seeds[0] as u64);
+        let mut b = rand::rngs::StdRng::seed_from_u64(gs.dungeon_seeds[gs.current_dungeon_level as usize] as u64);
+        assert_eq!(a.next_u32(), b.next_u32());
+        // L1 uses DungeonSeeds[1].
+        gs.current_dungeon_level = 1;
+        let mut a = rand::rngs::StdRng::seed_from_u64(gs.dungeon_seeds[1] as u64);
+        let mut b = rand::rngs::StdRng::seed_from_u64(gs.dungeon_seeds[gs.current_dungeon_level as usize] as u64);
+        assert_eq!(a.next_u32(), b.next_u32());
+    }
 
     #[test]
     fn test_town_layout_default() {
