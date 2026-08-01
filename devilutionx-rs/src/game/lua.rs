@@ -176,6 +176,74 @@ impl LuaEngine {
         Ok(())
     }
 
+
+    /// Register `devilutionx.monsters` (C++ `lua/modules/monsters.cpp`).
+    /// The TSV loading is a documented follow-up; paths are recorded in the
+    /// registry for inspection.
+    pub fn register_monsters_module(&self) -> mlua::Result<()> {
+        let monsters: Table = self.lua.create_table()?;
+        monsters.set(
+            "addMonsterDataFromTsv",
+            self.lua.create_function(|lua, path: String| {
+                lua.set_named_registry_value("monster_tsv", path);
+                Ok(())
+            })?,
+        )?;
+        monsters.set(
+            "addUniqueMonsterDataFromTsv",
+            self.lua.create_function(|lua, path: String| {
+                lua.set_named_registry_value("unique_monster_tsv", path);
+                Ok(())
+            })?,
+        )?;
+        let devilutionx: Table = self.lua.globals().get("devilutionx")?;
+        devilutionx.set("monsters", monsters)?;
+        Ok(())
+    }
+
+    /// Register `devilutionx.player` (C++ `lua/modules/player.cpp`).
+    /// `self()` returns a table with the current player's name/level from the
+    /// optional `player_callback`; `walk_to` is a no-op hook.
+    pub fn register_player_module(&self) -> mlua::Result<()> {
+        let player: Table = self.lua.create_table()?;
+        player.set(
+            "self",
+            self.lua.create_function(move |lua, ()| {
+                let name: String = lua.named_registry_value("player_name").unwrap_or_else(|_| "Hero".to_string());
+                let level: i32 = lua.named_registry_value("player_level").unwrap_or(1);
+                let t: Table = lua.create_table()?;
+                t.set("name", name)?;
+                t.set("characterLevel", level)?;
+                Ok(t)
+            })?,
+        )?;
+        player.set(
+            "walk_to",
+            self.lua.create_function(|_, (_x, _y): (i32, i32)| Ok(()))?,
+        )?;
+        let devilutionx: Table = self.lua.globals().get("devilutionx")?;
+        devilutionx.set("player", player)?;
+        Ok(())
+    }
+
+    /// Register `devilutionx.towners` (C++ `lua/modules/towners.cpp`): one
+    /// table per towner with a `position()` function. The Rust port has no
+    /// towner state wired yet, so `position()` returns nil.
+    pub fn register_towners_module(&self) -> mlua::Result<()> {
+        let towners: Table = self.lua.create_table()?;
+        for name in [
+            "griswold", "pepin", "deadguy", "ogden", "cain", "farnham", "adria", "gillian",
+            "wirt", "cow", "lester", "celia", "nut",
+        ] {
+            let t: Table = self.lua.create_table()?;
+            t.set("position", self.lua.create_function(|_, ()| Ok(mlua::Value::Nil))?)?;
+            towners.set(name, t)?;
+        }
+        let devilutionx: Table = self.lua.globals().get("devilutionx")?;
+        devilutionx.set("towners", towners)?;
+        Ok(())
+    }
+
     /// Register the common modules (C++ `LuaInitialize`'s table).
     pub fn register_default_modules(&self) -> mlua::Result<()> {
         let devilutionx: Table = self.lua.create_table()?;
@@ -185,6 +253,9 @@ impl LuaEngine {
         self.register_hellfire_module()?;
         self.register_audio_module()?;
         self.register_render_module()?;
+        self.register_monsters_module()?;
+        self.register_player_module()?;
+        self.register_towners_module()?;
         Ok(())
     }
 }
@@ -328,6 +399,53 @@ mod tests {
         engine
             .load_script("audio2.lua", "devilutionx.audio.playSfx(9999)")
             .unwrap();
+    }
+
+
+    #[test]
+    fn test_monsters_module_tsv_paths() {
+        let engine = LuaEngine::new().unwrap();
+        engine.register_default_modules().unwrap();
+        engine
+            .load_script(
+                "monsters.lua",
+                "devilutionx.monsters.addMonsterDataFromTsv('monsters.tsv')",
+            )
+            .unwrap();
+        let path: String = engine.state().named_registry_value("monster_tsv").unwrap();
+        assert_eq!(path, "monsters.tsv");
+    }
+
+    #[test]
+    fn test_player_module_self() {
+        let engine = LuaEngine::new().unwrap();
+        engine.register_default_modules().unwrap();
+        engine
+            .state()
+            .set_named_registry_value("player_name", "Aria")
+            .unwrap();
+        engine.state().set_named_registry_value("player_level", 12).unwrap();
+        engine
+            .load_script(
+                "player.lua",
+                "p = devilutionx.player.self() name = p.name lvl = p.characterLevel",
+            )
+            .unwrap();
+        let name: String = engine.state().globals().get("name").unwrap();
+        let lvl: i32 = engine.state().globals().get("lvl").unwrap();
+        assert_eq!(name, "Aria");
+        assert_eq!(lvl, 12);
+    }
+
+    #[test]
+    fn test_towners_module_registered() {
+        let engine = LuaEngine::new().unwrap();
+        engine.register_default_modules().unwrap();
+        engine
+            .load_script("towners.lua", "p = devilutionx.towners.griswold.position()")
+            .unwrap();
+        let p: mlua::Value = engine.state().globals().get("p").unwrap();
+        assert!(matches!(p, mlua::Value::Nil));
     }
 
 
