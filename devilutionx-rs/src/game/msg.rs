@@ -1616,13 +1616,16 @@ impl MsgHandler {
 
     /// 发送字符串命令
     ///
-    /// **C++ Reference**: `Source/msg.cpp` - `NetSendCmdString()`
+    /// **C++ Reference**: `Source/msg.cpp` - `NetSendCmdString()`: the packet is
+    /// `[CMD_STRING][UTF-8 text][NUL]` — no player mask in the body (pmask is
+    /// the addressing mask passed to `multi_send_msg_packet`).
     pub fn net_send_cmd_string(&mut self, pmask: u32, text: &str) -> bool {
-        // C++ 使用 CMD_STRING。Rust 枚举暂未定义该变体（编号在 C++ 中较高），
-        // 此处使用 Chat 作为聊天字符串命令的近似。
         let _ = pmask;
-        let mut data = vec![CmdId::Chat.to_u8()];
-        data.extend_from_slice(&pmask.to_le_bytes());
+        // C++ `CMD_STRING` = 61 (msg.h). NOTE: the Rust `CmdId` enum numbering
+        // diverges from C++ `_cmd_id` at value 42+, so the raw C++ value is used
+        // here for wire compatibility until the enum is renumbered.
+        const CMD_STRING: u8 = 61;
+        let mut data = vec![CMD_STRING];
         let truncated = if text.len() > MAX_SEND_STR_LEN {
             &text[..MAX_SEND_STR_LEN]
         } else {
@@ -2155,9 +2158,12 @@ mod tests {
         let mut h = MsgHandler::new(0, false);
         assert!(h.net_send_cmd_string(0xFFFF_FFFF, "Hello"));
         let data = h.get_send_data().unwrap();
-        assert_eq!(data[0], CmdId::Chat.to_u8());
-        // pmask (4 bytes) + "Hello" (5 bytes) + null (1)
-        assert!(data.len() >= 1 + 4 + 5 + 1);
+        // C++ NetSendCmdString: [CMD_STRING=61][utf8][NUL]; the pmask is the
+        // addressing mask, not part of the packet body.
+        assert_eq!(data[0], 61);
+        assert_eq!(&data[1..6], b"Hello");
+        assert_eq!(data[6], 0);
+        assert_eq!(data.len(), 7);
     }
 
     #[test]
@@ -2170,4 +2176,16 @@ mod tests {
         // cmd(1) + pmask(4) + truncated(MAX_SEND_STR_LEN) + null(1)
         assert!(data.len() <= 1 + 4 + MAX_SEND_STR_LEN + 1);
     }
+    #[test]
+    fn test_net_send_cmd_string_cpp_layout() {
+        let mut handler = MsgHandler::new(0, false);
+        assert!(handler.net_send_cmd_string(0, "hi"));
+        let data = handler.send_buffer.read(4).expect("4 bytes written");
+        // C++ NetSendCmdString: [CMD_STRING=61][utf8][NUL], no mask in body.
+        assert_eq!(data[0], 61);
+        assert_eq!(&data[1..3], b"hi");
+        assert_eq!(data[3], 0);
+    }
+
+
 }
