@@ -133,11 +133,52 @@ fn loads_save_archive_as_mpq() {
         "initial and reference saves should share block-table layout"
     );
 
-    // TODO(Tier 1.5): once the inner save-structure names are known, probe them
-    // here with `save.has_entry("<hero>")` etc. Diablo saves typically omit the
-    // MPQ `(listfile)`, so `list_entries()` is expected to fail — that's fine,
-    // the block-table count above is the real acceptance signal.
     // TODO(Tier 2): feed the decoded inner bytes into the engine's save loader.
+}
+
+/// Tier 1.5: byte-exact decode of a real C++ save via the vanilla codec.
+///
+/// `spawn_0.sv` is a genuine C++ save (spawn single-player, password
+/// `adslhfb1` — Source/pfile.cpp PASSWORD_SPAWN_SINGLE). The `game` entry
+/// decrypts to the C++ `SaveGameData` header: magic `"SHAR"` (spawn
+/// non-Hellfire, Source/loadsave.cpp:2766-2773), then setlevel u8, setlvlnum
+/// BE u32, currlevel BE u32, leveltype BE u32. The fixture is the opening
+/// save of WarriorLevel1to2, so currlevel must be 1.
+#[test]
+fn decodes_real_cpp_save_game_entry() {
+    use devilutionx_rs::game::codec::codec_decode;
+
+    const PASSWORD_SPAWN_SINGLE: &str = "adslhfb1";
+
+    for (name, save_path) in [
+        ("initial", "spawn_0.sv"),
+        ("reference", "demo_0_reference_spawn_0.sv"),
+    ] {
+        let mut save = load_save_archive(fixture_path(save_path))
+            .expect("save should open as an MPQ archive");
+        assert!(save.has_entry("game"), "{name} save has a game entry");
+        let raw = save.read_entry("game").expect("read game entry");
+        let decoded = codec_decode(&raw, PASSWORD_SPAWN_SINGLE);
+        assert!(decoded.len() >= 17, "{name} game entry decodes to a header");
+        assert_eq!(
+            &decoded[0..4],
+            b"SHAR",
+            "{name} game magic must be SHAR (spawn, non-Hellfire)"
+        );
+        assert_eq!(decoded[4], 0, "{name} setlevel must be 0");
+        let currlevel = u32::from_be_bytes([decoded[9], decoded[10], decoded[11], decoded[12]]);
+        assert_eq!(currlevel, 1, "{name} fixture starts at level 1");
+        // A non-spawn password must fail the checksum (proves the password gate).
+        let wrong = codec_decode(&raw, "xrgyrkj1");
+        assert!(wrong.is_empty(), "wrong password must be rejected by checksum");
+    }
+
+    // The hero entry decrypts to the C++ hero blob (non-empty, sane length).
+    let mut save = load_save_archive(fixture_path("spawn_0.sv")).expect("open save");
+    assert!(save.has_entry("hero"), "save has a hero entry");
+    let raw = save.read_entry("hero").expect("read hero entry");
+    let hero = codec_decode(&raw, PASSWORD_SPAWN_SINGLE);
+    assert!(hero.len() > 100, "hero blob is substantial, got {}", hero.len());
 }
 
 /// Tier 1..3 acceptance: load `spawn_0.sv`, replay `demo_0.dmo` headlessly through
