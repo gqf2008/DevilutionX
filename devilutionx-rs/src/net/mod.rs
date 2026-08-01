@@ -8,6 +8,8 @@ pub mod frame_queue;
 #[cfg(feature = "network")]
 pub mod storm;
 #[cfg(feature = "network")]
+pub mod tcp;
+#[cfg(feature = "network")]
 pub mod transport;
 #[cfg(feature = "network")]
 pub mod protocol;
