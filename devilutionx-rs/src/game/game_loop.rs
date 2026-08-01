@@ -4469,5 +4469,89 @@ mod tests {
         assert_eq!(gs.current_dungeon_level, 1, "stepping on up-stair on L2 ascends to L1");
     }
 
+    /// End-to-end full dungeon flow regression: town → L1 → L2 → L3 → L4 →
+    /// L3 → L2 → L1 → town, stepping on down/up stairs at every level. Uses
+    /// synthetic art so it runs without MPQ data; this is the "关卡全流程
+    /// L2–L4 楼梯衔接" gate in the alignment matrix.
+    #[test]
+    fn test_full_level_flow_town_l1_l2_l3_l4_and_back() {
+        use crate::engine::dungeon::{DungeonLevelData, DungeonType, MinData, PaletteData, SolData, TilData, TilEntry};
+        use crate::game::game_state::GameState;
+        use crate::game::player_exact::Player;
+        use crate::levels::trigs::{Point as TrigPoint, TriggerManager, TriggerMessage};
+
+        // A synthetic TIL large enough for every level (L4 uses tile ids < 256).
+        let mut til_tiles = Vec::new();
+        for i in 0..300u16 {
+            til_tiles.push(TilEntry { micro1: i, micro2: i + 1, micro3: i + 2, micro4: i + 3 });
+        }
+        let art = DungeonLevelData {
+            dungeon_type: DungeonType::Cathedral,
+            palette: PaletteData::default(),
+            sol: SolData { properties: vec![] },
+            min: MinData { mega_tiles: vec![], blocks_per_tile: 10 },
+            til: TilData { tiles: til_tiles },
+            level_cel: vec![],
+        };
+
+        let mut gs = GameState::new(Player::new(), true, 12345);
+        for lvl in 1..=4u8 {
+            gs.dungeon_art[lvl as usize] = Some(art.clone());
+        }
+
+        // Town down-stair → L1.
+        gs.game_tick = 100;
+        let (sx, sy) = crate::game::game_state::TOWN_DOWN_STAIRS;
+        gs.player.position.x = sx;
+        gs.player.position.y = sy;
+        check_stairs_transition(&mut gs);
+        assert!(gs.in_dungeon, "town down-stair enters the dungeon");
+        assert_eq!(gs.current_dungeon_level, 1, "town down-stair → L1");
+
+        // Descend L1 → L2 → L3 → L4 via planted NextLevel triggers at the
+        // (re-centred) spawn point of each freshly generated level.
+        for expected in [2u8, 3, 4] {
+            gs.game_tick += 100;
+            let mut trigs = TriggerManager::new();
+            trigs.add_trigger(
+                TrigPoint { x: gs.player.position.x, y: gs.player.position.y },
+                TriggerMessage::NextLevel,
+                0,
+            );
+            gs.triggers = trigs;
+            check_stairs_transition(&mut gs);
+            assert_eq!(gs.current_dungeon_level, expected, "down-stair descends to L{}", expected);
+            assert!(gs.in_dungeon);
+        }
+
+        // Ascend L4 → L3 → L2 → L1 via PrevLevel triggers.
+        for expected in [3u8, 2, 1] {
+            gs.game_tick += 100;
+            let mut trigs = TriggerManager::new();
+            trigs.add_trigger(
+                TrigPoint { x: gs.player.position.x, y: gs.player.position.y },
+                TriggerMessage::PrevLevel,
+                0,
+            );
+            gs.triggers = trigs;
+            check_stairs_transition(&mut gs);
+            assert_eq!(gs.current_dungeon_level, expected, "up-stair ascends to L{}", expected);
+            assert!(gs.in_dungeon);
+        }
+
+        // L1 up-stair → back to town.
+        gs.game_tick += 100;
+        let mut trigs = TriggerManager::new();
+        trigs.add_trigger(
+            TrigPoint { x: gs.player.position.x, y: gs.player.position.y },
+            TriggerMessage::PrevLevel,
+            0,
+        );
+        gs.triggers = trigs;
+        check_stairs_transition(&mut gs);
+        assert!(!gs.in_dungeon, "L1 up-stair returns to town");
+        assert!(gs.is_town);
+    }
+
 
 }
