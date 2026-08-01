@@ -34,51 +34,40 @@ pub const TILE_SIZE: usize = 2;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(dead_code)]
 pub enum Tile {
+    /// C++ miniset wildcard / empty cell (0)
+    Invalid = 0,
     /// Vertical wall (left side)
     VWall = 1,
     /// Horizontal wall (top side)
     HWall = 2,
-    /// Diagonal-corner wall written by MakeDmt (C++ `VCorner = 16`).
-    NWCorner = 16,
-    /// Top-right corner wall (minisets only; no C++ L1 equivalent)
-    NECorner = 41,
-    /// Bottom-left corner wall (minisets only; no C++ L1 equivalent)
-    SWCorner = 42,
-    /// Wall written by MakeDmt for the diagonal branch (C++ `DWall = 4`).
-    SECorner = 4,
-    /// Vertical wall with door (C++ `VDoor = 25`)
-    VWallDoor = 25,
-    /// Horizontal wall with door (C++ `HDoor = 26`)
-    HWallDoor = 26,
-    /// Archway horizontal (C++ `HArch = 12`)
-    ArchH1 = 12,
-    /// Archway horizontal bottom (unused in generation)
-    ArchH2 = 43,
-    /// Archway vertical (C++ `VArch = 11`)
-    ArchV1 = 11,
-    /// Archway vertical right (unused in generation)
-    ArchV2 = 44,
-    /// Floor tile
-    Floor = 13,
-
     /// C++ `Corner = 3` (wall corner; used by AddWall/FixTilesPatterns)
     Corner = 3,
+    /// C++ `DWall = 4` (diagonal wall written by MakeDmt)
+    SECorner = 4,
     /// C++ `DArch = 5` (door arch)
     DArch = 5,
+    /// C++ `VWallEnd = 6` (vertical wall end)
+    VWallEnd = 6,
+    /// C++ `HWallEnd = 7` (horizontal wall end)
+    HWallEnd = 7,
     /// C++ `HArchEnd = 8` (horizontal arch end)
     HArchEnd = 8,
     /// C++ `VArchEnd = 9` (vertical arch end)
     VArchEnd = 9,
     /// C++ `HArchVWall = 10` (horizontal arch + vertical wall)
     HArchVWall = 10,
+    /// C++ `VArch = 11` (vertical arch)
+    ArchV1 = 11,
+    /// C++ `HArch = 12` (horizontal arch)
+    ArchH1 = 12,
+    /// Floor tile
+    Floor = 13,
     /// C++ `HWallVArch = 14` (horizontal wall + vertical arch)
     HWallVArch = 14,
     /// C++ `Pillar = 15` (room pillar)
     Pillar = 15,
-    /// C++ `VWallEnd = 6` (vertical wall end)
-    VWallEnd = 6,
-    /// C++ `HWallEnd = 7` (horizontal wall end)
-    HWallEnd = 7,
+    /// C++ `VCorner = 16` (corner written by MakeDmt)
+    NWCorner = 16,
     /// C++ `HCorner = 17` (horizontal corner)
     HCorner = 17,
     /// C++ `DirtHwall = 18` (dirt horizontal wall)
@@ -89,75 +78,181 @@ pub enum Tile {
     VDirtCorner = 20,
     /// C++ `HDirtCorner = 21` (horizontal dirt corner)
     HDirtCorner = 21,
+    /// C++ `Dirt = 22` (the Cathedral background tile)
+    Dirt = 22,
     /// C++ `DirtHwallEnd = 23` (dirt horizontal wall end)
     DirtHwallEnd = 23,
     /// C++ `DirtVwallEnd = 24` (dirt vertical wall end)
     DirtVwallEnd = 24,
-
-    /// T-junction to south (self-invented; unused in generation)
-    DirtVWallToSouth = 45,
-    /// T-junction to north (self-invented; unused in generation)
-    DirtVWallToNorth = 46,
-    /// T-junction to east (self-invented; unused in generation)
-    DirtHWallToEast = 47,
-    /// T-junction to west (self-invented; unused in generation)
-    DirtHWallToWest = 48,
-    /// Dirt top-left corner (self-invented; unused in generation)
-    DirtNWCorner = 49,
-    /// Dirt top-right corner (self-invented; unused in generation)
-    DirtNECorner = 50,
-    /// Dirt bottom-left corner (self-invented; unused in generation)
-    DirtSWCorner = 51,
-    /// Dirt bottom-right corner (self-invented; unused in generation)
-    DirtSECorner = 52,
-    /// Cross junction (self-invented; unused in generation)
-    DirtCross = 53,
-    /// Horizontal wall dirt variant (self-invented; unused in generation)
-    DirtHWall = 54,
-    /// Vertical wall dirt variant (self-invented; unused in generation)
-    DirtVWall = 55,
-
+    /// C++ `VDoor = 25` (vertical wall with door)
+    VWallDoor = 25,
+    /// C++ `HDoor = 26` (horizontal wall with door)
+    HWallDoor = 26,
+    /// C++ `HFenceVWall = 27` (horizontal fence + vertical wall)
+    HFenceVWall = 27,
+    /// C++ `HDoorVDoor = 28` (horizontal door + vertical door)
+    HDoorVDoor = 28,
+    /// C++ `DFence = 29` (diagonal fence)
+    DFence = 29,
+    /// C++ `VDoorEnd = 30` (vertical door end)
+    VDoorEnd = 30,
+    /// C++ `HDoorEnd = 31` (horizontal door end)
+    HDoorEnd = 31,
+    /// C++ `VFenceEnd = 32` (vertical fence end)
+    VFenceEnd = 32,
+    /// C++ `VArchEnd2 = 33`
+    VArchEnd2 = 33,
+    /// C++ `HArchVWall2 = 34`
+    HArchVWall2 = 34,
+    /// C++ `VFence = 35` (vertical fence)
+    VFence = 35,
+    /// C++ `HFence = 36` (horizontal fence)
+    HFence = 36,
+    /// C++ `HWallVFence = 37` (horizontal wall + vertical fence)
+    HWallVFence = 37,
+    /// C++ `HArchVFence = 38` (horizontal arch + vertical fence)
+    HArchVFence = 38,
+    /// C++ `HArchVDoor = 39` (horizontal arch + vertical door)
+    HArchVDoor = 39,
+    /// C++ `HArchVWall3 = 40`
+    HArchVWall3 = 40,
+    /// C++ `DWall2 = 41`
+    DWall2 = 41,
+    /// C++ `HWallVArch2 = 42`
+    HWallVArch2 = 42,
+    /// C++ `DWall3 = 43`
+    DWall3 = 43,
     /// Lava pool (crypt only)
     Lava = 56,
-    /// Entrance stairs (C++ `EntranceStairs = 64`)
+    /// Raw l1.til mega-tiles used by the stairs minisets (C++ STAIRSUP/STAIRSDOWN)
+    StairTile57 = 57,
+    StairTile58 = 58,
+    StairTile59 = 59,
+    StairTile60 = 60,
+    StairTile61 = 61,
+    StairTile62 = 62,
+    StairTile63 = 63,
+    /// C++ `EntranceStairs = 64`
     EntranceStairs = 64,
-    /// Dirt floor (C++ `Dirt = 22` — the Cathedral background tile)
-    Dirt = 22,
-    /// C++ `Floor22 = 162` (floor variation from FillFloor)
+    StairTile65 = 65,
+    StairTile66 = 66,
+    StairTile67 = 67,
+    StairTile68 = 68,
+    /// C++ `VWall2 = 79`
+    VWall2 = 79,
+    /// C++ `HWall2 = 80`
+    HWall2 = 80,
+    /// C++ `DWall4 = 82`
+    DWall4 = 82,
+    /// C++ `VWallEnd2 = 84`
+    VWallEnd2 = 84,
+    /// C++ `VWall4 = 89`
+    VWall4 = 89,
+    /// C++ `VWall5 = 90`
+    VWall5 = 90,
+    /// C++ `HWall4 = 91`
+    HWall4 = 91,
+    /// C++ `HWall5 = 92`
+    HWall5 = 92,
+    /// C++ `VWall8 = 100`
+    VWall8 = 100,
+    /// Raw l1.til mega-tiles that Substitution can write (TileDecorations non-zero)
+    Mega94 = 94,
+    Mega95 = 95,
+    Mega97 = 97,
+    Mega98 = 98,
+    Mega99 = 99,
+    Mega101 = 101,
+    Mega102 = 102,
+    Mega103 = 103,
+    Mega104 = 104,
+    Mega105 = 105,
+    Mega106 = 106,
+    Mega107 = 107,
+    Mega108 = 108,
+    Mega109 = 109,
+    Mega110 = 110,
+    Mega111 = 111,
+    Mega112 = 112,
+    Mega113 = 113,
+    Mega114 = 114,
+    Mega115 = 115,
+    Mega116 = 116,
+    Mega117 = 117,
+    Mega118 = 118,
+    Mega121 = 121,
+    Mega122 = 122,
+    Mega123 = 123,
+    Mega124 = 124,
+    Mega125 = 125,
+    Mega133 = 133,
+    Mega136 = 136,
+    Mega137 = 137,
+    Mega138 = 138,
+    /// Raw l1.til mega-tiles used by LAMPS/PWATERIN minisets
+    Mega81 = 81,
+    Mega83 = 83,
+    Mega85 = 85,
+    Mega128 = 128,
+    Mega129 = 129,
+    Mega130 = 130,
+    Mega134 = 134,
+    Mega135 = 135,
+    Mega203 = 203,
+    Mega206 = 206,
+    /// C++ `Floor12 = 139` .. `Floor23 = 163` (floor/shadow variations)
+    Floor12 = 139,
+    Floor13 = 140,
+    Floor14 = 141,
+    Floor15 = 142,
+    Floor16 = 143,
+    Floor17 = 144,
+    Floor18 = 145,
+    VWall17 = 146,
+    VArch5 = 147,
+    HWallShadow = 148,
+    HArchShadow = 149,
+    Floor19 = 150,
+    Floor20 = 151,
+    Floor21 = 152,
+    HArchShadow2 = 153,
+    HWallShadow2 = 154,
     Floor22 = 162,
-    /// C++ `Floor23 = 163` (floor variation from FillFloor)
     Floor23 = 163,
-    /// Invalid/empty tile
-    Invalid = 57,
-
-    // Crypt-specific tiles (not used in Cathedral)
-    /// Crypt archway horizontal top
-    CryptArchH1 = 29,
-    /// Crypt archway horizontal bottom
-    CryptArchH2 = 30,
-    /// Crypt archway vertical left
-    CryptArchV1 = 31,
-    /// Crypt archway vertical right
-    CryptArchV2 = 32,
-
-    /// Crypt horizontal wall with door
-    CryptHWallDoor = 33,
-    /// Crypt vertical wall with door
-    CryptVWallDoor = 34,
-
-    /// Crypt top-left corner
-    CryptNWCorner = 35,
-    /// Crypt top-right corner
-    CryptNECorner = 36,
-    /// Crypt bottom-left corner
-    CryptSWCorner = 37,
-    /// Crypt bottom-right corner
-    CryptSECorner = 38,
-
-    /// Crypt horizontal wall
-    CryptHWall = 39,
-    /// Crypt vertical wall
-    CryptVWall = 40,
+    /// C++ `DirtHWall2 = 199` .. `DirtVWallEnd2 = 205`
+    DirtHWall2 = 199,
+    DirtVWall2 = 200,
+    DirtCorner2 = 202,
+    DirtHWallEnd2 = 204,
+    DirtVWallEnd2 = 205,
+    // --- revalued self-invented / crypt-only variants (not used by L1) ---
+    NECorner = 210,
+    SWCorner = 211,
+    ArchH2 = 212,
+    ArchV2 = 213,
+    DirtVWallToSouth = 214,
+    DirtVWallToNorth = 215,
+    DirtHWallToEast = 216,
+    DirtHWallToWest = 217,
+    DirtNWCorner = 218,
+    DirtNECorner = 219,
+    DirtSWCorner = 220,
+    DirtSECorner = 221,
+    DirtCross = 222,
+    DirtHWall = 223,
+    DirtVWall = 224,
+    CryptArchH1 = 225,
+    CryptArchH2 = 226,
+    CryptArchV1 = 227,
+    CryptArchV2 = 228,
+    CryptHWallDoor = 229,
+    CryptVWallDoor = 230,
+    CryptNWCorner = 231,
+    CryptNECorner = 232,
+    CryptSWCorner = 233,
+    CryptSECorner = 234,
+    CryptHWall = 235,
+    CryptVWall = 236,
 }
 
 impl Default for Tile {
@@ -177,65 +272,139 @@ impl TryFrom<u8> for Tile {
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
+            0 => Ok(Tile::Invalid),
             1 => Ok(Tile::VWall),
             2 => Ok(Tile::HWall),
             3 => Ok(Tile::Corner),
             4 => Ok(Tile::SECorner),
             5 => Ok(Tile::DArch),
             6 => Ok(Tile::VWallEnd),
+            7 => Ok(Tile::HWallEnd),
             8 => Ok(Tile::HArchEnd),
             9 => Ok(Tile::VArchEnd),
             10 => Ok(Tile::HArchVWall),
+            11 => Ok(Tile::ArchV1),
+            12 => Ok(Tile::ArchH1),
+            13 => Ok(Tile::Floor),
             14 => Ok(Tile::HWallVArch),
             15 => Ok(Tile::Pillar),
-            7 => Ok(Tile::HWallEnd),
+            16 => Ok(Tile::NWCorner),
             17 => Ok(Tile::HCorner),
             18 => Ok(Tile::DirtHwall),
             19 => Ok(Tile::DirtVwall),
             20 => Ok(Tile::VDirtCorner),
             21 => Ok(Tile::HDirtCorner),
+            22 => Ok(Tile::Dirt),
             23 => Ok(Tile::DirtHwallEnd),
             24 => Ok(Tile::DirtVwallEnd),
-            11 => Ok(Tile::ArchV1),
-            12 => Ok(Tile::ArchH1),
-            13 => Ok(Tile::Floor),
-            16 => Ok(Tile::NWCorner),
-            22 => Ok(Tile::Dirt),
             25 => Ok(Tile::VWallDoor),
             26 => Ok(Tile::HWallDoor),
-            41 => Ok(Tile::NECorner),
-            42 => Ok(Tile::SWCorner),
-            43 => Ok(Tile::ArchH2),
-            44 => Ok(Tile::ArchV2),
-            45 => Ok(Tile::DirtVWallToSouth),
-            46 => Ok(Tile::DirtVWallToNorth),
-            47 => Ok(Tile::DirtHWallToEast),
-            48 => Ok(Tile::DirtHWallToWest),
-            49 => Ok(Tile::DirtNWCorner),
-            50 => Ok(Tile::DirtNECorner),
-            51 => Ok(Tile::DirtSWCorner),
-            52 => Ok(Tile::DirtSECorner),
-            53 => Ok(Tile::DirtCross),
-            54 => Ok(Tile::DirtHWall),
-            55 => Ok(Tile::DirtVWall),
+            27 => Ok(Tile::HFenceVWall),
+            28 => Ok(Tile::HDoorVDoor),
+            29 => Ok(Tile::DFence),
+            30 => Ok(Tile::VDoorEnd),
+            31 => Ok(Tile::HDoorEnd),
+            32 => Ok(Tile::VFenceEnd),
+            33 => Ok(Tile::VArchEnd2),
+            34 => Ok(Tile::HArchVWall2),
+            35 => Ok(Tile::VFence),
+            36 => Ok(Tile::HFence),
+            37 => Ok(Tile::HWallVFence),
+            38 => Ok(Tile::HArchVFence),
+            39 => Ok(Tile::HArchVDoor),
+            40 => Ok(Tile::HArchVWall3),
+            41 => Ok(Tile::DWall2),
+            42 => Ok(Tile::HWallVArch2),
+            43 => Ok(Tile::DWall3),
             56 => Ok(Tile::Lava),
-            57 => Ok(Tile::Invalid),
+            57 => Ok(Tile::StairTile57),
+            58 => Ok(Tile::StairTile58),
+            59 => Ok(Tile::StairTile59),
+            60 => Ok(Tile::StairTile60),
+            61 => Ok(Tile::StairTile61),
+            62 => Ok(Tile::StairTile62),
+            63 => Ok(Tile::StairTile63),
             64 => Ok(Tile::EntranceStairs),
+            65 => Ok(Tile::StairTile65),
+            66 => Ok(Tile::StairTile66),
+            67 => Ok(Tile::StairTile67),
+            68 => Ok(Tile::StairTile68),
+            79 => Ok(Tile::VWall2),
+            80 => Ok(Tile::HWall2),
+            81 => Ok(Tile::Mega81),
+            82 => Ok(Tile::DWall4),
+            83 => Ok(Tile::Mega83),
+            84 => Ok(Tile::VWallEnd2),
+            85 => Ok(Tile::Mega85),
+            89 => Ok(Tile::VWall4),
+            90 => Ok(Tile::VWall5),
+            91 => Ok(Tile::HWall4),
+            92 => Ok(Tile::HWall5),
+            100 => Ok(Tile::VWall8),
+            128 => Ok(Tile::Mega128),
+            129 => Ok(Tile::Mega129),
+            130 => Ok(Tile::Mega130),
+            134 => Ok(Tile::Mega134),
+            135 => Ok(Tile::Mega135),
+            94 => Ok(Tile::Mega94),
+            95 => Ok(Tile::Mega95),
+            97 => Ok(Tile::Mega97),
+            98 => Ok(Tile::Mega98),
+            99 => Ok(Tile::Mega99),
+            101 => Ok(Tile::Mega101),
+            102 => Ok(Tile::Mega102),
+            103 => Ok(Tile::Mega103),
+            104 => Ok(Tile::Mega104),
+            105 => Ok(Tile::Mega105),
+            106 => Ok(Tile::Mega106),
+            107 => Ok(Tile::Mega107),
+            108 => Ok(Tile::Mega108),
+            109 => Ok(Tile::Mega109),
+            110 => Ok(Tile::Mega110),
+            111 => Ok(Tile::Mega111),
+            112 => Ok(Tile::Mega112),
+            113 => Ok(Tile::Mega113),
+            114 => Ok(Tile::Mega114),
+            115 => Ok(Tile::Mega115),
+            116 => Ok(Tile::Mega116),
+            117 => Ok(Tile::Mega117),
+            118 => Ok(Tile::Mega118),
+            121 => Ok(Tile::Mega121),
+            122 => Ok(Tile::Mega122),
+            123 => Ok(Tile::Mega123),
+            124 => Ok(Tile::Mega124),
+            125 => Ok(Tile::Mega125),
+            133 => Ok(Tile::Mega133),
+            136 => Ok(Tile::Mega136),
+            137 => Ok(Tile::Mega137),
+            138 => Ok(Tile::Mega138),
+            139 => Ok(Tile::Floor12),
+            140 => Ok(Tile::Floor13),
+            141 => Ok(Tile::Floor14),
+            142 => Ok(Tile::Floor15),
+            143 => Ok(Tile::Floor16),
+            144 => Ok(Tile::Floor17),
+            145 => Ok(Tile::Floor18),
+            146 => Ok(Tile::VWall17),
+            147 => Ok(Tile::VArch5),
+            148 => Ok(Tile::HWallShadow),
+            149 => Ok(Tile::HArchShadow),
+            150 => Ok(Tile::Floor19),
+            151 => Ok(Tile::Floor20),
+            152 => Ok(Tile::Floor21),
+            153 => Ok(Tile::HArchShadow2),
+            154 => Ok(Tile::HWallShadow2),
             162 => Ok(Tile::Floor22),
             163 => Ok(Tile::Floor23),
-            58 => Ok(Tile::CryptArchH1),
-            59 => Ok(Tile::CryptArchH2),
-            60 => Ok(Tile::CryptArchV1),
-            61 => Ok(Tile::CryptArchV2),
-            62 => Ok(Tile::CryptHWallDoor),
-            63 => Ok(Tile::CryptVWallDoor),
-            65 => Ok(Tile::CryptNWCorner),
-            66 => Ok(Tile::CryptNECorner),
-            67 => Ok(Tile::CryptSWCorner),
-            68 => Ok(Tile::CryptSECorner),
-            69 => Ok(Tile::CryptHWall),
-            70 => Ok(Tile::CryptVWall),
-            _ => Err(()),}
+            199 => Ok(Tile::DirtHWall2),
+            200 => Ok(Tile::DirtVWall2),
+            203 => Ok(Tile::Mega203),
+            202 => Ok(Tile::DirtCorner2),
+            204 => Ok(Tile::DirtHWallEnd2),
+            205 => Ok(Tile::DirtVWallEnd2),
+            206 => Ok(Tile::Mega206),
+            _ => Err(()),
+        }
     }
 }
 
@@ -262,7 +431,17 @@ pub struct Miniset {
 
 impl Miniset {
     /// Check if miniset matches at position (x, y) in dungeon
-    pub fn matches(&self, dungeon: &[[Tile; DUNGEON_SIZE]; DUNGEON_SIZE], x: usize, y: usize) -> bool {
+    /// Check if miniset matches at position (x, y) in dungeon
+    ///
+    /// Mirrors C++ `Miniset::matches()`: every cell must match `search`
+    /// (0/Invalid = wildcard) and none may be `protected`.
+    pub fn matches(
+        &self,
+        dungeon: &[[Tile; DUNGEON_SIZE]; DUNGEON_SIZE],
+        protected: &[[bool; DUNGEON_SIZE]; DUNGEON_SIZE],
+        x: usize,
+        y: usize,
+    ) -> bool {
         if x + self.width > DUNGEON_SIZE || y + self.height > DUNGEON_SIZE {
             return false;
         }
@@ -271,6 +450,9 @@ impl Miniset {
             for dx in 0..self.width {
                 let search_tile = self.search[dy][dx];
                 if search_tile != Tile::Invalid && dungeon[y + dy][x + dx] != search_tile {
+                    return false;
+                }
+                if protected[y + dy][x + dx] {
                     return false;
                 }
             }
@@ -305,15 +487,39 @@ pub fn stairs_up_miniset() -> Miniset {
         height: 4,
         search: vec![
             vec![Floor, Floor, Floor, Floor],
-            vec![Floor, Floor, Floor, Floor],
+            vec![HWall, HWall, HWall, HWall],
             vec![Floor, Floor, Floor, Floor],
             vec![Floor, Floor, Floor, Floor],
         ],
         replace: vec![
-            vec![Invalid, NWCorner, HWall, NECorner],
-            vec![Invalid, VWall, EntranceStairs, VWall],
-            vec![Invalid, VWall, EntranceStairs, VWall],
-            vec![Invalid, SWCorner, HWall, SECorner],
+            vec![Invalid, StairTile66, VWallEnd, Invalid],
+            vec![StairTile63, EntranceStairs, StairTile65, Invalid],
+            vec![Invalid, StairTile67, StairTile68, Invalid],
+            vec![Invalid, Invalid, Invalid, Invalid],
+        ],
+    }
+}
+
+/// Original-cathedral upward stairs miniset (4x4).
+///
+/// C++ source: L5STAIRSUP in crypt.cpp:19-33 — used when the legacy
+/// `pOriginalCathedral` option is on (matches the C++ test fixtures).
+pub fn l5_stairs_up_miniset() -> Miniset {
+    use Tile::*;
+    Miniset {
+        width: 4,
+        height: 4,
+        search: vec![
+            vec![Dirt, Dirt, Dirt, Dirt],
+            vec![HWall, HWall, HWall, HWall],
+            vec![Floor, Floor, Floor, Floor],
+            vec![Floor, Floor, Floor, Floor],
+        ],
+        replace: vec![
+            vec![Invalid, StairTile66, DirtHwallEnd, Invalid],
+            vec![StairTile63, EntranceStairs, StairTile65, Invalid],
+            vec![Invalid, StairTile67, StairTile68, Invalid],
+            vec![Invalid, Invalid, Invalid, Invalid],
         ],
     }
 }
@@ -332,9 +538,9 @@ pub fn stairs_down_miniset() -> Miniset {
             vec![Floor, Floor, Floor, Floor],
         ],
         replace: vec![
-            vec![NWCorner, HWall, HWall, NECorner],
-            vec![VWall, Floor, Floor, VWall],
-            vec![SWCorner, HWall, HWall, SECorner],
+            vec![StairTile62, StairTile57, StairTile58, Invalid],
+            vec![StairTile61, StairTile59, StairTile60, Invalid],
+            vec![Invalid, Invalid, Invalid, Invalid],
         ],
     }
 }
@@ -348,12 +554,12 @@ pub fn lamps_miniset() -> Miniset {
         width: 2,
         height: 2,
         search: vec![
-            vec![Floor, Floor],
+            vec![Floor, Invalid],
             vec![Floor, Floor],
         ],
         replace: vec![
-            vec![NWCorner, NECorner],
-            vec![SWCorner, SECorner],
+            vec![Mega129, Invalid],
+            vec![Mega130, Mega128],
         ],
     }
 }
@@ -375,12 +581,12 @@ pub fn water_in_miniset() -> Miniset {
             vec![Floor, Floor, Floor, Floor, Floor, Floor],
         ],
         replace: vec![
-            vec![NWCorner, HWall, HWall, HWall, HWall, NECorner],
-            vec![VWall, Floor, Floor, Floor, Floor, VWall],
-            vec![VWall, Floor, Floor, Floor, Floor, VWall],
-            vec![VWall, Floor, Floor, Floor, Floor, VWall],
-            vec![VWall, Floor, Floor, Floor, Floor, VWall],
-            vec![SWCorner, HWall, HWall, HWall, HWall, SECorner],
+            vec![Invalid, Invalid, Invalid, Invalid, Invalid, Invalid],
+            vec![Invalid, DirtCorner2, DirtVWall2, DirtVWall2, VWallEnd2, Invalid],
+            vec![Invalid, DirtHWall2, Mega203, Mega203, Mega83, Invalid],
+            vec![Invalid, Mega85, Mega206, HWall2, Mega81, Invalid],
+            vec![Invalid, Invalid, Mega134, Mega135, Invalid, Invalid],
+            vec![Invalid, Invalid, Invalid, Invalid, Invalid, Invalid],
         ],
     }
 }
@@ -500,6 +706,11 @@ pub struct CathedralGenerator {
     /// Theme locations (for special rooms)
     pub themes: Vec<ThemeLocation>,
 
+    /// Legacy original-cathedral stairs (`pOriginalCathedral`): when true the
+    /// C++ engine places L5STAIRSUP instead of STAIRSUP. Defaults to true to
+    /// match the C++ test fixtures (TestInitGame sets it true).
+    pub original_cathedral: bool,
+
     /// Seeded RNG (matches Diablo's `SetRndSeed`/`GenerateRnd`/`FlipCoin`).
     ///
     /// All randomness in Cathedral generation flows through this `Rng`, seeded
@@ -519,6 +730,7 @@ pub struct CathedralGenerator {
             vertical_layout: false,
             themes: Vec::new(),
             rng: Rng::with_default_seed(),
+            original_cathedral: true,
         }
     }
 }
@@ -538,8 +750,8 @@ impl CathedralGenerator {
                 self.dungeon[y][x] = Tile::Dirt;
             }
         }
-        // Reset masks
-        self.dungeon_mask = [[false; DUNGEON_SIZE]; DUNGEON_SIZE];
+        // C++ InitDungeonFlags() only clears dungeon + Protected/Chamber;
+        // DungeonMask is reset by FirstRoom() and must survive into MakeDmt().
         self.protected = [[false; DUNGEON_SIZE]; DUNGEON_SIZE];
         self.chamber = [[false; DUNGEON_SIZE]; DUNGEON_SIZE];
     }
@@ -1077,7 +1289,8 @@ impl CathedralGenerator {
     fn horizontal_wall_ok(&self, x: usize, y: usize) -> i32 {
         let mut length = 1;
         while x + length < DUNGEON_SIZE && self.dungeon[y][x + length] == Tile::Floor {
-            // Check if adjacent tiles are Floor and not protected/chamber
+            // C++ has no bounds checks here; the dungeon border is Dirt so the
+            // walk always stops before the edge in practice. Guard anyway.
             if y == 0 || y >= DUNGEON_SIZE - 1 {
                 break;
             }
@@ -1094,16 +1307,29 @@ impl CathedralGenerator {
         if length == 1 {
             return -1;
         }
+        if x + length >= DUNGEON_SIZE {
+            return -1;
+        }
 
-        // Check end tile validity
-        if x + length < DUNGEON_SIZE {
-            let end_tile = self.dungeon[y][x + length];
-            if matches!(
-                end_tile,
-                Tile::NWCorner | Tile::SECorner | Tile::VWall | Tile::HWall
-            ) {
-                return length as i32;
-            }
+        // C++: the terminating tile must be one of the wall/corner variants.
+        let end_tile = self.dungeon[y][x + length];
+        if matches!(
+            end_tile,
+            Tile::Corner
+                | Tile::SECorner
+                | Tile::DArch
+                | Tile::VWallEnd
+                | Tile::HWallEnd
+                | Tile::NWCorner
+                | Tile::HCorner
+                | Tile::DirtHwall
+                | Tile::DirtVwall
+                | Tile::VDirtCorner
+                | Tile::HDirtCorner
+                | Tile::DirtHwallEnd
+                | Tile::DirtVwallEnd
+        ) {
+            return length as i32;
         }
 
         -1
@@ -1115,7 +1341,6 @@ impl CathedralGenerator {
     fn vertical_wall_ok(&self, x: usize, y: usize) -> i32 {
         let mut length = 1;
         while y + length < DUNGEON_SIZE && self.dungeon[y + length][x] == Tile::Floor {
-            // Check if adjacent tiles are Floor and not protected/chamber
             if x == 0 || x >= DUNGEON_SIZE - 1 {
                 break;
             }
@@ -1132,16 +1357,28 @@ impl CathedralGenerator {
         if length == 1 {
             return -1;
         }
+        if y + length >= DUNGEON_SIZE {
+            return -1;
+        }
 
-        // Check end tile validity
-        if y + length < DUNGEON_SIZE {
-            let end_tile = self.dungeon[y + length][x];
-            if matches!(
-                end_tile,
-                Tile::NWCorner | Tile::SECorner | Tile::VWall | Tile::HWall
-            ) {
-                return length as i32;
-            }
+        let end_tile = self.dungeon[y + length][x];
+        if matches!(
+            end_tile,
+            Tile::Corner
+                | Tile::SECorner
+                | Tile::DArch
+                | Tile::VWallEnd
+                | Tile::HWallEnd
+                | Tile::NWCorner
+                | Tile::HCorner
+                | Tile::DirtHwall
+                | Tile::DirtVwall
+                | Tile::VDirtCorner
+                | Tile::HDirtCorner
+                | Tile::DirtHwallEnd
+                | Tile::DirtVwallEnd
+        ) {
+            return length as i32;
         }
 
         -1
@@ -1155,40 +1392,44 @@ impl CathedralGenerator {
         let mut door_tile = Tile::HWallDoor;
         let mut start = start;
 
-        // Randomly choose wall style — C++ GenerateRnd(4)
+        // C++ GenerateRnd(4): 2 = arch, 3 = fence
         match self.rng.generate(4) {
             2 => {
-                // Add arch
                 wall_tile = Tile::ArchH1;
                 door_tile = Tile::ArchH1;
                 if start == Tile::HWall {
                     start = Tile::ArchH1;
+                } else if start == Tile::SECorner {
+                    start = Tile::HArchVWall;
                 }
             }
             3 => {
-                // Add fence (not implemented for Cathedral, treat as normal wall)
-                wall_tile = Tile::HWall;
+                wall_tile = Tile::HFence;
+                if start == Tile::HWall {
+                    start = Tile::HFence;
+                } else if start == Tile::SECorner {
+                    start = Tile::HFenceVWall;
+                }
             }
             _ => {}
         }
 
-        // Randomly choose arch for door — C++ GenerateRnd(6) == 5
+        // C++ GenerateRnd(6) == 5 -> arch door
         if self.rng.generate(6) == 5 {
             door_tile = Tile::ArchH1;
         }
 
         self.dungeon[y][x] = start;
 
-        // Place wall tiles
         for i in 1..max_x {
             self.dungeon[y][x + i as usize] = wall_tile;
         }
 
-        // Place door at random position — C++ GenerateRnd(maxX - 1) + 1
-        let door_pos = self.rng.random_less_than(max_x - 1) as usize + 1;
-        self.dungeon[y][x + door_pos] = door_tile;
+        // C++ GenerateRnd(maxX - 1) + 1
+        let door_pos = self.rng.generate(max_x - 1) + 1;
+        self.dungeon[y][x + door_pos as usize] = door_tile;
         if door_tile == Tile::HWallDoor {
-            self.protected[y][x + door_pos] = true;
+            self.protected[y][x + door_pos as usize] = true;
         }
     }
 
@@ -1200,40 +1441,41 @@ impl CathedralGenerator {
         let mut door_tile = Tile::VWallDoor;
         let mut start = start;
 
-        // Randomly choose wall style — C++ GenerateRnd(4)
         match self.rng.generate(4) {
             2 => {
-                // Add arch
                 wall_tile = Tile::ArchV1;
                 door_tile = Tile::ArchV1;
                 if start == Tile::VWall {
                     start = Tile::ArchV1;
+                } else if start == Tile::SECorner {
+                    start = Tile::HWallVArch;
                 }
             }
             3 => {
-                // Add fence (not implemented for Cathedral, treat as normal wall)
-                wall_tile = Tile::VWall;
+                wall_tile = Tile::VFence;
+                if start == Tile::VWall {
+                    start = Tile::VFence;
+                } else if start == Tile::SECorner {
+                    start = Tile::HWallVFence;
+                }
             }
             _ => {}
         }
 
-        // Randomly choose arch for door — C++ GenerateRnd(6) == 5
         if self.rng.generate(6) == 5 {
             door_tile = Tile::ArchV1;
         }
 
         self.dungeon[y][x] = start;
 
-        // Place wall tiles
         for i in 1..max_y {
             self.dungeon[y + i as usize][x] = wall_tile;
         }
 
-        // Place door at random position — C++ GenerateRnd(maxY - 1) + 1
-        let door_pos = self.rng.random_less_than(max_y - 1) as usize + 1;
-        self.dungeon[y + door_pos][x] = door_tile;
+        let door_pos = self.rng.generate(max_y - 1) + 1;
+        self.dungeon[y + door_pos as usize][x] = door_tile;
         if door_tile == Tile::VWallDoor {
-            self.protected[y + door_pos][x] = true;
+            self.protected[y + door_pos as usize][x] = true;
         }
     }
 
@@ -1247,32 +1489,300 @@ impl CathedralGenerator {
                     continue;
                 }
 
-                let tile = self.dungeon[y][x];
-
-                // Try horizontal wall from corner
-                if tile == Tile::NWCorner {
-                    let _ = self.rng.generate(1); // Discard random value (C++ compatibility)
+                if self.dungeon[y][x] == Tile::Corner {
+                    let _ = self.rng.generate(1); // C++ DiscardRandomValues(1)
                     let max_x = self.horizontal_wall_ok(x, y);
-                    if max_x > 0 {
+                    if max_x != -1 {
                         self.horizontal_wall(x, y, Tile::HWall, max_x);
                     }
                 }
-
-                // Try vertical wall from corner
-                if self.dungeon[y][x] == Tile::NWCorner {
-                    let _ = self.rng.generate(1); // discard random value
+                if self.dungeon[y][x] == Tile::Corner {
+                    let _ = self.rng.generate(1);
                     let max_y = self.vertical_wall_ok(x, y);
-                    if max_y > 0 {
+                    if max_y != -1 {
                         self.vertical_wall(x, y, Tile::VWall, max_y);
                     }
                 }
-
-                // Handle other wall types (VWallEnd, HWallEnd, etc.)
-                // Simplified implementation for now
+                if self.dungeon[y][x] == Tile::VWallEnd {
+                    let _ = self.rng.generate(1);
+                    let max_x = self.horizontal_wall_ok(x, y);
+                    if max_x != -1 {
+                        self.horizontal_wall(x, y, Tile::SECorner, max_x);
+                    }
+                }
+                if self.dungeon[y][x] == Tile::HWallEnd {
+                    let _ = self.rng.generate(1);
+                    let max_y = self.vertical_wall_ok(x, y);
+                    if max_y != -1 {
+                        self.vertical_wall(x, y, Tile::SECorner, max_y);
+                    }
+                }
+                if self.dungeon[y][x] == Tile::HWall {
+                    let _ = self.rng.generate(1);
+                    let max_x = self.horizontal_wall_ok(x, y);
+                    if max_x != -1 {
+                        self.horizontal_wall(x, y, Tile::HWall, max_x);
+                    }
+                }
+                if self.dungeon[y][x] == Tile::VWall {
+                    let _ = self.rng.generate(1);
+                    let max_y = self.vertical_wall_ok(x, y);
+                    if max_y != -1 {
+                        self.vertical_wall(x, y, Tile::VWall, max_y);
+                    }
+                }
             }
         }
     }
 
+    /// C++ `BASE_TYPES` (drlg_l1.cpp) - 207 entries, indexed by tile value.
+    const BASE_TYPES: [u8; 207] = [
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+        16, 17, 0, 0, 0, 0, 0, 0, 0, 1, 2, 10, 4, 5, 6, 7,
+        8, 9, 10, 11, 12, 14, 5, 14, 10, 4, 14, 4, 5, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        2, 3, 4, 1, 6, 7, 16, 17, 2, 1, 1, 2, 2, 1, 1, 2,
+        2, 2, 2, 2, 1, 1, 11, 1, 13, 13, 13, 1, 2, 1, 2, 1,
+        2, 1, 2, 2, 2, 2, 12, 0, 0, 11, 1, 11, 1, 13, 0, 0,
+        0, 0, 0, 0, 0, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13,
+        13, 13, 1, 11, 2, 12, 13, 13, 13, 12, 2, 1, 2, 2, 4, 14,
+        4, 10, 13, 13, 4, 4, 1, 1, 4, 2, 2, 13, 13, 13, 13, 25,
+        26, 28, 30, 31, 41, 43, 40, 41, 42, 43, 25, 41, 43, 28, 28, 1,
+        2, 25, 26, 22, 22, 25, 26, 0, 0, 0, 0, 0, 0, 0, 0,
+    ];
+
+    /// C++ `TILE_DECORATIONS` (drlg_l1.cpp) - 207 entries, indexed by tile value.
+    const TILE_DECORATIONS: [u8; 207] = [
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+        16, 17, 0, 0, 0, 0, 0, 0, 0, 25, 26, 0, 28, 0, 30, 31,
+        0, 0, 0, 0, 0, 0, 0, 0, 40, 41, 42, 43, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 79,
+        80, 0, 82, 0, 0, 0, 0, 0, 0, 79, 0, 80, 0, 0, 79, 80,
+        0, 2, 2, 2, 1, 1, 11, 25, 13, 13, 13, 1, 2, 1, 2, 1,
+        2, 1, 2, 2, 2, 2, 12, 0, 0, 11, 1, 11, 1, 13, 0, 0,
+        0, 0, 0, 0, 0, 13, 13, 13, 13, 13, 13, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    ];
+
+    /// C++ `ShadowPatterns[37]` (drlg_l1.cpp) - (strig, s1, s2, s3, nv1, nv2, nv3).
+    const SHADOW_PATTERNS: [(u8, u8, u8, u8, u8, u8, u8); 37] = [
+        (7, 13, 0, 13, 144, 0, 142),
+        (16, 13, 0, 13, 144, 0, 142),
+        (15, 13, 0, 13, 145, 0, 142),
+        (5, 13, 13, 13, 152, 140, 139),
+        (5, 13, 1, 13, 143, 146, 139),
+        (5, 13, 13, 2, 143, 140, 148),
+        (5, 0, 1, 2, 0, 146, 148),
+        (5, 13, 11, 13, 143, 147, 139),
+        (5, 13, 13, 12, 143, 140, 149),
+        (5, 13, 11, 12, 150, 147, 149),
+        (5, 13, 1, 12, 143, 146, 149),
+        (5, 13, 11, 2, 143, 147, 148),
+        (9, 13, 13, 13, 144, 140, 142),
+        (9, 13, 1, 13, 144, 146, 142),
+        (9, 13, 11, 13, 151, 147, 142),
+        (8, 13, 0, 13, 144, 0, 139),
+        (8, 13, 0, 12, 143, 0, 149),
+        (8, 0, 0, 2, 0, 0, 148),
+        (11, 0, 0, 13, 0, 0, 139),
+        (11, 13, 0, 13, 139, 0, 139),
+        (11, 2, 0, 13, 148, 0, 139),
+        (11, 12, 0, 13, 149, 0, 139),
+        (11, 13, 11, 12, 139, 0, 149),
+        (14, 0, 0, 13, 0, 0, 139),
+        (14, 13, 0, 13, 139, 0, 139),
+        (14, 2, 0, 13, 148, 0, 139),
+        (14, 12, 0, 13, 149, 0, 139),
+        (14, 13, 11, 12, 139, 0, 149),
+        (10, 0, 13, 0, 0, 140, 0),
+        (10, 13, 13, 0, 140, 140, 0),
+        (10, 0, 1, 0, 0, 146, 0),
+        (10, 13, 11, 0, 140, 147, 0),
+        (12, 0, 13, 0, 0, 140, 0),
+        (12, 13, 13, 0, 140, 140, 0),
+        (12, 0, 1, 0, 0, 146, 0),
+        (12, 13, 11, 0, 140, 147, 0),
+        (3, 13, 11, 12, 150, 0, 0),
+    ];
+
+    /// Fix dirt-tile transitions to their decorated variants.
+    ///
+    /// C++ source: FixDirtTiles() in drlg_l1.cpp:1100-1115
+    fn fix_dirt_tiles(&mut self) {
+        for y in 0..(DUNGEON_SIZE - 1) {
+            for x in 0..(DUNGEON_SIZE - 1) {
+                if self.dungeon[y][x] == Tile::HDirtCorner && self.dungeon[y][x + 1] != Tile::DirtVwall {
+                    self.dungeon[y][x] = Tile::DirtCorner2;
+                }
+                if self.dungeon[y][x] == Tile::DirtVwall && self.dungeon[y][x + 1] != Tile::DirtVwall {
+                    self.dungeon[y][x] = Tile::DirtVWall2;
+                }
+                if self.dungeon[y][x] == Tile::DirtVwallEnd && self.dungeon[y][x + 1] != Tile::DirtVwall {
+                    self.dungeon[y][x] = Tile::DirtVWallEnd2;
+                }
+                if self.dungeon[y][x] == Tile::DirtHwall && self.dungeon[y + 1][x] != Tile::DirtHwall {
+                    self.dungeon[y][x] = Tile::DirtHWall2;
+                }
+                if self.dungeon[y][x] == Tile::HDirtCorner && self.dungeon[y + 1][x] != Tile::DirtHwall {
+                    self.dungeon[y][x] = Tile::DirtCorner2;
+                }
+                if self.dungeon[y][x] == Tile::DirtHwallEnd && self.dungeon[y + 1][x] != Tile::DirtHwall {
+                    self.dungeon[y][x] = Tile::DirtHWallEnd2;
+                }
+            }
+        }
+    }
+
+    /// Fix corner tiles.
+    ///
+    /// C++ source: FixCornerTiles() in drlg_l1.cpp:1117-1130
+    fn fix_corner_tiles(&mut self) {
+        for y in 1..(DUNGEON_SIZE - 1) {
+            for x in 1..(DUNGEON_SIZE - 1) {
+                if !self.protected[y][x]
+                    && self.dungeon[y][x] == Tile::HCorner
+                    && self.dungeon[y][x - 1] == Tile::Floor
+                    && self.dungeon[y - 1][x] == Tile::VWall
+                {
+                    self.dungeon[y][x] = Tile::NWCorner; // C++ VCorner
+                }
+                if self.dungeon[y][x] == Tile::DirtCorner2
+                    && self.dungeon[y][x + 1] == Tile::Floor
+                    && self.dungeon[y + 1][x] == Tile::VWall
+                {
+                    self.dungeon[y][x] = Tile::HArchEnd;
+                }
+                if self.dungeon[y][x] == Tile::DirtCorner2
+                    && self.dungeon[y + 1][x] == Tile::Floor
+                    && self.dungeon[y][x + 1] == Tile::HWall
+                {
+                    self.dungeon[y][x] = Tile::VArchEnd;
+                }
+            }
+        }
+    }
+
+    /// Randomly substitute decorated tile variants.
+    ///
+    /// C++ source: Substitution() in drlg_l1.cpp:1014-1045
+    fn substitution(&mut self) {
+        for y in 0..DUNGEON_SIZE {
+            for x in 0..DUNGEON_SIZE {
+                if self.rng.generate(4) != 0 {
+                    continue; // C++ FlipCoin(4)
+                }
+                let c = Self::TILE_DECORATIONS[self.dungeon[y][x] as usize];
+                if c == 0 || self.protected[y][x] {
+                    continue;
+                }
+                let mut rv = self.rng.generate(16);
+                let mut i: i32 = -1;
+                while rv >= 0 {
+                    i += 1;
+                    if i == Self::TILE_DECORATIONS.len() as i32 {
+                        i = 0;
+                    }
+                    if c == Self::TILE_DECORATIONS[i as usize] {
+                        rv -= 1;
+                    }
+                }
+                let mut i = i as usize;
+                if i == Tile::VWall4 as usize && y > 0 {
+                    if Self::TILE_DECORATIONS[self.dungeon[y - 1][x] as usize] != Tile::VWall2 as u8
+                        || self.protected[y - 1][x]
+                    {
+                        i = Tile::VWall2 as usize;
+                    } else {
+                        self.dungeon[y - 1][x] = Tile::VWall5;
+                    }
+                }
+                if i == Tile::HWall4 as usize && x + 1 < DUNGEON_SIZE {
+                    if Self::TILE_DECORATIONS[self.dungeon[y][x + 1] as usize] != Tile::HWall2 as u8
+                        || self.protected[y][x + 1]
+                    {
+                        i = Tile::HWall2 as usize;
+                    } else {
+                        self.dungeon[y][x + 1] = Tile::HWall5;
+                    }
+                }
+                self.dungeon[y][x] = Tile::try_from(i as u8).unwrap_or(Tile::Invalid);
+            }
+        }
+    }
+
+    /// Apply the Cathedral shadow patterns.
+    ///
+    /// C++ source: ApplyShadowsPatterns() in drlg_l1.cpp:280-346
+    fn apply_shadows_patterns(&mut self) {
+        for y in 1..DUNGEON_SIZE {
+            for x in 1..DUNGEON_SIZE {
+                let s00 = Self::BASE_TYPES[self.dungeon[y][x] as usize];
+                let s10 = Self::BASE_TYPES[self.dungeon[y][x - 1] as usize];
+                let s01 = Self::BASE_TYPES[self.dungeon[y - 1][x] as usize];
+                let s11 = Self::BASE_TYPES[self.dungeon[y - 1][x - 1] as usize];
+
+                for &(strig, s1, s2, s3, nv1, nv2, nv3) in Self::SHADOW_PATTERNS.iter() {
+                    if strig != s00 {
+                        continue;
+                    }
+                    if s1 != 0 && s1 != s11 {
+                        continue;
+                    }
+                    if s2 != 0 && s2 != s01 {
+                        continue;
+                    }
+                    if s3 != 0 && s3 != s10 {
+                        continue;
+                    }
+                    if nv1 != 0 && !self.protected[y - 1][x - 1] {
+                        self.dungeon[y - 1][x - 1] = Tile::try_from(nv1).unwrap_or(Tile::Invalid);
+                    }
+                    if nv2 != 0 && !self.protected[y - 1][x] {
+                        self.dungeon[y - 1][x] = Tile::try_from(nv2).unwrap_or(Tile::Invalid);
+                    }
+                    if nv3 != 0 && !self.protected[y][x - 1] {
+                        self.dungeon[y][x - 1] = Tile::try_from(nv3).unwrap_or(Tile::Invalid);
+                    }
+                }
+            }
+        }
+
+        for y in 1..DUNGEON_SIZE {
+            for x in 1..DUNGEON_SIZE {
+                if self.protected[y][x - 1] {
+                    continue;
+                }
+                let tile = self.dungeon[y][x - 1];
+                let right = self.dungeon[y][x];
+                let fence = matches!(
+                    right,
+                    Tile::DFence
+                        | Tile::VFenceEnd
+                        | Tile::VFence
+                        | Tile::HWallVFence
+                        | Tile::HArchVFence
+                        | Tile::HArchVDoor
+                );
+                match tile {
+                    Tile::Floor12 => {
+                        self.dungeon[y][x - 1] = if fence { Tile::Floor14 } else { Tile::Floor12 };
+                    }
+                    Tile::HArchShadow => {
+                        self.dungeon[y][x - 1] = if fence { Tile::HArchShadow2 } else { Tile::HArchShadow };
+                    }
+                    Tile::HWallShadow => {
+                        self.dungeon[y][x - 1] = if fence { Tile::HWallShadow2 } else { Tile::HWallShadow };
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
     /// Randomly add floor variations
     ///
     /// C++ source: FillFloor() in drlg_l1.cpp:368-380
@@ -1296,85 +1806,124 @@ impl CathedralGenerator {
         }
     }
 
+
     /// Generate Cathedral level
     ///
-    /// C++ source: CreateL5Dungeon() in drlg_l1.cpp:1302-1318
+    /// C++ source: CreateL5Dungeon() / GenerateLevel() in drlg_l1.cpp
     ///
-    /// Main entry point for Cathedral generation. Steps:
-    /// 1. Initialize dungeon with dirt
-    /// 2. Generate rooms and chambers
-    /// 3. Connect chambers with corridors
-    /// 4. Place minisets (stairs, lamps, etc.)
-    /// 5. Add floor variations
-    /// 6. Fix tile transitions and corners
+    /// Faithfully reproduces the C++ pipeline: re-roll the room layout until
+    /// it is large enough and stairs can be placed, then run the final tile
+    /// fix-up passes (dirt/corner substitution, shadows, lamps, floor fill).
     pub fn generate(&mut self, _level_type: DungeonType, seed: u32) {
         // Seed the Diablo LCG before generation so results are deterministic
         // and reproduce the C++ `SetRndSeed(seed)` behaviour exactly.
         self.rng.set_seed(seed);
 
-        // Initialize dungeon
-        self.init_dungeon();
+        // C++ GenerateLevel(): minarea for currlevel 1 is 533.
+        loop {
+            loop {
+                self.first_room();
+                if self.find_area() >= 533 {
+                    break;
+                }
+                            }
+                        self.init_dungeon();
+            self.make_dmt();
+            self.fill_chambers();
+            self.fix_tiles_patterns();
+            self.add_wall();
+            // FloodTransparencyValues(13) only touches dTransVal; skip.
+                        let ok = self.place_stairs();
+                        if ok {
+                break;
+            }
+        }
 
-        // Generate room layout
-        self.first_room();
+        // FixTransparency() only touches dTransVal; skip.
+        self.fix_dirt_tiles();
+        self.fix_corner_tiles();
+        self.substitution();
+        self.apply_shadows_patterns();
 
-        // Convert mask to tiles
-        self.make_dmt();
-
-        // C++ order: MakeDmt -> FillChambers -> FixTilesPatterns -> AddWall.
-        // (FillChambers is not ported yet; its chamber-mask effect is minimal
-        // for the current layout.)
-        self.fill_chambers();
-        self.fix_tiles_patterns();
-
-        // Add walls between rooms
-        self.add_wall();
-
-        // Place stairs and decorations
-        let stairs_up = stairs_up_miniset();
-        let stairs_down = stairs_down_miniset();
-        let lamps = lamps_miniset();
-
-        // Try to place upward stairs
-        self.place_miniset_random(&stairs_up, 100);
-
-        // Try to place downward stairs
-        self.place_miniset_random(&stairs_down, 100);
-
-        // Place 5-10 lamp decorations — C++ GenerateRnd(5) + 5
-        let num_lamps = self.rng.random_less_than(5) as u32 + 5;
+        // C++: numt = GenerateRnd(5) + 5 lamp minisets.
+        let num_lamps = self.rng.generate(5) + 5;
         for _ in 0..num_lamps {
-            self.place_miniset_random(&lamps, 100);
+            self.place_miniset(&lamps_miniset(), DUNGEON_SIZE * DUNGEON_SIZE, true);
         }
 
         // Add floor variations
         self.fill_floor();
     }
 
-    /// Place miniset randomly in dungeon
+    /// Place stairs for the Cathedral level.
     ///
-    /// C++ source: PlaceMiniSetRandom() in drlg_l1.cpp:1246-1261
+    /// C++ source: PlaceCathedralStairs() in drlg_l1.cpp:1132-1174
     ///
-    /// Attempts to place miniset at random valid positions with probability.
-    /// C++ logic: if (GenerateRnd(100) >= rndper) continue; (skip placement)
-    /// So higher rndper = MORE likely to skip = LESS likely to place
-    /// rndper=0 → always place (never skip)
-    /// rndper=100 → never place (always skip, unless rng returns 100+)
-    /// Returns true if miniset was placed successfully.
-    pub fn place_miniset_random(&mut self, miniset: &Miniset, rnd_percent: u32) -> bool {
-        for y in 0..(DUNGEON_SIZE - miniset.height) {
-            for x in 0..(DUNGEON_SIZE - miniset.width) {
-                if miniset.matches(&self.dungeon, x, y) {
-                    // C++ uses GenerateRnd(100) >= rndper to SKIP placement
-                    if self.rng.generate(100) >= rnd_percent as i32 {
-                        continue; // Skip placement
-                    }
-                    miniset.place(&mut self.dungeon, x, y);
-                    return true;
+    /// Quest-free port: PWATER / LTBANNER quests are not active, so only
+    /// STAIRSUP and STAIRSDOWN are placed (L5STAIRSUP is only used with the
+    /// legacy `pOriginalCathedral` flag).
+    fn place_stairs(&mut self) -> bool {
+        let mut success = true;
+        let stairs_up = if self.original_cathedral {
+            l5_stairs_up_miniset()
+        } else {
+            stairs_up_miniset()
+        };
+        if self.place_miniset(&stairs_up, DUNGEON_SIZE * DUNGEON_SIZE, true).is_none() {
+            success = false;
+        }
+        if self.place_miniset(&stairs_down_miniset(), DUNGEON_SIZE * DUNGEON_SIZE, true).is_none() {
+            success = false;
+        }
+        success
+    }
+
+    /// Place a miniset using the C++ `PlaceMiniSet` scan algorithm.
+    ///
+    /// C++ source: PlaceMiniSet() in gendung.cpp:648-683
+    ///
+    /// Starts from a random position, then scans with wrap-around until the
+    /// miniset matches. `drlg1_quirk` replicates the Cathedral bias that
+    /// skips positions with x/y <= 12. Returns the placed position.
+    fn place_miniset(&mut self, miniset: &Miniset, tries: usize, drlg1_quirk: bool) -> Option<(usize, usize)> {
+        let sw = miniset.width as i32;
+        let sh = miniset.height as i32;
+        let mut x = self.rng.generate(DUNGEON_SIZE as i32 - sw);
+        let mut y = self.rng.generate(DUNGEON_SIZE as i32 - sh);
+        let mut i = 0usize;
+        while i < tries {
+            if x == DUNGEON_SIZE as i32 - sw {
+                x = 0;
+                y += 1;
+                if y == DUNGEON_SIZE as i32 - sh {
+                    y = 0;
                 }
             }
+            if drlg1_quirk {
+                let mut valid = true;
+                if x <= 12 {
+                    x += 1;
+                    valid = false;
+                }
+                if y <= 12 {
+                    y += 1;
+                    valid = false;
+                }
+                if !valid {
+                    i += 1;
+                    x += 1;
+                    continue;
+                }
+            }
+            // SetPieceRoom is empty for quest-free Cathedral generation.
+            if miniset.matches(&self.dungeon, &self.protected, x as usize, y as usize) {
+                miniset.place(&mut self.dungeon, x as usize, y as usize);
+                return Some((x as usize, y as usize));
+            }
+            i += 1;
+            x += 1;
         }
-        false
+        None
     }
 
     /// Convert dungeon tiles to final output (Dungeon struct)
@@ -1408,7 +1957,7 @@ mod tests {
         assert_eq!(Tile::HWallDoor as u8, 26); // C++ HDoor
         assert_eq!(Tile::ArchH1 as u8, 12); // C++ HArch
         assert_eq!(Tile::EntranceStairs as u8, 64); // C++ EntranceStairs
-        assert_eq!(Tile::Invalid as u8, 57);
+        assert_eq!(Tile::Invalid as u8, 0); // C++ miniset wildcard
     }
 
     #[test]
@@ -1418,7 +1967,8 @@ mod tests {
         assert_eq!(Tile::try_from(16), Ok(Tile::NWCorner));
         assert_eq!(Tile::try_from(4), Ok(Tile::SECorner));
         assert_eq!(Tile::try_from(64), Ok(Tile::EntranceStairs));
-        assert_eq!(Tile::try_from(57), Ok(Tile::Invalid));
+        assert_eq!(Tile::try_from(0), Ok(Tile::Invalid));
+        assert_eq!(Tile::try_from(57), Ok(Tile::StairTile57));
         assert_eq!(Tile::try_from(255), Err(()));
     }
 
@@ -1428,7 +1978,9 @@ mod tests {
         assert_eq!(miniset.width, 4);
         assert_eq!(miniset.height, 4);
         assert_eq!(miniset.search[0][0], Tile::Floor);
-        assert_eq!(miniset.replace[1][2], Tile::EntranceStairs);
+        assert_eq!(miniset.search[1][0], Tile::HWall); // C++ row 1 is HWall
+        assert_eq!(miniset.replace[1][1], Tile::EntranceStairs); // C++ {63,64,65,0}
+        assert_eq!(miniset.replace[1][2], Tile::StairTile65);
     }
 
     #[test]
@@ -1436,7 +1988,7 @@ mod tests {
         let miniset = stairs_down_miniset();
         assert_eq!(miniset.width, 4);
         assert_eq!(miniset.height, 3);
-        assert_eq!(miniset.replace[0][0], Tile::NWCorner);
+        assert_eq!(miniset.replace[0][0], Tile::StairTile62); // C++ STAIRSDOWN raw tile
     }
 
     #[test]
@@ -1445,7 +1997,7 @@ mod tests {
         assert_eq!(miniset.width, 2);
         assert_eq!(miniset.height, 2);
         assert_eq!(miniset.search[0][0], Tile::Floor);
-        assert_eq!(miniset.replace[0][0], Tile::NWCorner);
+        assert_eq!(miniset.replace[0][0], Tile::Mega129); // C++ LAMPS raw tile
     }
 
     #[test]
@@ -1454,8 +2006,9 @@ mod tests {
         assert_eq!(miniset.width, 6);
         assert_eq!(miniset.height, 6);
         assert_eq!(miniset.search[0][0], Tile::Floor);
-        assert_eq!(miniset.replace[0][0], Tile::NWCorner);
-        assert_eq!(miniset.replace[3][3], Tile::Floor); // Center stays floor
+        assert_eq!(miniset.replace[0][0], Tile::Invalid); // C++ PWATERIN edge is 0
+        assert_eq!(miniset.replace[3][2], Tile::Mega206); // C++ PWATERIN row 3: {0,85,206,80,81,0}
+        assert_eq!(miniset.replace[3][3], Tile::HWall2);
     }
 
     #[test]
@@ -1469,8 +2022,9 @@ mod tests {
         dungeon[6][5] = Tile::Floor;
         dungeon[6][6] = Tile::Floor;
 
-        assert!(miniset.matches(&dungeon, 5, 5));
-        assert!(!miniset.matches(&dungeon, 0, 0)); // Dirt area
+        let protected = [[false; DUNGEON_SIZE]; DUNGEON_SIZE];
+        assert!(miniset.matches(&dungeon, &protected, 5, 5));
+        assert!(!miniset.matches(&dungeon, &protected, 0, 0)); // Dirt area
     }
 
     #[test]
@@ -1480,10 +2034,11 @@ mod tests {
 
         miniset.place(&mut dungeon, 10, 10);
 
-        assert_eq!(dungeon[10][10], Tile::NWCorner);
-        assert_eq!(dungeon[10][11], Tile::NECorner);
-        assert_eq!(dungeon[11][10], Tile::SWCorner);
-        assert_eq!(dungeon[11][11], Tile::SECorner);
+        // C++ LAMPS replace: {129, 0}, {130, 128}
+        assert_eq!(dungeon[10][10], Tile::Mega129);
+        assert_eq!(dungeon[10][11], Tile::Floor); // wildcard (0) leaves tile unchanged
+        assert_eq!(dungeon[11][10], Tile::Mega130);
+        assert_eq!(dungeon[11][11], Tile::Mega128);
     }
 
     #[test]
@@ -1558,46 +2113,27 @@ mod tests {
         let mut gen = CathedralGenerator::new();
         gen.init_dungeon();
 
-        // Create floor area for miniset (4x4 for stairs_up)
-        for y in 10..14 {
-            for x in 10..14 {
+        // Fill a floor area with an HWall run so the scan-based C++
+        // PlaceMiniSet (with the drlg1_quirk bias) finds the STAIRSUP pattern:
+        // search rows [Floor..], [HWall..], [Floor..], [Floor..].
+        for y in 14..20 {
+            for x in 14..20 {
                 gen.dungeon[y][x] = Tile::Floor;
             }
+        }
+        for x in 14..20 {
+            gen.dungeon[15][x] = Tile::HWall;
         }
 
         let miniset = stairs_up_miniset();
+        let placed = gen.place_miniset(&miniset, DUNGEON_SIZE * DUNGEON_SIZE, true);
+        assert!(placed.is_some(), "stairs-up miniset should be placed");
 
-        // C++ logic: if (GenerateRnd(100) >= rndper) continue; (skip placement)
-        // rndper=0:   GenerateRnd(100) >= 0   → always true  → always skip → NEVER place
-        // rndper=100: GenerateRnd(100) >= 100 → always false (returns 0-99) → never skip → ALWAYS place
-        // Both threshold extremes are RNG-independent, so the actual seed does
-        // not change the outcome here.
-
-        // Test 1: rndper=0 (always skip) → should NOT place
-        let placed = gen.place_miniset_random(&miniset, 0);
-        assert!(!placed);
-
-        // Test 2: rndper=100 (never skip) → ALWAYS place
-        gen.init_dungeon();
-        for y in 10..14 {
-            for x in 10..14 {
-                gen.dungeon[y][x] = Tile::Floor;
-            }
-        }
-
-        let placed = gen.place_miniset_random(&miniset, 100);
-        assert!(placed);
-
-        // Verify miniset was placed at (10, 10)
-        // stairs_up_miniset replace pattern:
-        // [Invalid, NWCorner, HWall, NECorner]     row 0 → y=10
-        // [Invalid, VWall, EntranceStairs, VWall]  row 1 → y=11
-        // [Invalid, VWall, EntranceStairs, VWall]  row 2 → y=12
-        // [Invalid, SWCorner, HWall, SECorner]     row 3 → y=13
-        assert_eq!(gen.dungeon[10][11], Tile::NWCorner);      // row 0, col 1
-        assert_eq!(gen.dungeon[10][12], Tile::HWall);         // row 0, col 2
-        assert_eq!(gen.dungeon[11][11], Tile::VWall);         // row 1, col 1
-        assert_eq!(gen.dungeon[11][12], Tile::EntranceStairs); // row 1, col 2
+        let (px, py) = placed.unwrap();
+        assert!(px >= 13 && py >= 13, "drlg1 quirk biases placement past x/y=12");
+        // C++ STAIRSUP replace: {0,66,6,0},{63,64,65,0},{0,67,68,0},{0,0,0,0}
+        assert_eq!(gen.dungeon[py][px + 2], Tile::VWallEnd);
+        assert_eq!(gen.dungeon[py + 1][px + 1], Tile::EntranceStairs);
     }
 
     #[test]
