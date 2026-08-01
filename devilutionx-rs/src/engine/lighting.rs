@@ -702,6 +702,34 @@ mod tests {
         assert!(differs, "intermediate table should darken some colors");
     }
 
+    /// Lock the light falloff / cone-distance math to the C++ `MakeLightTable`
+    /// formulas (lighting.cpp:290-327, non-NEST/CRYPT linear branch):
+    ///   - `LightFalloffs[radius][distance] = uint8_t(distance/maxDistance*15 + 0.5)`
+    ///     with `maxDistance = (radius+1)*8`, 15 beyond maxDistance.
+    ///   - `LightConeInterpolations[0][0][x][y] = sqrt((8x)^2 + (8y)^2)`.
+    /// These values are computed by hand from the C++ formulas (e.g. radius 8:
+    /// maxDistance = 72; distance 36 -> 36/72*15+0.5 = 8).
+    #[test]
+    fn test_light_math_matches_cpp_make_light_table() {
+        // LightFalloffs[8][d] for the linear (non-NEST/CRYPT) branch.
+        assert_eq!(light_falloff(8, 0), 0);
+        assert_eq!(light_falloff(8, 8), 2);
+        assert_eq!(light_falloff(8, 36), 8);
+        assert_eq!(light_falloff(8, 72), 15);
+        assert_eq!(light_falloff(8, 73), 15, "beyond maxDistance is full dark");
+        assert_eq!(light_falloff(0, 0), 0);
+        assert_eq!(light_falloff(0, 8), 15, "radius 0: maxDistance = 8");
+        // LightConeInterpolations[0][0][x][y] with no sub-tile offset.
+        assert_eq!(light_cone_distance(0, 0), 0);
+        assert_eq!(light_cone_distance(3, 4), 40); // sqrt(24^2+32^2)
+        assert_eq!(light_cone_distance(5, 12), 104); // sqrt(40^2+96^2)
+        assert_eq!(light_cone_distance(7, 7), 79); // sqrt(56^2+56^2) truncated
+        // Symmetry: the cone table is rotationally symmetric at offset 0, so the
+        // Rust square scan equals the C++ 4-quadrant RotateRadius walk.
+        assert_eq!(light_cone_distance(4, 3), light_cone_distance(3, 4));
+        assert_eq!(light_cone_distance(-3, 4), light_cone_distance(3, 4));
+    }
+
     #[test]
     fn test_do_lighting_centres_brightness() {
         let manager = LightManager::new();
