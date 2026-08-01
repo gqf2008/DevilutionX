@@ -326,7 +326,7 @@ fn mega_for_til_index(level: &DungeonLevelData, til_idx: usize) -> Option<(u16, 
 fn tile_to_l1_til_index(tile: Tile) -> usize {
     match tile {
         // Floors
-        Tile::Floor => 0,
+        Tile::Floor | Tile::Floor22 | Tile::Floor23 => 0,
 
         // Walls (use a couple of variants so long walls aren't a single flat strip)
         Tile::VWall => 1,

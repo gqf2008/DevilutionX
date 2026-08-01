@@ -111,6 +111,10 @@ pub enum Tile {
     EntranceStairs = 64,
     /// Dirt floor (C++ `Dirt = 22` — the Cathedral background tile)
     Dirt = 22,
+    /// C++ `Floor22 = 162` (floor variation from FillFloor)
+    Floor22 = 162,
+    /// C++ `Floor23 = 163` (floor variation from FillFloor)
+    Floor23 = 163,
     /// Invalid/empty tile
     Invalid = 57,
 
@@ -199,6 +203,8 @@ impl TryFrom<u8> for Tile {
             56 => Ok(Tile::Lava),
             57 => Ok(Tile::Invalid),
             64 => Ok(Tile::EntranceStairs),
+            162 => Ok(Tile::Floor22),
+            163 => Ok(Tile::Floor23),
             58 => Ok(Tile::CryptArchH1),
             59 => Ok(Tile::CryptArchH2),
             60 => Ok(Tile::CryptArchV1),
@@ -1138,12 +1144,11 @@ impl CathedralGenerator {
                 // C++ uses RandomIntLessThan(3) which returns 0, 1, or 2
                 let rv = self.rng.random_less_than(3) as u32;
                 if rv == 1 {
-                    // Floor variation 1 (Floor22 in C++)
-                    // For now keep as Floor, visual tiles handled later
-                    self.dungeon[y][x] = Tile::Floor;
+                    // C++ FillFloor: rv==1 -> Floor22 (162)
+                    self.dungeon[y][x] = Tile::Floor22;
                 } else if rv == 2 {
-                    // Floor variation 2 (Floor23 in C++)
-                    self.dungeon[y][x] = Tile::Floor;
+                    // C++ FillFloor: rv==2 -> Floor23 (163)
+                    self.dungeon[y][x] = Tile::Floor23;
                 }
             }
         }
@@ -1622,13 +1627,19 @@ mod tests {
             }
         }
 
-        // fill_floor maps rv==1/2 to Floor and leaves rv==0 unchanged, so every
-        // input Floor tile stays Floor regardless of the RNG draw.
+        // C++ FillFloor: rv==0 stays Floor, rv==1 -> Floor22, rv==2 -> Floor23.
         gen.fill_floor();
 
-        // All should still be Floor
-        assert_eq!(gen.dungeon[5][5], Tile::Floor);
-        assert_eq!(gen.dungeon[8][8], Tile::Floor);
+        // Every input Floor tile must now be Floor, Floor22 or Floor23.
+        for y in 5..10 {
+            for x in 5..10 {
+                assert!(
+                    matches!(gen.dungeon[y][x], Tile::Floor | Tile::Floor22 | Tile::Floor23),
+                    "fill_floor must only emit Floor/Floor22/Floor23, got {:?}",
+                    gen.dungeon[y][x]
+                );
+            }
+        }
     }
 
     #[test]
