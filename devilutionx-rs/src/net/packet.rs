@@ -209,6 +209,86 @@ mod tests {
         assert_eq!(p.encode(), vec![0x11, 3, 0xFE, 0xEF, 0xBE, 0xAD, 0xDE, 1, 2, 3]);
     }
 
+    /// C++ `packet_proc::process_data` (dvlnet/packet.h): PT_JOIN_ACCEPT =
+    /// [type][src][dest][cookie u32 LE][newplr u8][info].
+    #[test]
+    fn test_join_accept_bytes_match_cpp_layout() {
+        let p = Packet {
+            packet_type: packet_type::PT_JOIN_ACCEPT,
+            source: 1,
+            destination: 2,
+            cookie: 0x01020304,
+            new_player: 7,
+            info: vec![0xAA, 0xBB],
+            ..Packet::default()
+        };
+        assert_eq!(p.encode(), vec![0x12, 1, 2, 0x04, 0x03, 0x02, 0x01, 7, 0xAA, 0xBB]);
+    }
+
+    /// C++ PT_CONNECT = [type][src][dest][newplr u8][info].
+    #[test]
+    fn test_connect_bytes_match_cpp_layout() {
+        let p = Packet {
+            packet_type: packet_type::PT_CONNECT,
+            source: PLR_MASTER,
+            destination: PLR_BROADCAST,
+            new_player: 3,
+            info: vec![0xDE, 0xAD],
+            ..Packet::default()
+        };
+        assert_eq!(p.encode(), vec![0x13, 0xFE, 0xFF, 3, 0xDE, 0xAD]);
+    }
+
+    /// C++ PT_DISCONNECT = [type][src][dest][newplr u8][leaveinfo u32 LE].
+    #[test]
+    fn test_disconnect_bytes_match_cpp_layout() {
+        let p = Packet {
+            packet_type: packet_type::PT_DISCONNECT,
+            source: 4,
+            destination: PLR_BROADCAST,
+            new_player: 5,
+            leave_info: leave_info::LEAVE_ENDING,
+            ..Packet::default()
+        };
+        assert_eq!(p.encode(), vec![0x14, 4, 0xFF, 5, 0x04, 0x00, 0x00, 0x40]);
+    }
+
+    /// C++ PT_ECHO_REQUEST / PT_ECHO_REPLY = [type][src][dest][time u32 LE].
+    #[test]
+    fn test_echo_bytes_match_cpp_layout() {
+        let req = Packet {
+            packet_type: packet_type::PT_ECHO_REQUEST,
+            source: 1,
+            destination: PLR_MASTER,
+            time: 0x78563412,
+            ..Packet::default()
+        };
+        assert_eq!(req.encode(), vec![0x31, 1, 0xFE, 0x12, 0x34, 0x56, 0x78]);
+        let reply = Packet {
+            packet_type: packet_type::PT_ECHO_REPLY,
+            source: PLR_MASTER,
+            destination: 1,
+            time: 0x78563412,
+            ..Packet::default()
+        };
+        assert_eq!(reply.encode(), vec![0x32, 0xFE, 1, 0x12, 0x34, 0x56, 0x78]);
+    }
+
+    /// C++ PT_INFO_REQUEST = [type][src][dest]; PT_INFO_REPLY =
+    /// [type][src][dest][info].
+    #[test]
+    fn test_info_packets_bytes_match_cpp_layout() {
+        let req = Packet::new(packet_type::PT_INFO_REQUEST, 0, PLR_MASTER);
+        assert_eq!(req.encode(), vec![0x21, 0, 0xFE]);
+        let reply = Packet {
+            packet_type: packet_type::PT_INFO_REPLY,
+            source: PLR_MASTER,
+            destination: 0,
+            info: vec![1, 2, 3, 4],
+            ..Packet::default()
+        };
+        assert_eq!(reply.encode(), vec![0x22, 0xFE, 0, 1, 2, 3, 4]);
+    }
     #[test]
     fn test_join_request_round_trip() {
         let p = Packet {
