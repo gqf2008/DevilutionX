@@ -30,30 +30,30 @@ pub enum CmdId {
     AGetItem = 8,
     PutItem = 9,
     SpawnItem = 10,
-    AttackXY = 11,
-    RAttackXY = 12,
-    SpellXY = 13,
-    OpObjXY = 14,
-    DisarmXY = 15,
-    AttackId = 16,
-    AttackPid = 17,
-    RAttackId = 18,
-    RAttackPid = 19,
-    SpellId = 20,
-    SpellPid = 21,
-    Resurrect = 22,
-    OpObjT = 23,
-    Knockback = 24,
-    TalkXY = 25,
-    NewLvl = 26,
-    Warp = 27,
-    CheatExperience = 28,
-    ChangeSpellLevel = 29,
-    Debug = 30,
-    SyncData = 31,
-    MonstDeath = 32,
-    MonstDamage = 33,
-    PlrDead = 34,
+    RAttackXY = 11,
+    SpellXY = 12,
+    OpObjXY = 13,
+    DisarmXY = 14,
+    AttackId = 15,
+    AttackPid = 16,
+    RAttackId = 17,
+    RAttackPid = 18,
+    SpellId = 19,
+    SpellPid = 20,
+    Resurrect = 21,
+    OpObjT = 22,
+    Knockback = 23,
+    TalkXY = 24,
+    NewLvl = 25,
+    Warp = 26,
+    CheatExperience = 27,
+    ChangeSpellLevel = 28,
+    Debug = 29,
+    SyncData = 30,
+    MonstDeath = 31,
+    MonstDamage = 32,
+    PlrDead = 33,
+    PlrAlive = 34, // CMD_PLRALIVE (upstream msg.h)
     RequestGItem = 35,
     RequestAGItem = 36,
     GotoGetItem = 37,
@@ -149,8 +149,7 @@ impl CmdId {
     pub fn is_attack(&self) -> bool {
         matches!(
             self,
-            CmdId::AttackXY
-                | CmdId::RAttackXY
+            CmdId::RAttackXY
                 | CmdId::AttackId
                 | CmdId::AttackPid
                 | CmdId::RAttackId
@@ -605,17 +604,6 @@ impl MsgHandler {
         self.send_buffer.write(data)
     }
 
-    /// 发送攻击位置命令
-    pub fn send_attack_xy(&mut self, x: i8, y: i8) -> bool {
-        let cmd = TCmdLoc::new(CmdId::AttackXY, x, y);
-        let data = unsafe {
-            std::slice::from_raw_parts(
-                &cmd as *const _ as *const u8,
-                std::mem::size_of::<TCmdLoc>(),
-            )
-        };
-        self.send_buffer.write(data)
-    }
 
     /// 发送攻击怪物命令
     pub fn send_attack_id(&mut self, monster_id: i16) -> bool {
@@ -713,8 +701,9 @@ impl MsgHandler {
     /// 获取命令大小
     fn get_command_size(cmd: CmdId) -> usize {
         match cmd {
-            CmdId::Stand | CmdId::CheatExperience | CmdId::Debug => 1,
-            CmdId::WalkXY | CmdId::AttackXY | CmdId::RAttackXY | CmdId::OpObjXY
+            CmdId::Stand | CmdId::CheatExperience | CmdId::Debug
+            | CmdId::PlrAlive => 1,
+            CmdId::WalkXY | CmdId::RAttackXY | CmdId::OpObjXY
             | CmdId::DisarmXY | CmdId::OpObjT | CmdId::OpenDoor | CmdId::CloseDoor
             | CmdId::OperateObj => std::mem::size_of::<TCmdLoc>(),
             CmdId::AddStr | CmdId::AddMag | CmdId::AddDex | CmdId::AddVit
@@ -1633,12 +1622,12 @@ mod tests {
     fn test_cmd_is_movement() {
         assert!(CmdId::WalkXY.is_movement());
         assert!(CmdId::GotoGetItem.is_movement());
-        assert!(!CmdId::AttackXY.is_movement());
+        assert!(!CmdId::RAttackXY.is_movement());
     }
 
     #[test]
     fn test_cmd_is_attack() {
-        assert!(CmdId::AttackXY.is_attack());
+        assert!(CmdId::RAttackXY.is_attack());
         assert!(CmdId::AttackId.is_attack());
         assert!(!CmdId::WalkXY.is_attack());
     }
@@ -1647,7 +1636,7 @@ mod tests {
     fn test_cmd_is_spell() {
         assert!(CmdId::SpellXY.is_spell());
         assert!(CmdId::SpellId.is_spell());
-        assert!(!CmdId::AttackXY.is_spell());
+        assert!(!CmdId::RAttackXY.is_spell());
     }
 
     #[test]
@@ -2062,16 +2051,16 @@ mod tests {
     #[test]
     fn test_net_send_cmd_loc_param2() {
         let mut h = MsgHandler::new(0, false);
-        assert!(h.net_send_cmd_loc_param2(true, CmdId::AttackXY, 1, 2, 100, 200));
+        assert!(h.net_send_cmd_loc_param2(true, CmdId::RAttackXY, 1, 2, 100, 200));
         let data = h.get_send_data().unwrap();
-        assert_eq!(data[0], CmdId::AttackXY.to_u8());
+        assert_eq!(data[0], CmdId::RAttackXY.to_u8());
         assert_eq!(data.len(), 1 + 2 + 2 * 2); // cmd + xy + 2 params
     }
 
     #[test]
     fn test_net_send_cmd_loc_param3() {
         let mut h = MsgHandler::new(0, false);
-        assert!(h.net_send_cmd_loc_param3(true, CmdId::AttackXY, 1, 2, 10, 20, 30));
+        assert!(h.net_send_cmd_loc_param3(true, CmdId::RAttackXY, 1, 2, 10, 20, 30));
         let data = h.get_send_data().unwrap();
         assert_eq!(data.len(), 1 + 2 + 3 * 2);
     }
@@ -2166,6 +2155,13 @@ mod tests {
         assert_eq!(CmdId::Stand as u8, 0);
         assert_eq!(CmdId::WalkXY as u8, 1);
         assert_eq!(CmdId::AckPlrInfo as u8, 2);
+        // Upstream removed CMD_ATTACKXY (old 11) and added CMD_PLRALIVE at 34,
+        // shifting CMD_RATTACKXY..CMD_PLRDEAD down by one (msg.h @ 4b2e6c74).
+        assert_eq!(CmdId::RAttackXY as u8, 11);
+        assert_eq!(CmdId::Warp as u8, 26);
+        assert_eq!(CmdId::PlrDead as u8, 33);
+        assert_eq!(CmdId::PlrAlive as u8, 34);
+        assert_eq!(CmdId::RequestGItem as u8, 35);
         assert_eq!(CmdId::OperateObj as u8, 41);
         // Renumbered C++ values (previously misaligned in Rust).
         assert_eq!(CmdId::BreakObj as u8, 42);
