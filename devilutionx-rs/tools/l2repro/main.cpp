@@ -98,6 +98,7 @@ std::optional<Point> PlaceMiniSet(const Miniset &miniset, int tries, bool drlg1Q
 	const int sw = miniset.size.width;
 	const int sh = miniset.size.height;
 	Point position { GenerateRnd(DMAXX - sw), GenerateRnd(DMAXY - sh) };
+	fprintf(stderr, "[pms] start x=%d y=%d\n", position.x, position.y);
 
 	for (int i = 0; i < tries; i++, position.x++) {
 		if (position.x == DMAXX - sw) {
@@ -121,13 +122,20 @@ std::optional<Point> PlaceMiniSet(const Miniset &miniset, int tries, bool drlg1Q
 				continue;
 			}
 		}
-		if (SetPieceRoom.contains(position))
+		if (SetPieceRoom.contains(position)) {
+			fprintf(stderr, "[scan] x=%d y=%d setpiece\n", position.x, position.y);
 			continue;
-		if (!miniset.matches(position))
+		}
+		if (!miniset.matches(position)) {
+			fprintf(stderr, "[scan] x=%d y=%d nomatch\n", position.x, position.y);
 			continue;
+		}
+		fprintf(stderr, "[scan] x=%d y=%d MATCH\n", position.x, position.y);
 		miniset.place(position);
+		fprintf(stderr, "[pms] found x=%d y=%d\n", position.x, position.y);
 		return position;
 	}
+	fprintf(stderr, "[pms] NOT FOUND\n");
 	return {};
 }
 

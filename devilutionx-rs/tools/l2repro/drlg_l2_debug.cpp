@@ -2650,28 +2650,44 @@ bool PlaceStairs(lvl_entry entry)
 {
 	std::optional<Point> position;
 
+	auto dumpChk = [](const char *tag) {
+		uint32_t h = 2166136261u;
+		for (int j = 0; j < DMAXY; j++)
+			for (int i = 0; i < DMAXX; i++) {
+				h ^= dungeon[i][j];
+				h *= 16777619u;
+			}
+		fprintf(stderr, "[chk] after %s %u\n", tag, h);
+	};
+
 	// Place stairs up
 	position = PlaceMiniSet(USTAIRS);
+	fprintf(stderr, "[stairs] USTAIRS %s\n", position ? ("OK " + std::to_string(position->x) + "," + std::to_string(position->y)).c_str() : "FAIL");
 	if (!position)
 		return false;
 	if (entry == ENTRY_MAIN)
 		ViewPosition = position->megaToWorld() + Displacement { 5, 4 };
+	dumpChk("ustairs");
 
 	// Place stairs down
 	position = PlaceMiniSet(DSTAIRS);
+	fprintf(stderr, "[stairs] DSTAIRS %s\n", position ? ("OK " + std::to_string(position->x) + "," + std::to_string(position->y)).c_str() : "FAIL");
 	if (!position)
 		return false;
 	if (entry == ENTRY_PREV)
 		ViewPosition = position->megaToWorld() + Displacement { 4, 6 };
+	dumpChk("dstairs");
 
 	// Place town warp stairs
 	if (currlevel == 5) {
 		position = PlaceMiniSet(WARPSTAIRS);
+		fprintf(stderr, "[stairs] WARPSTAIRS %s\n", position ? ("OK " + std::to_string(position->x) + "," + std::to_string(position->y)).c_str() : "FAIL");
 		if (!position)
 			return false;
 		if (entry == ENTRY_TWARPDN)
 			ViewPosition = position->megaToWorld() + Displacement { 5, 4 };
 	}
+	dumpChk("warp");
 
 	return true;
 }
@@ -2681,22 +2697,36 @@ void GenerateLevel(lvl_entry entry)
 	if (LevelSeeds[currlevel])
 		SetRndSeed(*LevelSeeds[currlevel]);
 
+	int dbgAttempt = 0;
 	while (true) {
+		fprintf(stderr, "[retry] attempt=%d start=%u\n", dbgAttempt, GetLCGEngineState());
 		LevelSeeds[currlevel] = GetLCGEngineState();
 		nRoomCnt = 0;
 		InitDungeonFlags();
 		DRLG_InitTrans();
 		if (!CreateDungeon()) {
+			fprintf(stderr, "[retry] attempt=%d createDungeon=FAIL rng=%u\n", dbgAttempt, GetLCGEngineState());
+			dbgAttempt++;
 			continue;
 		}
+		fprintf(stderr, "[retry] attempt=%d createDungeon=OK rng=%u\n", dbgAttempt, GetLCGEngineState());
 		FixTilesPatterns();
 	fprintf(stderr, "[rng] after FixTilesPatterns %u\n", GetLCGEngineState());
 		InitSetPiece();
+		{
+			uint32_t h = 2166136261u;
+			for (int j = 0; j < DMAXY; j++) for (int i = 0; i < DMAXX; i++) { h ^= dungeon[i][j]; h *= 16777619u; }
+			fprintf(stderr, "[chk] after setpiece %u\n", h);
+		}
 		FloodTransparencyValues(3);
 		FixTransparency();
-		if (PlaceStairs(entry))
+		if (PlaceStairs(entry)) {
+			fprintf(stderr, "[retry] attempt=%d stairs=OK rng=%u\n", dbgAttempt, GetLCGEngineState());
 			break;
+		}
+		fprintf(stderr, "[retry] attempt=%d stairs=FAIL rng=%u\n", dbgAttempt, GetLCGEngineState());
 	fprintf(stderr, "[rng] after stairs %u\n", GetLCGEngineState());
+		dbgAttempt++;
 	}
 
 	{

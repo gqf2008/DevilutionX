@@ -1913,8 +1913,10 @@ impl CatacombsGenerator {
     fn substitution(&mut self, dungeon: &mut Dungeon) {
         for y in 0..DMAXY {
             for x in 0..DMAXX {
-                // Skip set piece room areas (TODO: implement SetPieceRoom check)
-                // if SetPieceRoom.contains(x, y) { continue; }
+                // C++ Substitution (drlg_l2.cpp): skip the quest-room set piece.
+                if self.in_set_piece_room(x, y) {
+                    continue;
+                }
 
                 // 25% probability per tile
                 if self.random_range(0, 4) != 0 {
@@ -2539,8 +2541,10 @@ impl CatacombsGenerator {
                     y = 0;
                 }
             }
-            // SetPieceRoom is empty for quest-free generation.
+            // C++ `for (i; i < tries; i++, position.x++)` advances x even when
+            // `continue` fires (set piece room skip) — replicate that here.
             if self.in_set_piece_room(x as usize, y as usize) {
+                x += 1;
                 continue;
             }
             if miniset.matches(dungeon, &self.protected, (x as usize, y as usize)) {
