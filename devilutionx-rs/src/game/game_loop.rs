@@ -1386,11 +1386,22 @@ fn render_world_pipeline(
         }
         const PLAYER_VISION_RADIUS: u8 = 9;
         let origin = crate::game::types::Point::new(view_pos.x, view_pos.y);
+        // C++ `TileAllowsLight` (lighting.cpp:93): a vision ray stops at any
+        // micro-tile whose SOL data sets `BlockLight` (solid walls). Without
+        // this, every trans region inside the radius is marked transparent and
+        // walls behind walls render see-through.
+        let sol = &level.sol;
+        let tile_allows_light = |p: crate::game::types::Point| -> bool {
+            if p.x < 0 || p.y < 0 || p.x >= 112 || p.y >= 112 {
+                return false;
+            }
+            crate::game::lighting::tile_allows_light(grid.d_piece(p.x, p.y), sol)
+        };
         let visible_tiles = crate::game::lighting::LightManager::cast_vision_rays(
             origin,
             PLAYER_VISION_RADIUS,
             |p| p.x >= 0 && p.x < 112 && p.y >= 0 && p.y < 112,
-            |_| true,
+            tile_allows_light,
         );
         for tile in visible_tiles {
             let v = trans_val_grid[(tile.y * 112 + tile.x) as usize];

@@ -8,6 +8,7 @@
 // This module implements the light and vision system for the game,
 // handling dynamic lighting, player vision, and light color cycling.
 
+use crate::engine::dungeon::{SolData, TileProperties};
 use crate::game::types::Point;
 
 //
@@ -245,6 +246,13 @@ pub struct LightManager {
     /// Debug: disable lighting
     #[cfg(debug_assertions)]
     pub disable_lighting: bool,
+}
+
+/// C++ `TileAllowsLight` (lighting.cpp:93): a micro-tile lets vision/light
+/// rays continue unless its SOL data sets `TileProperties::BlockLight`
+/// (solid walls). `piece` is the dPiece value at the micro-tile position.
+pub fn tile_allows_light(piece: u16, sol: &SolData) -> bool {
+    !sol.get(piece as usize).contains(TileProperties::BLOCK_LIGHT)
 }
 
 impl LightManager {
@@ -1147,6 +1155,52 @@ impl Default for LightManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// C++ `TileAllowsLight` (lighting.cpp:93): a micro-tile with SOL
+    /// `BlockLight` blocks vision/light rays; floor tiles pass.
+    #[test]
+    fn test_tile_allows_light_matches_cpp() {
+        use crate::engine::dungeon::TileProperties;
+        let sol = SolData {
+            properties: vec![
+                TileProperties::empty(),               // 0: floor
+                TileProperties::BLOCK_LIGHT,           // 1: solid wall
+                TileProperties::SOLID,                 // 2: solid but not BlockLight
+                TileProperties::BLOCK_LIGHT | TileProperties::TRANSPARENT, // 3: see-through wall still blocks light
+            ],
+        };
+        assert!(tile_allows_light(0, &sol), "floor allows light");
+        assert!(!tile_allows_light(1, &sol), "BlockLight wall blocks");
+        assert!(tile_allows_light(2, &sol), "SOLID alone does not block light");
+        assert!(!tile_allows_light(3, &sol), "BlockLight bit wins");
+        // Out-of-range SOL index defaults to empty (no BlockLight).
+        assert!(tile_allows_light(999, &sol));
+    }
+
+    /// Vision rays stop at the first BlockLight tile (the C++ `passesLightFn`
+    /// break in vision.cpp:113) — tiles beyond a wall are not reachable.
+    #[test]
+    fn test_cast_vision_rays_stop_behind_block_light_wall() {
+        use crate::engine::dungeon::TileProperties;
+        let sol = SolData {
+            properties: vec![
+                TileProperties::empty(),
+                TileProperties::BLOCK_LIGHT,
+            ],
+        };
+        // d_piece: piece 0 = floor everywhere except x == 24 which is a wall.
+        let origin = Point::new(20, 20);
+        let allows = |p: Point| -> bool {
+            if p.x < 0 || p.y < 0 || p.x >= 112 || p.y >= 112 {
+                return false;
+            }
+            let piece = if p.x == 24 && p.y == 20 { 1u16 } else { 0u16 };
+            tile_allows_light(piece, &sol)
+        };
+        let visible = LightManager::cast_vision_rays(origin, 9, |p| p.x >= 0 && p.x < 112 && p.y >= 0 && p.y < 112, allows);
+        assert!(visible.contains(&Point::new(23, 20)), "tile before wall visible");
+        assert!(!visible.contains(&Point::new(25, 20)), "tile beyond wall occluded");
+    }
 
     #[test]
     fn test_constants() {
