@@ -4,25 +4,23 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use crate::game::codec::{codec_decode, codec_encode, codec_get_encoded_len};
 use crate::game::player_exact::HeroClass;
 use crate::game::pack::{Player, PlayerPack, pack_player, unpack_player};
 
-// Forward declarations for functions that would be in other modules
-fn codec_encode(data: &[u8], _password: &str, _len: usize) -> Vec<u8> {
-    data.to_vec() // Placeholder
-}
-
-fn codec_decode(data: &[u8], _password: &str) -> Vec<u8> {
-    data.to_vec() // Placeholder
-}
-
-fn codec_get_encoded_len(len: usize) -> usize {
-    len + 16 // Placeholder
-}
-
+/// C++ `IsHeaderValid` (Source/loadsave.cpp:2304): the first four bytes of a
+/// decoded `game` entry identify the save flavour. `SHAR`/`SHLF` are the
+/// shareware (spawn) saves; `RETL`/`HELF` are the full-game saves and are only
+/// accepted when the game is not running from the shareware data.
 #[allow(non_snake_case)]
-fn IsHeaderValid(_header: u32) -> bool {
-    true // Placeholder
+fn IsHeaderValid(header: u32, is_spawn: bool) -> bool {
+    match header {
+        0x52414853 => true, // "SHAR" (LoadLE32("SHAR"))
+        0x464C4853 => true, // "SHLF"
+        0x4C544552 => !is_spawn, // "RETL"
+        0x464C4548 => !is_spawn, // "HELF"
+        _ => false,
+    }
 }
 
 // Constants
@@ -455,7 +453,7 @@ impl PlayerFileManager {
         if let Ok(data) = archive.read_file("game") {
             if data.len() >= 4 {
                 let header = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                return IsHeaderValid(header);
+                return IsHeaderValid(header, self.game_mode.is_spawn);
             }
         }
 
@@ -792,6 +790,36 @@ mod tests {
 
     fn create_test_manager() -> PlayerFileManager {
         PlayerFileManager::new(PathBuf::from("/tmp/test_saves"))
+    }
+
+    /// C++ `IsHeaderValid` (loadsave.cpp:2304): SHAR/SHLF always valid;
+    /// RETL/HELF only for non-spawn.
+    #[test]
+    fn test_is_header_valid_matches_cpp() {
+        let shar = u32::from_le_bytes(*b"SHAR");
+        let shlf = u32::from_le_bytes(*b"SHLF");
+        let retl = u32::from_le_bytes(*b"RETL");
+        let helf = u32::from_le_bytes(*b"HELF");
+        assert!(IsHeaderValid(shar, true), "SHAR valid for spawn");
+        assert!(IsHeaderValid(shar, false), "SHAR valid for full game");
+        assert!(IsHeaderValid(shlf, true), "SHLF valid for spawn hellfire");
+        assert!(!IsHeaderValid(retl, true), "RETL rejected on spawn");
+        assert!(IsHeaderValid(retl, false), "RETL valid on full game");
+        assert!(!IsHeaderValid(helf, true), "HELF rejected on spawn");
+        assert!(IsHeaderValid(helf, false), "HELF valid on full game");
+        assert!(!IsHeaderValid(0xDEADBEEF, false), "garbage magic rejected");
+    }
+
+    /// pfile codec now delegates to the vanilla codec: encode → decode recovers
+    /// the plaintext with the spawn single-player password.
+    #[test]
+    fn test_pfile_codec_roundtrip_with_vanilla_codec() {
+        let data: Vec<u8> = (0..200u8).collect();
+        let len = codec_get_encoded_len(data.len());
+        let encoded = codec_encode(&data, PASSWORD_SPAWN_SINGLE, len);
+        assert_eq!(encoded.len(), len);
+        let decoded = codec_decode(&encoded, PASSWORD_SPAWN_SINGLE);
+        assert_eq!(decoded, data, "vanilla codec round-trips through pfile");
     }
 
     #[test]
