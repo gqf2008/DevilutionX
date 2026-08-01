@@ -3167,6 +3167,27 @@ mod tests {
         );
     }
 
+    /// Regression: room ids must be 1-based like C++ `nRid`. The old code
+    /// took `room_id` before incrementing, so the root's children skipped
+    /// their halls -> the RNG stream diverged and the grid stayed empty
+    /// (9/1600 non-zero tiles). With the fix, `generate` emits a real
+    /// Catacombs dungeon for every tested seed.
+    #[test]
+    fn test_generate_produces_real_catacombs() {
+        for seed in [0x13572468u32, 1, 12345, 54321] {
+            let mut gen = CatacombsGenerator::new();
+            let mut d = Dungeon::new();
+            assert!(gen.generate(&mut d, seed, 5), "seed {seed:#x}: generate failed");
+            let non_zero = d.tiles.iter().flatten().filter(|&&t| t != 0).count();
+            assert!(
+                non_zero > 500,
+                "seed {seed:#x}: expected a real dungeon, got {non_zero}/1600 non-zero tiles"
+            );
+            let floors = d.tiles.iter().flatten().filter(|&&t| t == 3).count();
+            assert!(floors > 50, "seed {seed:#x}: expected floor tiles, got {floors}");
+        }
+    }
+
     /// C++ L2 `GenerateLevel` calls `FloodTransparencyValues(3)` before
     /// `FixTransparency()`. Verify the wiring on a synthetic C++-L2 grid
     /// (floor tile id 3): the flood assigns one TransVal id to the connected
