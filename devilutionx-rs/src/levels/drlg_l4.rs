@@ -2126,6 +2126,13 @@ impl Dungeon4Generator {
         // Normal L4 generation loop
         loop {
             self.init_dungeon_flags();
+            // C++ `InitDungeonFlags` does `memset(dungeon, 30, sizeof(dungeon))`
+            // (L4 rock background). The old port left unmatched cells at 0.
+            for y in 0..DMAXY {
+                for x in 0..DMAXX {
+                    dungeon.tiles[x][y] = 30;
+                }
+            }
 
             // Day 75: Place UberRooms (recursive room subdivision)
             self.first_room(level);
@@ -3477,5 +3484,3 @@ mod tests {
         }
     }
 }
-
-
