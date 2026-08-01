@@ -577,4 +577,24 @@ mod tests {
         let selection = HeroSelection::single_player(heroes);
         assert_eq!(selection.find_next_save_slot(), 2); // Slot 2 is available
     }
+    #[test]
+    fn test_hero_info_matches_cpp_uiheroinfo() {
+        use super::HeroInfo;
+        // C++ `_uiheroinfo` (diabloui.h): saveNumber/name[16]/level/heroclass/
+        // herorank/strength/magic/dexterity/vitality/hassaved/spawned.
+        let h = HeroInfo::default();
+        assert_eq!(h.level, 1, "C++ new hero starts at level 1");
+        assert_eq!(h.hero_rank, 0);
+        assert_eq!(h.strength, 0);
+        assert_eq!(h.hero_class as u8, 0, "Warrior default");
+        // name[16] => 15 visible characters (C++ PlayerNameLength).
+        assert_eq!(super::MAX_NAME_LENGTH, 15);
+        assert!(!h.is_name_valid(), "empty name is invalid");
+        // new_for_class fills the C++ default stats.
+        let warrior = HeroInfo::new_for_class(super::HeroClass::Warrior, "Aidan");
+        assert_eq!(warrior.strength, 30);
+        assert_eq!(warrior.vitality, 25);
+    }
+
+
 }
