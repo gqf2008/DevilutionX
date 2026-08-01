@@ -1100,17 +1100,18 @@ impl CatacombsGenerator {
         // Determine room size (random or quest-specific)
         let mut room_width = area_width;
         let mut room_height = area_height;
-
+        // C++ `CreateRoom` always draws the random room size when the area is
+        // large enough, then overrides it with the quest size. Match that draw
+        // order so the RNG stream (and therefore the room placement) lines up.
+        if area_width > ROOM_MIN {
+            room_width = (self.random_range(0, area_width.min(ROOM_MAX) - ROOM_MIN) + ROOM_MIN).min(area_width);
+        }
+        if area_height > ROOM_MIN {
+            room_height = (self.random_range(0, area_height.min(ROOM_MAX) - ROOM_MIN) + ROOM_MIN).min(area_height);
+        }
         if let Some((qw, qh)) = quest_size {
             room_width = qw;
             room_height = qh;
-        } else {
-            if area_width > ROOM_MIN {
-                room_width = (self.random_range(0, area_width.min(ROOM_MAX) - ROOM_MIN) + ROOM_MIN).min(area_width);
-            }
-            if area_height > ROOM_MIN {
-                room_height = (self.random_range(0, area_height.min(ROOM_MAX) - ROOM_MIN) + ROOM_MIN).min(area_height);
-            }
         }
 
         // Random placement within area
@@ -1993,152 +1994,294 @@ impl CatacombsGenerator {
         count
     }
 
-    /// Fill a void region starting from (xx, yy)
-    /// C++ equivalent: FillVoid
+    /// Convert a filled void area into a room: interior floor, border walls.
+    /// C++ equivalent: MapRoom (drlg_l2.cpp).
+    fn map_room(&mut self, x1: i32, y1: i32, x2: i32, y2: i32) {
+        for jj in y1..=y2 {
+            for ii in x1..=x2 {
+                self.set_predungeon(Point::new(ii, jj), '.');
+            }
+        }
+        for jj in y1..=y2 {
+            self.set_predungeon(Point::new(x1, jj), '#');
+            self.set_predungeon(Point::new(x2, jj), '#');
+        }
+        for ii in x1..=x2 {
+            self.set_predungeon(Point::new(ii, y1), '#');
+            self.set_predungeon(Point::new(ii, y2), '#');
+        }
+    }
+
+    /// Knock openings into a room's border walls where the adjacent cell is
+    /// already floor or a door. C++ equivalent: KnockWalls (drlg_l2.cpp).
+    fn knock_walls(&mut self, x1: i32, y1: i32, x2: i32, y2: i32) {
+        for ii in (x1 + 1)..x2 {
+            if self.get_predungeon(Point::new(ii, y1 - 1)) == '.'
+                && self.get_predungeon(Point::new(ii, y1 + 1)) == '.'
+            {
+                self.set_predungeon(Point::new(ii, y1), '.');
+            }
+            if self.get_predungeon(Point::new(ii, y2 - 1)) == '.'
+                && self.get_predungeon(Point::new(ii, y2 + 1)) == '.'
+            {
+                self.set_predungeon(Point::new(ii, y2), '.');
+            }
+            if self.get_predungeon(Point::new(ii, y1 - 1)) == 'D' {
+                self.set_predungeon(Point::new(ii, y1 - 1), '.');
+            }
+            if self.get_predungeon(Point::new(ii, y2 + 1)) == 'D' {
+                self.set_predungeon(Point::new(ii, y2 + 1), '.');
+            }
+        }
+        for jj in (y1 + 1)..y2 {
+            if self.get_predungeon(Point::new(x1 - 1, jj)) == '.'
+                && self.get_predungeon(Point::new(x1 + 1, jj)) == '.'
+            {
+                self.set_predungeon(Point::new(x1, jj), '.');
+            }
+            if self.get_predungeon(Point::new(x2 - 1, jj)) == '.'
+                && self.get_predungeon(Point::new(x2 + 1, jj)) == '.'
+            {
+                self.set_predungeon(Point::new(x2, jj), '.');
+            }
+            if self.get_predungeon(Point::new(x1 - 1, jj)) == 'D' {
+                self.set_predungeon(Point::new(x1 - 1, jj), '.');
+            }
+            if self.get_predungeon(Point::new(x2 + 1, jj)) == 'D' {
+                self.set_predungeon(Point::new(x2 + 1, jj), '.');
+            }
+        }
+    }
+
+    /// Fill a void region and, when large enough, turn it into a room.
+    ///
+    /// C++ equivalent: FillVoid (drlg_l2.cpp) — matches all four expansion
+    /// branches, the 2-cell shrink after each expansion, the >5 size guards,
+    /// and the final MapRoom/KnockWalls steps.
     fn fill_void(&mut self, mut xf1: bool, mut yf1: bool, mut xf2: bool, mut yf2: bool, xx: usize, yy: usize) {
-        let mut x1 = xx;
+        let mut x1 = xx as i32;
         if xf1 {
-            x1 = x1.saturating_sub(1);
+            x1 -= 1;
         }
-        let mut x2 = xx;
+        let mut x2 = xx as i32;
         if xf2 {
-            x2 = (x2 + 1).min(DMAXX - 1);
+            x2 += 1;
         }
-        let mut y1 = yy;
+        let mut y1 = yy as i32;
         if yf1 {
-            y1 = y1.saturating_sub(1);
+            y1 -= 1;
         }
-        let mut y2 = yy;
+        let mut y2 = yy as i32;
         if yf2 {
-            y2 = (y2 + 1).min(DMAXY - 1);
+            y2 += 1;
         }
 
         if !xf1 {
-            // Expand vertically
+            // Expand vertically, probing column x2.
             while yf1 || yf2 {
                 if y1 == 0 {
                     yf1 = false;
                 }
-                if y2 == DMAXY - 1 {
+                if y2 == DMAXY as i32 - 1 {
                     yf2 = false;
                 }
-                if y2.saturating_sub(y1) >= 14 {
+                if y2 - y1 >= 14 {
                     yf1 = false;
                     yf2 = false;
                 }
-                if yf1 && y1 > 0 {
+                if yf1 {
                     y1 -= 1;
                 }
-                if yf2 && y2 < DMAXY - 1 {
+                if yf2 {
                     y2 += 1;
                 }
-                if x2 < DMAXX && (yf1 && self.predungeon[x2][y1] != ' ' || yf2 && self.predungeon[x2][y2] != ' ') {
+                if self.get_predungeon(Point::new(x2, y1)) != ' ' {
                     yf1 = false;
+                }
+                if self.get_predungeon(Point::new(x2, y2)) != ' ' {
                     yf2 = false;
                 }
             }
-            // Mark area
-            for y in y1..=y2 {
-                for x in x1..=x2 {
-                    if x < DMAXX && y < DMAXY {
-                        self.predungeon[x][y] = '.';
+            y1 += 2;
+            y2 -= 2;
+            if y2 - y1 > 5 {
+                // Expand horizontally right.
+                while xf2 {
+                    if x2 == DMAXX as i32 - 1 {
+                        xf2 = false;
                     }
+                    if x2 - x1 >= 12 {
+                        xf2 = false;
+                    }
+                    for jj in y1..=y2 {
+                        if self.get_predungeon(Point::new(x2, jj)) != ' ' {
+                            xf2 = false;
+                        }
+                    }
+                    if xf2 {
+                        x2 += 1;
+                    }
+                }
+                x2 -= 2;
+                if x2 - x1 > 5 {
+                    self.map_room(x1, y1, x2, y2);
+                    self.knock_walls(x1, y1, x2, y2);
                 }
             }
         } else if !xf2 {
-            // Expand vertically (other direction)
+            // Expand vertically, probing column x1.
             while yf1 || yf2 {
                 if y1 == 0 {
                     yf1 = false;
                 }
-                if y2 == DMAXY - 1 {
+                if y2 == DMAXY as i32 - 1 {
                     yf2 = false;
                 }
-                if y2.saturating_sub(y1) >= 14 {
+                if y2 - y1 >= 14 {
                     yf1 = false;
                     yf2 = false;
                 }
-                if yf1 && y1 > 0 {
+                if yf1 {
                     y1 -= 1;
                 }
-                if yf2 && y2 < DMAXY - 1 {
+                if yf2 {
                     y2 += 1;
                 }
-                if x1 < DMAXX && (yf1 && self.predungeon[x1][y1] != ' ' || yf2 && self.predungeon[x1][y2] != ' ') {
+                if self.get_predungeon(Point::new(x1, y1)) != ' ' {
                     yf1 = false;
+                }
+                if self.get_predungeon(Point::new(x1, y2)) != ' ' {
                     yf2 = false;
                 }
             }
-            // Mark area
-            for y in y1..=y2 {
-                for x in x1..=x2 {
-                    if x < DMAXX && y < DMAXY {
-                        self.predungeon[x][y] = '.';
+            y1 += 2;
+            y2 -= 2;
+            if y2 - y1 > 5 {
+                // Expand horizontally left.
+                while xf1 {
+                    if x1 == 0 {
+                        xf1 = false;
                     }
+                    if x2 - x1 >= 12 {
+                        xf1 = false;
+                    }
+                    for jj in y1..=y2 {
+                        if self.get_predungeon(Point::new(x1, jj)) != ' ' {
+                            xf1 = false;
+                        }
+                    }
+                    if xf1 {
+                        x1 -= 1;
+                    }
+                }
+                x1 += 2;
+                if x2 - x1 > 5 {
+                    self.map_room(x1, y1, x2, y2);
+                    self.knock_walls(x1, y1, x2, y2);
                 }
             }
         } else if !yf1 {
-            // Expand horizontally
+            // Expand horizontally, probing row y2.
             while xf1 || xf2 {
                 if x1 == 0 {
                     xf1 = false;
                 }
-                if x2 == DMAXX - 1 {
+                if x2 == DMAXX as i32 - 1 {
                     xf2 = false;
                 }
-                if x2.saturating_sub(x1) >= 14 {
+                if x2 - x1 >= 14 {
                     xf1 = false;
                     xf2 = false;
                 }
-                if xf1 && x1 > 0 {
+                if xf1 {
                     x1 -= 1;
                 }
-                if xf2 && x2 < DMAXX - 1 {
+                if xf2 {
                     x2 += 1;
                 }
-                if y2 < DMAXY && (xf1 && self.predungeon[x1][y2] != ' ' || xf2 && self.predungeon[x2][y2] != ' ') {
+                if self.get_predungeon(Point::new(x1, y2)) != ' ' {
                     xf1 = false;
+                }
+                if self.get_predungeon(Point::new(x2, y2)) != ' ' {
                     xf2 = false;
                 }
             }
-            // Mark area
-            for y in y1..=y2 {
-                for x in x1..=x2 {
-                    if x < DMAXX && y < DMAXY {
-                        self.predungeon[x][y] = '.';
+            x1 += 2;
+            x2 -= 2;
+            if x2 - x1 > 5 {
+                // Expand vertically down.
+                while yf2 {
+                    if y2 == DMAXY as i32 - 1 {
+                        yf2 = false;
                     }
+                    if y2 - y1 >= 12 {
+                        yf2 = false;
+                    }
+                    for ii in x1..=x2 {
+                        if self.get_predungeon(Point::new(ii, y2)) != ' ' {
+                            yf2 = false;
+                        }
+                    }
+                    if yf2 {
+                        y2 += 1;
+                    }
+                }
+                y2 -= 2;
+                if y2 - y1 > 5 {
+                    self.map_room(x1, y1, x2, y2);
+                    self.knock_walls(x1, y1, x2, y2);
                 }
             }
         } else {
-            // Expand horizontally (other direction)
+            // !yf2: expand horizontally, probing row y1.
             while xf1 || xf2 {
                 if x1 == 0 {
                     xf1 = false;
                 }
-                if x2 == DMAXX - 1 {
+                if x2 == DMAXX as i32 - 1 {
                     xf2 = false;
                 }
-                if x2.saturating_sub(x1) >= 14 {
+                if x2 - x1 >= 14 {
                     xf1 = false;
                     xf2 = false;
                 }
-                if xf1 && x1 > 0 {
+                if xf1 {
                     x1 -= 1;
                 }
-                if xf2 && x2 < DMAXX - 1 {
+                if xf2 {
                     x2 += 1;
                 }
-                if y1 < DMAXY && (xf1 && self.predungeon[x1][y1] != ' ' || xf2 && self.predungeon[x2][y1] != ' ') {
+                if self.get_predungeon(Point::new(x1, y1)) != ' ' {
                     xf1 = false;
+                }
+                if self.get_predungeon(Point::new(x2, y1)) != ' ' {
                     xf2 = false;
                 }
             }
-            // Mark area
-            for y in y1..=y2 {
-                for x in x1..=x2 {
-                    if x < DMAXX && y < DMAXY {
-                        self.predungeon[x][y] = '.';
+            x1 += 2;
+            x2 -= 2;
+            if x2 - x1 > 5 {
+                // Expand vertically up.
+                while yf1 {
+                    if y1 == 0 {
+                        yf1 = false;
                     }
+                    if y2 - y1 >= 12 {
+                        yf1 = false;
+                    }
+                    for ii in x1..=x2 {
+                        if self.get_predungeon(Point::new(ii, y1)) != ' ' {
+                            yf1 = false;
+                        }
+                    }
+                    if yf1 {
+                        y1 -= 1;
+                    }
+                }
+                y1 += 2;
+                if y2 - y1 > 5 {
+                    self.map_room(x1, y1, x2, y2);
+                    self.knock_walls(x1, y1, x2, y2);
                 }
             }
         }
@@ -2823,38 +2966,56 @@ mod tests {
         assert!(has_floor, "CreateDungeon should create floor tiles");
     }
 
+
+    /// C++ `FillVoid` only maps a void into a room when the area is larger
+    /// than 5x5 after the 2-cell shrink; a too-narrow void is left untouched.
     #[test]
-    fn test_fill_void_horizontal_expansion() {
+    fn test_fill_void_small_void_is_noop() {
         let mut gen = CatacombsGenerator::new();
 
-        // Setup horizontal void pattern
-        for y in 10..20 {
-            gen.predungeon[15][y] = '.'; // Vertical floor strip
-        }
-        gen.predungeon[14][15] = '#'; // Wall to fill
-
-        // Fill horizontally
-        gen.fill_void(true, false, true, false, 14, 15);
-
-        // Should expand horizontally
-        assert_eq!(gen.predungeon[14][15], '.');
-    }
-
-    #[test]
-    fn test_fill_void_vertical_expansion() {
-        let mut gen = CatacombsGenerator::new();
-
-        // Setup vertical void pattern
+        // A narrow (1-wide) void: fill_void must not map it (width guard fails).
         for x in 10..20 {
             gen.predungeon[x][15] = '.'; // Horizontal floor strip
         }
         gen.predungeon[15][14] = '#'; // Wall to fill
 
-        // Fill vertically
         gen.fill_void(false, true, false, true, 15, 14);
 
-        // Should expand vertically
-        assert_eq!(gen.predungeon[15][14], '.');
+        // C++ FillVoid: after the vertical expansion and 2-cell shrink the
+        // candidate room is narrower than 6 cells, so MapRoom is not called
+        // and the wall cell stays a wall.
+        assert_eq!(gen.predungeon[15][14], '#');
+    }
+
+    /// C++ `FillVoid` converts a sufficiently large bounded void into a room:
+    /// interior floor (MapRoom) with '#' border walls, then KnockWalls opens.
+    #[test]
+    fn test_fill_void_maps_bounded_void_into_room() {
+        let mut gen = CatacombsGenerator::new();
+
+        // Floor border around a void interior.
+        for y in 6..=20 {
+            for x in 6..=24 {
+                gen.predungeon[x][y] = '.';
+            }
+        }
+        for y in 8..18 {
+            for x in 8..22 {
+                gen.predungeon[x][y] = ' ';
+            }
+        }
+        gen.predungeon[15][15] = '#'; // Wall cell with void left / floor right
+
+        let voids_before = gen.predungeon.iter().flatten().filter(|&&c| c == ' ').count();
+        gen.fill_void(true, true, false, true, 15, 15);
+        let voids_after = gen.predungeon.iter().flatten().filter(|&&c| c == ' ').count();
+
+        assert!(voids_after < voids_before, "large void must be converted into a room");
+        // MapRoom creates '#' border walls around the new room.
+        let walls = gen.predungeon.iter().flatten().filter(|&&c| c == '#').count();
+        assert!(walls > 0, "MapRoom must add border walls");
+        // Interior cells of the new room are floor.
+        assert_eq!(gen.predungeon[10][10], '.');
     }
 
     #[test]
