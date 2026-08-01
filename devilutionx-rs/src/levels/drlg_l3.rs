@@ -387,64 +387,70 @@ impl CavesGenerator {
                 continue; // Retry if stairs placement failed
             }
 
-            // River/Pool generation (for L3 Caves, not Hive)
-            if level >= 9 && level <= 12 {
-                self.river(dungeon);
-                self.pool_fix(dungeon);
-
-                // TODO: Warp (town warp special handling)
-
-                // Place L3 Isle minisets
-                self.place_miniset_random(dungeon, &miniset_l3_isle1(), 70);
-                self.place_miniset_random(dungeon, &miniset_l3_isle2(), 70);
-                self.place_miniset_random(dungeon, &miniset_l3_isle3(), 30);
-                self.place_miniset_random(dungeon, &miniset_l3_isle4(), 30);
-                self.place_miniset_random(dungeon, &miniset_l3_isle1(), 100);
-                self.place_miniset_random(dungeon, &miniset_l3_isle2(), 100);
-                self.place_miniset_random(dungeon, &miniset_l3_isle5(), 90);
-
-                // TODO: HallOfHeroes, River (second call in C++)
-
-                // Place TITE minisets (stalactites)
-                self.place_miniset_random(dungeon, &miniset_l3_tite1(), 10);
-                self.place_miniset_random(dungeon, &miniset_l3_tite2(), 10);
-                self.place_miniset_random(dungeon, &miniset_l3_tite3(), 10);
-                self.place_miniset_random(dungeon, &miniset_l3_tite6(), 20);
-                self.place_miniset_random(dungeon, &miniset_l3_tite7(), 20);
-                self.place_miniset_random(dungeon, &miniset_l3_tite8(), 20);
-                self.place_miniset_random(dungeon, &miniset_l3_tite9(), 20);
-                self.place_miniset_random(dungeon, &miniset_l3_tite10(), 20);
-                self.place_miniset_random(dungeon, &miniset_l3_tite11(), 30);
-                self.place_miniset_random(dungeon, &miniset_l3_tite12(), 20);
-                self.place_miniset_random(dungeon, &miniset_l3_tite13(), 20);
-
-                // Place CREV minisets (crevices)
-                self.place_miniset_random(dungeon, &miniset_l3_crev1(), 30);
-                self.place_miniset_random(dungeon, &miniset_l3_crev2(), 30);
-                self.place_miniset_random(dungeon, &miniset_l3_crev3(), 30);
-                self.place_miniset_random(dungeon, &miniset_l3_crev4(), 30);
-                self.place_miniset_random(dungeon, &miniset_l3_crev5(), 30);
-                self.place_miniset_random(dungeon, &miniset_l3_crev6(), 30);
-                self.place_miniset_random(dungeon, &miniset_l3_crev7(), 30);
-                self.place_miniset_random(dungeon, &miniset_l3_crev8(), 30);
-                self.place_miniset_random(dungeon, &miniset_l3_crev9(), 30);
-                self.place_miniset_random(dungeon, &miniset_l3_crev10(), 30);
-                self.place_miniset_random(dungeon, &miniset_l3_crev11(), 30);
-
-                // Place 1x1 minisets (single tile replacements)
-                self.place_miniset_random_1x1(dungeon, 7, 106, 25);
-                self.place_miniset_random_1x1(dungeon, 7, 107, 25);
-                self.place_miniset_random_1x1(dungeon, 7, 108, 25);
-                self.place_miniset_random_1x1(dungeon, 9, 109, 25);
-                self.place_miniset_random_1x1(dungeon, 10, 110, 25);
-            }
-
-            // Place lava pools
+            // C++ `PlacePool()` is the loop-break condition: retry the whole
+            // cave until a pool is placed. It runs BEFORE the post-loop
+            // decorations, so its RNG draws must come first.
             if self.place_lava_pool(dungeon) {
-                break; // Successfully generated dungeon with pool
+                break;
             }
+        }
 
-            // If no pool placed, retry (matches C++ behavior)
+        // Post-loop decoration passes (C++ after the `while(true)` loop):
+        // PoolFix -> Warp -> L3ISLE -> HallOfHeroes -> River -> ThemeRooms
+        // -> Fence -> L3TITE -> L3CREV -> 1x1. Passes still to port: Warp,
+        // HallOfHeroes, DRLG_PlaceThemeRooms, Fence (RNG stream therefore
+        // diverges after the L3ISLE draws).
+        if level >= 9 && level <= 12 {
+            self.pool_fix(dungeon);
+
+            // TODO: Warp (town warp special handling)
+
+            // Place L3 Isle minisets (C++ order, after PoolFix/Warp)
+            self.place_miniset_random(dungeon, &miniset_l3_isle1(), 70);
+            self.place_miniset_random(dungeon, &miniset_l3_isle2(), 70);
+            self.place_miniset_random(dungeon, &miniset_l3_isle3(), 30);
+            self.place_miniset_random(dungeon, &miniset_l3_isle4(), 30);
+            self.place_miniset_random(dungeon, &miniset_l3_isle1(), 100);
+            self.place_miniset_random(dungeon, &miniset_l3_isle2(), 100);
+            self.place_miniset_random(dungeon, &miniset_l3_isle5(), 90);
+
+            // TODO: HallOfHeroes; C++ calls River() after it.
+            self.river(dungeon);
+
+            // TODO: DRLG_PlaceThemeRooms(5, 10, 7, 0, false) + Fence()
+
+            // Place TITE minisets (stalactites)
+            self.place_miniset_random(dungeon, &miniset_l3_tite1(), 10);
+            self.place_miniset_random(dungeon, &miniset_l3_tite2(), 10);
+            self.place_miniset_random(dungeon, &miniset_l3_tite3(), 10);
+            self.place_miniset_random(dungeon, &miniset_l3_tite6(), 20);
+            self.place_miniset_random(dungeon, &miniset_l3_tite7(), 20);
+            self.place_miniset_random(dungeon, &miniset_l3_tite8(), 20);
+            self.place_miniset_random(dungeon, &miniset_l3_tite9(), 20);
+            self.place_miniset_random(dungeon, &miniset_l3_tite10(), 20);
+            self.place_miniset_random(dungeon, &miniset_l3_tite11(), 30);
+            self.place_miniset_random(dungeon, &miniset_l3_tite12(), 20);
+            self.place_miniset_random(dungeon, &miniset_l3_tite13(), 20);
+
+            // Place CREV minisets (crevices)
+            self.place_miniset_random(dungeon, &miniset_l3_crev1(), 30);
+            self.place_miniset_random(dungeon, &miniset_l3_crev2(), 30);
+            self.place_miniset_random(dungeon, &miniset_l3_crev3(), 30);
+            self.place_miniset_random(dungeon, &miniset_l3_crev4(), 30);
+            self.place_miniset_random(dungeon, &miniset_l3_crev5(), 30);
+            self.place_miniset_random(dungeon, &miniset_l3_crev6(), 30);
+            self.place_miniset_random(dungeon, &miniset_l3_crev7(), 30);
+            self.place_miniset_random(dungeon, &miniset_l3_crev8(), 30);
+            self.place_miniset_random(dungeon, &miniset_l3_crev9(), 30);
+            self.place_miniset_random(dungeon, &miniset_l3_crev10(), 30);
+            self.place_miniset_random(dungeon, &miniset_l3_crev11(), 30);
+
+            // Place 1x1 minisets (single tile replacements)
+            self.place_miniset_random_1x1(dungeon, 7, 106, 25);
+            self.place_miniset_random_1x1(dungeon, 7, 107, 25);
+            self.place_miniset_random_1x1(dungeon, 7, 108, 25);
+            self.place_miniset_random_1x1(dungeon, 9, 109, 25);
+            self.place_miniset_random_1x1(dungeon, 10, 110, 25);
         }
 
         true
