@@ -24,8 +24,8 @@ for i, r in enumerate(rows):
                 r['hitPointsMinimum'], r['hitPointsMaximum'], r['ai'],
                 r['intelligence'], r['toHit'], r['minDamage'], r['maxDamage'],
                 r['toHitSpecial'], r['minDamageSpecial'], r['maxDamageSpecial'], r['armorClass']) +
-            '          MonsterClass::%s, %s, %s, %s),' % (
-                r['monsterClass'], res_expr(r['resistance']), res_expr(r['resistanceHell']), r['exp']))
+            '          MonsterClass::%s, %s, %s, %s, %s),' % (
+                r['monsterClass'], res_expr(r['resistance']), res_expr(r['resistanceHell']), r['exp'], r['image']))
     out.append(line)
 
 result = '\n'.join(out)

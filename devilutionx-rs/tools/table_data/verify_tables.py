@@ -57,13 +57,13 @@ def check_monstdat():
         got = (args[0].strip('"'), iv(args[1]), iv(args[2]), iv(args[3]), iv(args[4]), iv(args[5]),
                AI[args[6].split('::')[1]], iv(args[7]), iv(args[8]), iv(args[9]), iv(args[10]),
                iv(args[11]), iv(args[12]), iv(args[13]), iv(args[14]), CLS[args[15].split('::')[1]],
-               res_mask(args[16]), res_mask(args[17]), iv(args[18]))
+               res_mask(args[16]), res_mask(args[17]), iv(args[18]), iv(args[19]))
         exp = (row['name'], int(row['minDunLvl']), int(row['maxDunLvl']), int(row['level']),
                int(row['hitPointsMinimum']), int(row['hitPointsMaximum']), AI[row['ai']],
                int(row['intelligence']), int(row['toHit']), int(row['minDamage']), int(row['maxDamage']),
                int(row['toHitSpecial']), int(row['minDamageSpecial']), int(row['maxDamageSpecial']),
                int(row['armorClass']), CLS[row['monsterClass']], res_mask(row['resistance']),
-               res_mask(row['resistanceHell']), int(row['exp']))
+               res_mask(row['resistanceHell']), int(row['exp']), int(row['image']))
         if got != exp:
             diffs += 1
     print('monstdat: %d/%d rows, %d diffs' % (len(entries), len(tsv), diffs))
