@@ -1895,6 +1895,70 @@ pub fn parse_portal(decoded: &[u8], offset: usize) -> Option<((bool, (i32, i32),
 }
 
 // ============================================================================
+// SaveGameData orchestration (C++ loadsave.cpp:2762-2935)
+// ============================================================================
+
+/// Serialize a full `game` entry for the classic (non-Hellfire, spawn)
+/// format, following the C++ `SaveGameData` section order:
+///   header (43B) + level seeds (17×8B) + player (1266B PlayerPack) +
+///   16 quests (44B each) + 4 portals (24B each) + kill counts (800B) +
+///   dungeon body (active monsters/missiles/objects + dropped items) +
+///   128 unique flags + dLight/dFlags/dPlayer grids (112×112 each) +
+///   dungeon-only grids (dMonster/dCorpse/dPreLight/AutomapView/missile
+///   grid) + premium items + trailing misc.
+///
+/// The Rust engine does not yet map monster/missile/object/dropped-item
+/// state into the C++ packs, so callers pass those blobs in (`dungeon_body`,
+/// `dropped_items`, `dungeon_only_grids`); the orchestration guarantees the
+/// byte layout and ordering for the sections that are implemented.
+pub fn write_game_data_v3(
+    header: &CppGameHeader,
+    seeds: &[(u32, u32)],
+    player_pack: &[u8],
+    quests: &[crate::game::quest_new::Quest],
+    return_state: (i32, i32, i32, i32),
+    portals: &[(bool, (i32, i32), i32, i32, bool)],
+    kill_counts: &[i32],
+    dungeon_body: &[u8],
+    dropped_items: &[u8],
+    unique_flags: &[bool],
+    dlight: &[u8],
+    dflags: &[u8],
+    dplayer: &[u8],
+    dungeon_only_grids: &[u8],
+    premium: &[u8],
+    misc: &[u8],
+) -> Vec<u8> {
+    let mut h = SaveHelper::new(320 * 1024);
+    h.write_bytes(&header.write());
+    h.write_bytes(&CppGameHeader::write_level_seeds(seeds));
+    h.write_bytes(player_pack);
+    for q in quests {
+        write_quest(
+            &mut h,
+            q,
+            (return_state.0, return_state.1),
+            return_state.2,
+            return_state.3,
+        );
+    }
+    for p in portals {
+        write_portal(&mut h, p.0, p.1, p.2, p.3, p.4);
+    }
+    write_kill_counts(&mut h, kill_counts);
+    h.write_bytes(dungeon_body);
+    h.write_bytes(dropped_items);
+    write_unique_flags(&mut h, unique_flags);
+    write_grid_u8(&mut h, dlight);
+    write_grid_u8(&mut h, dflags);
+    write_grid_u8(&mut h, dplayer);
+    h.write_bytes(dungeon_only_grids);
+    h.write_bytes(premium);
+    h.write_bytes(misc);
+    h.into_data()
+}
+
+// ============================================================================
 // SaveLevel / LoadLevel — full per-level persistence
 //
 // Mirrors C++ `SaveLevel`/`LoadLevel` from Source/loadsave.cpp (lines

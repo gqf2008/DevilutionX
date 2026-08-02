@@ -518,6 +518,70 @@ fn save_game_fixed_sections_match_cpp_layout() {
     assert_eq!(h.into_data().len(), 112 * 112 * 4, "i32 grid is 50176 bytes");
 }
 
+/// The SaveGameData orchestration must lay out the sections in the C++
+/// order with the right sizes and byte content at the expected offsets.
+#[test]
+fn write_game_data_v3_section_order_and_offsets() {
+    use devilutionx_rs::game::loadsave::{CppGameHeader, write_game_data_v3};
+    use devilutionx_rs::game::quest_new::Quest;
+
+    let header = CppGameHeader {
+        magic: *b"SHAR",
+        setlevel: 0,
+        setlvlnum: 0,
+        currlevel: 1,
+        leveltype: 1,
+        view_position_x: 75,
+        view_position_y: 68,
+        invflag: false,
+        char_flag: false,
+        active_monster_count: 0,
+        active_item_count: 0,
+        active_missile_count: 0,
+        active_object_count: 0,
+    };
+    let seeds = vec![(0u32, 0u32); 17];
+    let player = vec![0xABu8; 1266];
+    let quests = vec![Quest::default(); 16];
+    let portals = vec![(false, (0, 0), 0, 0, false); 4];
+    let kill = vec![0i32; 138];
+    let dungeon_body = vec![1u8; 10];
+    let dropped = vec![2u8; 20];
+    let flags = vec![false; 128];
+    let grid = vec![9u8; 112 * 112];
+    let dungeon_only = vec![3u8; 40];
+    let premium = vec![4u8; 8];
+    let misc = vec![5u8; 12];
+
+    let out = write_game_data_v3(
+        &header, &seeds, &player, &quests, (0, 0, 0, 0), &portals, &kill,
+        &dungeon_body, &dropped, &flags, &grid, &grid, &grid, &dungeon_only,
+        &premium, &misc,
+    );
+    let base = 43 + 17 * 8 + 1266 + 16 * 44 + 4 * 24 + 800;
+    let expected = base
+        + dungeon_body.len()
+        + dropped.len()
+        + 128
+        + 3 * (112 * 112)
+        + dungeon_only.len()
+        + premium.len()
+        + misc.len();
+    assert_eq!(out.len(), expected, "total length is the sum of all sections");
+
+    assert_eq!(&out[..4], b"SHAR", "magic first");
+    assert!(out[43..43 + 17 * 8].iter().all(|&b| b == 0), "seed table at 43");
+    let p_off = 43 + 17 * 8;
+    assert!(out[p_off..p_off + 3].iter().all(|&b| b == 0xAB), "player pack at seed end");
+    let kill_off = p_off + 1266 + 16 * 44 + 4 * 24;
+    assert_eq!(&out[kill_off..kill_off + 4], &0i32.to_be_bytes(), "kill counts BE i32");
+    let uniq_off = kill_off + 800 + dungeon_body.len() + dropped.len();
+    assert!(out[uniq_off..uniq_off + 128].iter().all(|&b| b == 0), "unique flags");
+    let grid_off = uniq_off + 128;
+    assert!(out[grid_off..grid_off + 3].iter().all(|&b| b == 9), "dLight grid first");
+    assert_eq!(&out[out.len() - misc.len()..], &misc[..], "misc tail");
+}
+
 /// Tier 3 foundation: the Rust `CppGameHeader` writer must reproduce the
 /// C++ `SaveGameData` header + level-seed table byte-for-byte. Decodes the
 /// real C++ reference save, re-serialises the parsed header/seeds, and
