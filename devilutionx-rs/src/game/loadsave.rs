@@ -1733,6 +1733,38 @@ impl CppGameHeader {
             active_object_count: be_i32(39),
         })
     }
+
+    /// Serialize the fixed header exactly as C++ `SaveGameData` writes it
+    /// (loadsave.cpp:2766-2801): magic LE u32, setlevel LE u8, then BE
+    /// u32/i32 fields, then the two LE u8 flags. Returns the 43-byte header.
+    pub fn write(&self) -> Vec<u8> {
+        let mut helper = SaveHelper::new(43);
+        helper.write_le_u32(u32::from_le_bytes(self.magic));
+        helper.write_u8(self.setlevel);
+        helper.write_be_u32(self.setlvlnum);
+        helper.write_be_u32(self.currlevel);
+        helper.write_be_u32(self.leveltype);
+        helper.write_be_i32(self.view_position_x);
+        helper.write_be_i32(self.view_position_y);
+        helper.write_bool8(self.invflag);
+        helper.write_bool8(self.char_flag);
+        helper.write_be_i32(self.active_monster_count);
+        helper.write_be_i32(self.active_item_count);
+        helper.write_be_u32(self.active_missile_count);
+        helper.write_be_i32(self.active_object_count);
+        helper.into_data()
+    }
+
+    /// Serialize the per-level seed table (loadsave.cpp:2803-2806): 8 bytes
+    /// per level (BE u32 seed, BE u32 level type).
+    pub fn write_level_seeds(seeds: &[(u32, u32)]) -> Vec<u8> {
+        let mut helper = SaveHelper::new(seeds.len() * 8);
+        for &(seed, ltype) in seeds {
+            helper.write_be_u32(seed);
+            helper.write_be_u32(ltype);
+        }
+        helper.into_data()
+    }
 }
 
 // ============================================================================

@@ -431,6 +431,40 @@ fn replay_warrior_level1to2() {
 
     // TODO(Tier 3): compare final engine save state to demo_0_reference_spawn_0.sv
     // byte-for-byte (HeroCompareResult::Same in C++).
+}
+
+/// Tier 3 foundation: the Rust `CppGameHeader` writer must reproduce the
+/// C++ `SaveGameData` header + level-seed table byte-for-byte. Decodes the
+/// real C++ reference save, re-serialises the parsed header/seeds, and
+/// compares against the original decoded bytes.
+#[test]
+fn save_writer_header_matches_cpp_reference_bytes() {
+    use devilutionx_rs::game::codec::codec_decode;
+    use devilutionx_rs::game::loadsave::CppGameHeader;
+
+    const PASSWORD_SPAWN_SINGLE: &str = "adslhfb1";
+    let mut save = load_save_archive(fixture_path("demo_0_reference_spawn_0.sv"))
+        .expect("reference save opens as MPQ");
+    let raw = save.read_entry("game").expect("game entry");
+    let decoded = codec_decode(&raw, PASSWORD_SPAWN_SINGLE);
+    assert!(decoded.len() >= 43 + 17 * 8, "decoded entry has header + seed table");
+
+    let header = CppGameHeader::parse(&decoded).expect("header parses");
+    let written_header = header.write();
+    assert_eq!(
+        &written_header[..],
+        &decoded[..43],
+        "header round-trip is byte-exact vs C++ SaveGameData"
+    );
+
+    let seeds = CppGameHeader::parse_level_seeds(&decoded, 17).expect("seeds parse");
+    let written_seeds = CppGameHeader::write_level_seeds(&seeds);
+    assert_eq!(
+        &written_seeds[..],
+        &decoded[43..43 + 17 * 8],
+        "level-seed table round-trip is byte-exact vs C++"
+    );
+}
 
 /// Byte-exact decoding against the C++ `demomode.cpp` record layout
 /// (`WriteDemoMsgHeader` + per-type payload, version 3):
@@ -502,7 +536,4 @@ fn decodes_synthetic_version3_events_byte_exactly() {
         demo.events[4].payload,
         DemoPayload::MouseMotion { x: 640, y: 320 }
     );
-}
-
-
 }
