@@ -203,7 +203,7 @@ impl GroundItemType {
 /// the renderer projects them with the same isometric transform. The player
 /// picks a ground item up by walking onto its tile (see
 /// `GameState::pickup_ground_items`).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct GroundItem {
     /// World tile X (micro-tile coords).
     pub x: i32,
@@ -214,6 +214,9 @@ pub struct GroundItem {
     /// Real ITEMS_DATA index when this is a genuine dropped item (C++
     /// `AllItemsList` row / IDidx), `None` for gold and the demo potions.
     pub item_index: Option<usize>,
+    /// Fully generated item (C++ `SetupAllItems` output) for real drops;
+    /// `None` for gold and the demo potions.
+    pub item: Option<crate::game::items::Item>,
 }
 
 /// Main game state integrating all subsystems
@@ -1248,17 +1251,18 @@ impl GameState {
         }
         if rng.random_range(0..100) > 25 {
             let item_type = GroundItemType::Gold;
-            self.ground_items.push(GroundItem { x, y, item_type, item_index: None });
+            self.ground_items.push(GroundItem { x, y, item_type, item_index: None, item: None });
             println!("[Drop] spawned {:?} '{}' at ({}, {})", item_type, item_type.display_name(), x, y);
             return;
         }
         // Non-gold droppable item: pick a real base item from the aligned
-        // ITEMS_DATA by monster level (C++ GetItemIndexForDroppableItem +
-        // RndItemForMonsterLevel). Full SetupAllItems spawning (attributes,
-        // affixes, uniques) is a follow-up; the item index is stored so the
-        // pickup can build the real Item.
+        // ITEMS_DATA by monster level, then run the full C++ `SetupAllItems`
+        // pipeline (GetItemAttrs + GetItemBLevel/CheckUnique/GetItemBonus +
+        // ItemRndDur) with a seed drawn from the caller's RNG. The generated
+        // `Item` travels with the ground item so pickup reports the real
+        // name/quality.
         let item_index = crate::game::item_affix::get_item_index_for_droppable(
-            false,
+            true, // C++ RndItemForMonsterLevel weights by iDropRate
             |item_data| item_data.min_mlvl as i32 <= monster_level,
             rng,
             false,
@@ -1266,25 +1270,65 @@ impl GameState {
             false,
             false,
         );
-        let (item_type, item_index) = match item_index {
-            Some(idx) => (GroundItemType::ManaPotion, Some(idx)),
-            None => (
-                if rng.random_range(0..2) == 0 {
+        match item_index {
+            Some(idx) => {
+                let seed = rng.random::<u32>();
+                let mut item = crate::game::items::Item::empty();
+                crate::game::item_affix::setup_all_items(
+                    &mut item,
+                    &self.player,
+                    idx,
+                    seed,
+                    monster_level,
+                    1,    // uper: normal monsters use 1% unique chance
+                    false, // onlygood: normal monsters drop any affix
+                    false, // pregen
+                    0,     // uidOffset
+                    false, // forceNotUnique
+                );
+                let display = if item.name.is_empty() {
+                    crate::game::item_dat::get_item_data(idx)
+                        .map(|d| d.name)
+                        .unwrap_or("Unknown")
+                } else {
+                    &item.name
+                };
+                println!(
+                    "[Drop] spawned {} ({:?}, seed {}) at ({}, {})",
+                    display, item.quality, seed, x, y
+                );
+                self.ground_items.push(GroundItem {
+                    x,
+                    y,
+                    item_type: GroundItemType::ManaPotion,
+                    item_index: Some(idx),
+                    item: Some(item),
+                });
+            }
+            None => {
+                // No droppable item for this monster level: fall back to a
+                // demo potion so the tile still yields loot.
+                let item_type = if rng.random_range(0..2) == 0 {
                     GroundItemType::HealingPotion
                 } else {
                     GroundItemType::ManaPotion
-                },
-                None,
-            ),
-        };
-        self.ground_items.push(GroundItem { x, y, item_type, item_index });
-        println!(
-            "[Drop] spawned {:?} '{}' at ({}, {})",
-            item_type,
-            item_type.display_name(),
-            x,
-            y
-        );
+                };
+                self.ground_items.push(GroundItem {
+                    x,
+                    y,
+                    item_type,
+                    item_index: None,
+                    item: None,
+                });
+                println!(
+                    "[Drop] spawned {:?} '{}' at ({}, {})",
+                    item_type,
+                    item_type.display_name(),
+                    x,
+                    y
+                );
+            }
+        }
     }
 
     /// Pick up any `GroundItem`s on the player's current tile.
@@ -1302,13 +1346,13 @@ impl GameState {
         let remaining: Vec<GroundItem> = self
             .ground_items
             .iter()
-            .copied()
+            .cloned()
             .filter(|g| !(g.x == px && g.y == py))
             .collect();
         let picked_up: Vec<GroundItem> = self
             .ground_items
             .iter()
-            .copied()
+            .cloned()
             .filter(|g| g.x == px && g.y == py)
             .collect();
         self.ground_items = remaining;
@@ -1326,10 +1370,16 @@ impl GameState {
                 }
                 GroundItemType::HealingPotion | GroundItemType::ManaPotion => {
                     // Inventory/belt integration is deferred; just log the pickup.
+                    // Real drops carry the fully generated item (C++ SetupAllItems).
                     let name = g
-                        .item_index
-                        .and_then(|idx| crate::game::item_dat::get_item_data(idx))
-                        .map(|d| d.name)
+                        .item
+                        .as_ref()
+                        .map(|i| i.name.as_str())
+                        .or_else(|| {
+                            g.item_index
+                                .and_then(|idx| crate::game::item_dat::get_item_data(idx))
+                                .map(|d| d.name)
+                        })
                         .unwrap_or_else(|| g.item_type.display_name());
                     println!("[Pickup] picked up {}", name);
                 }
@@ -2336,7 +2386,7 @@ impl crate::game::save::LevelStateMut for GameState {
                 1 => GroundItemType::HealingPotion,
                 _ => GroundItemType::ManaPotion,
             };
-            self.ground_items.push(GroundItem { x: it.x, y: it.y, item_type, item_index: None });
+            self.ground_items.push(GroundItem { x: it.x, y: it.y, item_type, item_index: None, item: None });
         }
     }
 }
@@ -2601,8 +2651,8 @@ mod tests {
 
     #[test]
     fn test_ground_item_struct_fields() {
-        // GroundItem carries tile coords + type and is Copy.
-        let g = GroundItem { x: 12, y: 7, item_type: GroundItemType::Gold, item_index: None };
+        // GroundItem carries tile coords + type (+ optional generated item).
+        let g = GroundItem { x: 12, y: 7, item_type: GroundItemType::Gold, item_index: None, item: None };
         assert_eq!(g.x, 12);
         assert_eq!(g.y, 7);
         assert_eq!(g.item_type, GroundItemType::Gold);
@@ -2709,7 +2759,7 @@ mod tests {
         let gold_before = gs.player._p_gold;
         // Drop a gold item directly onto the player's tile.
         gs.player.position = Point::new(30, 30);
-        gs.ground_items.push(GroundItem { x: 30, y: 30, item_type: GroundItemType::Gold, item_index: None });
+        gs.ground_items.push(GroundItem { x: 30, y: 30, item_type: GroundItemType::Gold, item_index: None, item: None });
         gs.pickup_ground_items();
         assert_eq!(
             gs.player._p_gold,
@@ -2724,8 +2774,8 @@ mod tests {
         let mut gs = GameState::new(Player::new(), false, 1);
         gs.player.position = Point::new(30, 30);
         // One item on the player's tile, one elsewhere.
-        gs.ground_items.push(GroundItem { x: 30, y: 30, item_type: GroundItemType::Gold, item_index: None });
-        gs.ground_items.push(GroundItem { x: 40, y: 40, item_type: GroundItemType::HealingPotion, item_index: None });
+        gs.ground_items.push(GroundItem { x: 30, y: 30, item_type: GroundItemType::Gold, item_index: None, item: None });
+        gs.ground_items.push(GroundItem { x: 40, y: 40, item_type: GroundItemType::HealingPotion, item_index: None, item: None });
         assert_eq!(gs.ground_items.len(), 2);
         gs.pickup_ground_items();
         // Only the coincident item is removed.
@@ -2742,8 +2792,8 @@ mod tests {
         let mut gs = GameState::new(Player::new(), false, 1);
         gs.player.position = Point::new(5, 5);
         let gold_before = gs.player._p_gold;
-        gs.ground_items.push(GroundItem { x: 5, y: 5, item_type: GroundItemType::HealingPotion, item_index: None });
-        gs.ground_items.push(GroundItem { x: 5, y: 5, item_type: GroundItemType::ManaPotion, item_index: None });
+        gs.ground_items.push(GroundItem { x: 5, y: 5, item_type: GroundItemType::HealingPotion, item_index: None, item: None });
+        gs.ground_items.push(GroundItem { x: 5, y: 5, item_type: GroundItemType::ManaPotion, item_index: None, item: None });
         gs.pickup_ground_items();
         assert!(gs.ground_items.is_empty());
         assert_eq!(gs.player._p_gold, gold_before, "potion pickup must not change gold");
@@ -2761,7 +2811,7 @@ mod tests {
     fn test_pickup_noop_when_not_coincident() {
         let mut gs = GameState::new(Player::new(), false, 1);
         gs.player.position = Point::new(10, 10);
-        gs.ground_items.push(GroundItem { x: 99, y: 99, item_type: GroundItemType::Gold, item_index: None });
+        gs.ground_items.push(GroundItem { x: 99, y: 99, item_type: GroundItemType::Gold, item_index: None, item: None });
         gs.pickup_ground_items();
         // Item stays because the player isn't on its tile.
         assert_eq!(gs.ground_items.len(), 1);
@@ -2772,9 +2822,9 @@ mod tests {
         // Walking onto a tile with several items should pick them all up.
         let mut gs = GameState::new(Player::new(), false, 1);
         gs.player.position = Point::new(7, 7);
-        gs.ground_items.push(GroundItem { x: 7, y: 7, item_type: GroundItemType::Gold, item_index: None });
-        gs.ground_items.push(GroundItem { x: 7, y: 7, item_type: GroundItemType::Gold, item_index: None });
-        gs.ground_items.push(GroundItem { x: 7, y: 7, item_type: GroundItemType::HealingPotion, item_index: None });
+        gs.ground_items.push(GroundItem { x: 7, y: 7, item_type: GroundItemType::Gold, item_index: None, item: None });
+        gs.ground_items.push(GroundItem { x: 7, y: 7, item_type: GroundItemType::Gold, item_index: None, item: None });
+        gs.ground_items.push(GroundItem { x: 7, y: 7, item_type: GroundItemType::HealingPotion, item_index: None, item: None });
         let gold_before = gs.player._p_gold;
         gs.pickup_ground_items();
         assert!(gs.ground_items.is_empty());
@@ -3006,7 +3056,7 @@ mod tests {
         gs.ground_items.clear();
         gs.ground_items.push(GroundItem { x: 30,
             y: 31,
-            item_type: GroundItemType::HealingPotion, item_index: None });
+            item_type: GroundItemType::HealingPotion, item_index: None, item: None });
 
         // Snapshot the distinctive values.
         let saved_monster_hp = 37i32;
@@ -3413,7 +3463,7 @@ mod tests {
         gs.player_dead = true;
         // Populate some dungeon state that should be cleared.
         gs.dungeon_up_stairs = Some((5, 5));
-        gs.ground_items.push(GroundItem { x: 1, y: 1, item_type: GroundItemType::Gold, item_index: None });
+        gs.ground_items.push(GroundItem { x: 1, y: 1, item_type: GroundItemType::Gold, item_index: None, item: None });
         gs.simple_missiles.push(SimpleMissile {
             x: 0, y: 0, dx: 1, dy: 0, damage: 5, range_left: 5,
         });

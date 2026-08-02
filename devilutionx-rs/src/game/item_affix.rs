@@ -1997,8 +1997,8 @@ pub fn rnd_pl(min: i32, max: i32) -> i32 {
     if min >= max {
         return min;
     }
-    let mut rng = rand::rng();
-    rng.random_range(min..=max)
+    // C++ `RndPl` (items.cpp): return GenerateRnd(max - min + 1) + min;
+    super::super::engine::random::generate_rnd(max - min + 1) + min
 }
 
 /// Calculate to-hit bonus from damage bonus
@@ -2435,9 +2435,9 @@ pub fn calc_affix_item_value(item: &super::items::Item) -> i32 {
 
 /// Apply random affixes to an item based on its type
 /// Exact port of GetItemBonus() from items.cpp lines 1309-1347
-pub fn get_item_bonus(
+pub fn get_item_bonus<P>(
     item: &mut super::items::Item,
-    player: &super::player::Player,
+    player: &P,
     min_lvl: i32,
     max_lvl: i32,
     only_good: bool,
@@ -2582,9 +2582,9 @@ fn select_random_affix_internal<'a>(
 
 /// Get random prefix/suffix affixes and apply them to an item
 /// Exact port of GetItemPower() from items.cpp lines 1210-1236
-pub fn apply_random_affixes(
+pub fn apply_random_affixes<P>(
     item: &mut super::items::Item,
-    _player: &super::player::Player,  // Reserved for future use
+    _player: &P,  // Reserved for future use
     min_lvl: i32,
     max_lvl: i32,
     item_types: AffixItemType,
@@ -2653,24 +2653,21 @@ pub fn apply_random_affixes(
         }
     }
 
-    // Generate item name
-    let base_name = &item.base_name;
-    let magic_name = generate_magic_item_name(base_name, prefix_data, suffix_data);
-    // TODO: Set item.identified_name when field exists in Item struct
-
-    // TODO: Check StringInPanel and use short name if needed
-
-    // Recalculate item value
+    // Generate item name (C++: CopyUtf8(item._iIName, GenerateMagicItemName(...)))
+    // The Rust Item has no separate identified-name field; `name` is the
+    // display name (and `base_name` keeps the base).
     if prefix_data.is_some() || suffix_data.is_some() {
+        item.name = generate_magic_item_name(&item.base_name, prefix_data, suffix_data);
+        // Recalculate item value (simplified CalcItemValue)
         item.buy_value = calc_affix_item_value(item);
     }
 }
 
 /// Apply spell and charges to a staff, optionally with a prefix
 /// Exact port of GetStaffPower() from items.cpp lines 1138-1159
-pub fn apply_staff_power(
+pub fn apply_staff_power<P>(
     item: &mut super::items::Item,
-    _player: &super::player::Player,
+    _player: &P,
     lvl: i32,
     only_good: bool,
 ) {
@@ -2697,14 +2694,10 @@ pub fn apply_staff_power(
         }
     }
 
-    // Generate staff name
-    // TODO: Implement proper staff name generation with spell names
-    // For now use basic format
+    // Staff display name: prefix + base (spell name generation is a
+    // follow-up; the C++ format is "{Prefix} {Item} of {Spell}").
     if let Some(prefix) = prefix_data {
-        let _magic_name = generate_magic_item_name(&item.base_name, Some(prefix), None);
-        // TODO: Set item.identified_name when field exists
-    } else {
-        // TODO: Set item.identified_name to base_name when field exists
+        item.name = generate_magic_item_name(&item.base_name, Some(prefix), None);
     }
 
     // Recalculate value
@@ -2913,11 +2906,18 @@ pub struct CreateInfo(pub u16);
 
 impl CreateInfo {
     pub const NONE: Self = Self(0);
-    pub const PREGEN: Self = Self(0x0001);   // Pre-generated item
-    pub const ONLYGOOD: Self = Self(0x0002);  // Only good affixes
-    pub const UPER15: Self = Self(0x0004);    // 15% unique chance
-    pub const UPER1: Self = Self(0x0008);     // 1% unique chance
-    pub const UNIQUE: Self = Self(0x0010);    // Is unique item
+    /// Level mask — C++ `CF_LEVEL = (1 << 6) - 1`.
+    pub const LEVEL: Self = Self(0x3F);
+    /// Pre-generated item — C++ `CF_PREGEN = 1 << 15`.
+    pub const PREGEN: Self = Self(1 << 15);
+    /// Only good affixes — C++ `CF_ONLYGOOD = 1 << 6`.
+    pub const ONLYGOOD: Self = Self(1 << 6);
+    /// 15% unique chance — C++ `CF_UPER15 = 1 << 7`.
+    pub const UPER15: Self = Self(1 << 7);
+    /// 1% unique chance — C++ `CF_UPER1 = 1 << 8`.
+    pub const UPER1: Self = Self(1 << 8);
+    /// Is a unique item — C++ `CF_UNIQUE = 1 << 9`.
+    pub const UNIQUE: Self = Self(1 << 9);
 }
 
 /// Complete item generation from seed
@@ -2928,113 +2928,217 @@ impl CreateInfo {
 /// - Random durability
 /// - Unique item check (if applicable)
 /// - Magic affixes (if not unique)
-///
-/// TODO: Requires GetItemAttrs, GetItemBLevel, CheckUnique, GetUniqueItem, ItemRndDur
-pub fn setup_all_items(
+pub fn setup_all_items<P>(
     item: &mut super::items::Item,
-    player: &super::player::Player,
+    player: &P,
     item_index: usize,
     seed: u32,
     level: i32,
-    unique_percent: i32,  // 1 or 15 typical
+    unique_percent: i32, // 1 or 15 typical
     only_good: bool,
     pregen: bool,
-    _uid_offset: i32,
-    _force_not_unique: bool,
+    uid_offset: i32,
+    force_not_unique: bool,
 ) {
-    // Set item seed and initialize RNG
+    use super::items::{ItemMiscId, ItemQuality};
+    use super::super::engine::random::{discard_random_values, set_rnd_seed};
+
+    // C++: item._iSeed = iseed; SetRndSeed(iseed);
     item.seed = seed;
-    super::super::engine::random::set_rnd_seed(seed);
+    set_rnd_seed(seed);
 
-    // Get base item attributes
-    // TODO: get_item_attrs(item, item_index, level / 2);
+    // C++: GetItemAttrs(item, idx, lvl / 2);
+    super::items::get_item_attrs_by_index(item, item_index as i16, level / 2);
 
-    // Set create info flags
-    let mut create_info = CreateInfo::NONE;
-    create_info.0 |= level as u16;
-
+    // C++: item._iCreateInfo = lvl; (+ CF_PREGEN / CF_ONLYGOOD / CF_UPER15 / CF_UPER1)
+    let mut create_info = level as u16;
     if pregen {
-        create_info.0 |= CreateInfo::PREGEN.0;
+        create_info |= CreateInfo::PREGEN.0;
     }
     if only_good {
-        create_info.0 |= CreateInfo::ONLYGOOD.0;
+        create_info |= CreateInfo::ONLYGOOD.0;
     }
     if unique_percent == 15 {
-        create_info.0 |= CreateInfo::UPER15.0;
+        create_info |= CreateInfo::UPER15.0;
     } else if unique_percent == 1 {
-        create_info.0 |= CreateInfo::UPER1.0;
+        create_info |= CreateInfo::UPER1.0;
     }
+    item.create_info = create_info;
 
-    item.create_info = create_info.0;
-
-    // Check if item is quest unique (IMISC_UNIQUE)
-    let is_quest_unique = false;  // TODO: Check item.misc_id == IMISC_UNIQUE
-
-    if !is_quest_unique {
-        // Get item bonus level for affix/unique selection
-        // TODO: let iblvl = get_item_blevel(level, item.misc_id, only_good, unique_percent == 15);
-        let iblvl = level;  // Placeholder
-
+    if item.misc_id != ItemMiscId::Unique {
+        // C++: const int iblvl = GetItemBLevel(lvl, item._iMiscId, onlygood, uper == 15);
+        let iblvl = get_item_blevel(level, item.misc_id, only_good, unique_percent == 15);
         if iblvl != -1 {
-            // Try for unique item
-            // TODO: let uid = check_unique(item, iblvl, unique_percent, uid_offset);
-            let uid: Option<usize> = None;  // Placeholder
-
-            if uid.is_none() {
-                // Not unique - apply magic affixes
-                get_item_bonus(item, player, iblvl / 2, iblvl, only_good, true);
+            let uid = if force_not_unique {
+                // C++: DiscardRandomValues(1);
+                discard_random_values(1);
+                None
             } else {
-                // Apply unique properties
-                // TODO: get_unique_item(player, item, uid.unwrap());
+                check_unique(item, iblvl, unique_percent, uid_offset)
+            };
+            match uid {
+                None => get_item_bonus(item, player, iblvl / 2, iblvl, only_good, true),
+                Some(uid) => get_unique_item(player, item, uid),
             }
         }
-
-        // Randomize durability (unless unique)
-        if item.quality != super::items::ItemQuality::Unique {
-            // TODO: item_rnd_dur(item);
+        // C++: if (item._iMagical != ITEM_QUALITY_UNIQUE) ItemRndDur(item);
+        if item.quality != ItemQuality::Unique {
+            item_rnd_dur(item);
         }
     } else {
-        // Quest unique item - special handling
-        // TODO: Implement quest unique logic
+        // Quest-unique item: the uid is stored in iseed (C++ `_unique_items`).
+        // C++: if (item._iLoc != ILOC_UNEQUIPABLE) { ... }
+        let unequipable = super::item_dat::get_item_data(item_index)
+            .map_or(false, |d| d.equip_type == super::item_dat::ItemEquipType::Unequipable);
+        if !unequipable {
+            let mismatched = seed > 109
+                || super::item_dat::UniqueItemId::from_index(seed as usize).map_or(true, |uid| {
+                    super::item_dat::get_unique_item_data(uid).map_or(true, |unique| {
+                        unique.base_item_id
+                            != super::item_dat::get_item_data(item_index)
+                                .map(|d| d.unique_base_id)
+                                .unwrap_or(super::item_dat::UniqueBaseItem::None)
+                    })
+                });
+            if mismatched {
+                // C++: item.clear();
+                *item = super::items::Item::empty();
+                return;
+            }
+            get_unique_item(player, item, seed as usize);
+        }
     }
 }
 
-/// Randomize item durability within ±20% range
-/// Port of ItemRndDur() from items.cpp lines 1477-1481
+/// C++ `GetValidUniques(lvl, baseItemId)` (items.cpp:1419-1430): every unique
+/// whose base item matches `baseItemId` and whose min level is satisfied.
+fn get_valid_uniques(level: i32, base_item_id: super::item_dat::UniqueBaseItem) -> Vec<u16> {
+    let mut valid = Vec::new();
+    for (index, unique) in super::item_dat::UNIQUE_ITEMS.iter().enumerate() {
+        if unique.base_item_id == base_item_id && level >= unique.min_level as i32 {
+            valid.push(index as u16);
+        }
+    }
+    valid
+}
+
+/// Exact port of CheckUnique() from items.cpp lines 1432-1452.
 ///
-/// TODO: Requires proper Item durability fields
+/// Returns `Some(uid)` (index into `UniqueItems`) when the item rolls unique
+/// and a valid unique exists for the base item; `None` otherwise.
+pub fn check_unique(item: &super::items::Item, level: i32, uper: i32, uid_offset: i32) -> Option<usize> {
+    use super::super::engine::random::{discard_random_values, generate_rnd};
+
+    // C++: if (GenerateRnd(100) > uper) return UITEM_INVALID;
+    if generate_rnd(100) > uper {
+        return None;
+    }
+
+    // C++: GetValidUniques(lvl, AllItemsList[item.IDidx].iItemId)
+    let base_item_id = super::item_dat::get_item_data(item.item_index as usize)
+        .map(|d| d.unique_base_id)
+        .unwrap_or(super::item_dat::UniqueBaseItem::None);
+    let valid = get_valid_uniques(level, base_item_id);
+    if valid.is_empty() {
+        return None;
+    }
+
+    // C++: DiscardRandomValues(1);
+    discard_random_values(1);
+
+    // C++: if (uidOffset >= validUniques.size()) return UITEM_INVALID;
+    if uid_offset < 0 || uid_offset as usize >= valid.len() {
+        return None;
+    }
+
+    // C++: return validUniques[validUniques.size() - 1 - uidOffset];
+    Some(valid[valid.len() - 1 - uid_offset as usize] as usize)
+}
+
+/// Exact port of GetUniqueItem() from items.cpp lines 1454-1475.
+pub fn get_unique_item<P>(_player: &P, item: &mut super::items::Item, uid: usize) {
+    use super::item_dat::{ItemEffectType, UniqueItemId};
+    use super::items::{ItemMiscId, ItemQuality};
+
+    let Some(id) = UniqueItemId::from_index(uid) else { return };
+    let Some(data) = super::item_dat::get_unique_item_data(id) else { return };
+
+    // C++: for (auto power : uniqueItemData.powers) {
+    //          if (power.type == IPL_INVALID) break;
+    //          SaveItemPower(player, item, power);
+    //      }
+    for power in data.powers.iter().take(data.num_powers as usize) {
+        if power.effect_type == ItemEffectType::Invalid {
+            break;
+        }
+        save_item_power(item, power, 0, 0); // TODO: pass player max hp/mana
+    }
+
+    // C++: CopyUtf8(item._iIName, uniqueItemData.UIName, ItemNameLength);
+    // The Rust Item has no separate identified-name field; `name` is the
+    // display name (matches `apply_random_affixes`).
+    item.name = data.name.to_string();
+
+    // C++: if (uniqueItemData.UICurs != ICURS_DEFAULT) item._iCurs = uniqueItemData.UICurs;
+    if data.cursor_graphic != 0 {
+        item.cursor = data.cursor_graphic;
+    }
+
+    // C++: item._iIvalue = uniqueItemData.UIValue;
+    item.identified_value = data.value;
+
+    // C++: if (item._iMiscId == IMISC_UNIQUE) item._iSeed = uid;
+    if item.misc_id == ItemMiscId::Unique {
+        item.seed = uid as u32;
+    }
+
+    // C++: item._iUid = uid; item._iMagical = ITEM_QUALITY_UNIQUE;
+    //      item._iCreateInfo |= CF_UNIQUE;
+    item.unique_id = uid as i32;
+    item.quality = ItemQuality::Unique;
+    item.create_info |= CreateInfo::UNIQUE.0;
+}
+
+/// Randomize item durability
+/// Exact port of ItemRndDur() from items.cpp lines 1477-1481
 pub fn item_rnd_dur(item: &mut super::items::Item) {
+    use super::item_dat::DUR_INDESTRUCTIBLE;
     use super::super::engine::random::generate_rnd;
 
-    if item.max_durability > 0 && item.max_durability != 255 {
-        let variation = item.max_durability / 4;  // ±25%
-        let adjustment = generate_rnd(2 * variation + 1) - variation;
-        item.max_durability = (item.max_durability + adjustment).max(1);
-        item.durability = item.max_durability;
+    // C++: if (item._iDurability > 0 && item._iDurability != DUR_INDESTRUCTIBLE)
+    if item.durability > 0 && item.durability != DUR_INDESTRUCTIBLE {
+        // C++: item._iDurability = GenerateRnd(item._iMaxDur / 2) + (item._iMaxDur / 4) + 1;
+        item.durability = generate_rnd(item.max_durability / 2) + (item.max_durability / 4) + 1;
     }
 }
 
 /// Get item bonus level for affix/unique generation
-/// Port of GetItemBLevel() from items.cpp lines 1483-1508
-///
-/// TODO: Requires item misc_id enum and level calculation logic
+/// Exact port of GetItemBLevel() from items.cpp lines 1483-1508
 pub fn get_item_blevel(
     level: i32,
-    _misc_id: super::item_dat::ItemMiscId,
+    misc_id: super::items::ItemMiscId,
     only_good: bool,
     uper15: bool,
 ) -> i32 {
-    // Simplified version - full logic requires misc_id cases
-    let mut blvl = level;
+    use super::items::ItemMiscId;
+    use super::super::engine::random::generate_rnd;
 
-    if only_good {
-        blvl += 4;
+    // C++: int iblvl = -1;
+    let mut iblvl = -1;
+    // C++: if (GenerateRnd(100) <= 10 || GenerateRnd(100) <= lvl || onlygood
+    //         || IsAnyOf(miscId, IMISC_STAFF, IMISC_RING, IMISC_AMULET))
+    if generate_rnd(100) <= 10
+        || generate_rnd(100) <= level
+        || only_good
+        || matches!(misc_id, ItemMiscId::Staff | ItemMiscId::Ring | ItemMiscId::Amulet)
+    {
+        iblvl = level;
     }
+    // C++: if (uper15) iblvl = lvl + 4;
     if uper15 {
-        blvl += 4;
+        iblvl = level + 4;
     }
-
-    blvl
+    iblvl
 }
 
 // ============================================================================
@@ -4037,4 +4141,155 @@ mod tests {
         // And must NOT match a weapon search.
         assert!(!zodiac.item_types.contains(AffixItemType::WEAPON));
     }
+    // ------------------------------------------------------------------
+    // SetupAllItems / CheckUnique / GetUniqueItem / ItemRndDur
+    // ------------------------------------------------------------------
+    //
+    // NOTE: the generation path uses the shared global Diablo LCG (like C++).
+    // The assertions below are intentionally state-independent so they stay
+    // deterministic under the parallel test harness; byte-exact seed-to-item
+    // reproduction is exercised by the single-threaded cpp-repro workflows.
+
+    fn find_item_index(name: &str) -> usize {
+        crate::game::item_dat::ITEMS_DATA
+            .iter()
+            .position(|d| d.name == name)
+            .unwrap_or_else(|| panic!("ITEMS_DATA row {name:?} not found"))
+    }
+
+    #[test]
+    fn test_setup_all_items_sets_seed_index_and_create_info() {
+        use super::super::items::{Item, ItemQuality};
+
+        let idx = find_item_index("Short Sword");
+        let mut item = Item::empty();
+        setup_all_items(&mut item, &(), idx, 0x1234_5678, 8, 1, true, true, 0, false);
+
+        assert_eq!(item.seed, 0x1234_5678);
+        assert_eq!(item.item_index, idx as i16);
+        // C++ flags: CF_PREGEN = 1<<15, CF_ONLYGOOD = 1<<6, CF_UPER1 = 1<<8.
+        assert_ne!(item.create_info & CreateInfo::PREGEN.0, 0, "pregen flag set");
+        assert_ne!(item.create_info & CreateInfo::ONLYGOOD.0, 0, "onlygood flag set");
+        assert_ne!(item.create_info & CreateInfo::UPER1.0, 0, "uper1 flag set");
+        assert_eq!(item.create_info & CreateInfo::UPER15.0, 0, "uper15 not set");
+        // Level is stored in the low bits (C++ `_iCreateInfo = lvl`).
+        assert_eq!(item.create_info & CreateInfo::LEVEL.0, 8);
+        // A sword with onlygood=true must end up magic or unique.
+        assert!(
+            item.quality == ItemQuality::Magic || item.quality == ItemQuality::Unique,
+            "sword quality should be magic or unique, got {:?}",
+            item.quality
+        );
+        assert!(!item.name.is_empty());
+    }
+
+    #[test]
+    fn test_check_unique_uper_100_returns_matching_uid() {
+        use super::super::items::Item;
+
+        // uper=100 makes the first GenerateRnd(100) roll always pass, so the
+        // result depends only on GetValidUniques + uidOffset (state-independent).
+        // Pick the first base item whose unique_base_id has matching uniques
+        // (some names appear on multiple table rows with different base ids).
+        let idx = crate::game::item_dat::ITEMS_DATA
+            .iter()
+            .position(|d| {
+                crate::game::item_dat::UNIQUE_ITEMS
+                    .iter()
+                    .any(|u| u.base_item_id == d.unique_base_id)
+            })
+            .expect("some ITEMS_DATA row has matching uniques");
+        let mut item = Item::empty();
+        // item_index is what CheckUnique reads (C++ item.IDidx).
+        item.item_index = idx as i16;
+
+        let uid = check_unique(&item, 50, 100, 0).expect("base item has valid uniques at level 50");
+        let unique = crate::game::item_dat::get_unique_item_data(
+            crate::game::item_dat::UniqueItemId::from_index(uid).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            unique.base_item_id,
+            crate::game::item_dat::get_item_data(idx).unwrap().unique_base_id,
+            "picked unique must match the base item"
+        );
+
+        // uid_offset beyond the valid list -> invalid.
+        assert_eq!(check_unique(&item, 50, 100, 99), None);
+        // A base item with no uniques (e.g. a scroll) -> invalid.
+        let scroll = find_item_index("Scroll of Town Portal");
+        let mut no_unique = Item::empty();
+        no_unique.item_index = scroll as i16;
+        assert_eq!(check_unique(&no_unique, 50, 100, 0), None);
+    }
+
+    #[test]
+    fn test_get_unique_item_sets_unique_quality_and_name() {
+        use super::super::items::Item;
+
+        use super::super::items::ItemQuality;
+
+        let idx = find_item_index("Cleaver");
+        let mut item = Item::empty();
+        setup_all_items(&mut item, &(), idx, 0, 10, 1, false, false, 0, false);
+
+        // Cleaver is a quest-unique (IMISC_UNIQUE) whose uid == iseed == 0.
+        assert_eq!(item.quality, ItemQuality::Unique);
+        assert_eq!(item.unique_id, 0);
+        assert_eq!(item.seed, 0, "IMISC_UNIQUE keeps uid in _iSeed");
+        assert_ne!(item.create_info & CreateInfo::UNIQUE.0, 0);
+        assert_eq!(
+            item.name,
+            crate::game::item_dat::UNIQUE_ITEMS[0].name,
+            "display name is the unique item name"
+        );
+    }
+
+    #[test]
+    fn test_setup_all_items_quest_unique_bad_seed_clears_item() {
+        use super::super::items::Item;
+
+        let idx = find_item_index("Cleaver");
+        let mut item = Item::empty();
+        item.value = 999;
+        // iseed > 109 (or mismatching base) -> C++ `item.clear()`.
+        setup_all_items(&mut item, &(), idx, 200, 10, 1, false, false, 0, false);
+        assert_eq!(item.item_index, -1, "mismatched quest-unique seed clears the item");
+        assert!(item.name.is_empty());
+        assert_eq!(item.value, 0);
+    }
+
+    #[test]
+    fn test_item_rnd_dur_skips_indestructible_and_zero_dur() {
+        use super::super::items::Item;
+
+        let mut item = Item::empty();
+        item.durability = 0;
+        item.max_durability = 20;
+        item_rnd_dur(&mut item);
+        assert_eq!(item.durability, 0, "zero durability is left untouched");
+
+        // C++ checks current durability (not max): indestructible items have
+        // both _iDurability and _iMaxDur == DUR_INDESTRUCTIBLE.
+        item.durability = 255; // DUR_INDESTRUCTIBLE
+        item.max_durability = 255;
+        item_rnd_dur(&mut item);
+        assert_eq!(item.durability, 255, "indestructible durability is left untouched");
+    }
+
+    #[test]
+    fn test_get_item_blevel_misc_short_circuit_and_uper15() {
+        use super::super::items::ItemMiscId;
+
+        // Staff/Ring/Amulet short-circuit the rolls (C++ IsAnyOf).
+        assert_eq!(get_item_blevel(8, ItemMiscId::Staff, false, false), 8);
+        assert_eq!(get_item_blevel(8, ItemMiscId::Ring, false, false), 8);
+        assert_eq!(get_item_blevel(8, ItemMiscId::Amulet, false, false), 8);
+        // onlygood always yields a level (state-independent).
+        assert_eq!(get_item_blevel(8, ItemMiscId::None, true, false), 8);
+        // uper15 pins to lvl + 4 (state-independent).
+        assert_eq!(get_item_blevel(8, ItemMiscId::None, false, true), 12);
+        assert_eq!(get_item_blevel(30, ItemMiscId::None, false, true), 34);
+    }
+
 }

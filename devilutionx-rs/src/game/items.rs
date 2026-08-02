@@ -1530,7 +1530,16 @@ impl ItemArray {
 ///
 /// 从物品数据表加载基础属性到 Item 结构
 pub fn get_item_attrs(item: &mut Item, item_idx: ItemIndex, level: i32) {
-    let idx = item_idx as i16;
+    get_item_attrs_by_index(item, item_idx as i16, level);
+}
+
+/// [`get_item_attrs`] variant that takes a raw `ITEMS_DATA` row index directly.
+///
+/// The `ItemIndex` enum only names a subset of the table rows, so the full
+/// `SetupAllItems` path (which can receive any droppable index) must not round-
+/// trip through the enum.
+pub fn get_item_attrs_by_index(item: &mut Item, item_idx: i16, level: i32) {
+    let idx = item_idx;
     if idx < 0 || idx as usize >= ITEMS_DATA.len() {
         return;
     }
@@ -1584,13 +1593,10 @@ pub fn get_item_attrs(item: &mut Item, item_idx: ItemIndex, level: i32) {
     item.base_damage_min = data.min_damage;
     item.base_damage_max = data.max_damage;
 
-    // 护甲 (随机在 min_ac 和 max_ac 之间)
-    let mut rng = rand::rng();
-    if data.max_ac > data.min_ac {
-        item.armor_class = data.min_ac as i16 + rng.random_range(0..=(data.max_ac - data.min_ac)) as i16;
-    } else {
-        item.armor_class = data.min_ac as i16;
-    }
+    // 护甲 (C++: item._iAC = baseItemData.iMinAC + GenerateRnd(iMaxAC - iMinAC + 1))
+    // 使用与 C++ 相同的全局 LCG，保证 SetupAllItems 的随机序列与 C++ 一致
+    item.armor_class = data.min_ac as i16
+        + crate::engine::random::generate_rnd(data.max_ac as i32 - data.min_ac as i32 + 1) as i16;
     item.base_armor = item.armor_class;
 
     // 耐久度
