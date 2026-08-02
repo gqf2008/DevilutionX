@@ -2197,6 +2197,23 @@ pub const UNIQUE_ITEMS: [UniqueItemData; 90] = [
           ItemEffectType::Invalid, 0, 0,
           ItemEffectType::Invalid, 0, 0),
 ];
+/// C++ `GetInventorySize(item)` (inv.cpp:2291-2298): the cursor sprite
+/// pixel size / 28 (INV_SLOT_SIZE_PX, inv.h:20). Classic sizes: 1x1
+/// misc/consumables, 2x1 weapons, 2x2 armor/helms/shields. Returns
+/// `(width_cells, height_cells)` for the itemdat.tsv row.
+pub fn inventory_size(index: usize) -> (u8, u8) {
+    match get_item_data(index).map(|d| d.item_type) {
+        Some(
+            ItemType::Sword | ItemType::Axe | ItemType::Bow | ItemType::Mace | ItemType::Staff,
+        ) => (2, 1),
+        Some(
+            ItemType::Shield | ItemType::Helm | ItemType::LightArmor | ItemType::MediumArmor
+                | ItemType::HeavyArmor,
+        ) => (2, 2),
+        _ => (1, 1),
+    }
+}
+
 pub fn get_item_data(index: usize) -> Option<&'static ItemData> {
     if index < ITEMS_DATA.len() {
         Some(&ITEMS_DATA[index])

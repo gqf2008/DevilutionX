@@ -995,19 +995,28 @@ impl GameState {
         if body_slot >= self.player.inv_body.len() {
             return false;
         }
-        // Swap with the equipped item; clear the source grid cell and re-mark
-        // the displaced item at a free cell.
+        // Swap with the equipped item; clear the whole grid footprint
+        // (positive anchor + negative body cells, C++ AddItemToInvGrid) and
+        // re-mark the displaced item at a free footprint.
         let displaced = std::mem::replace(&mut self.player.inv_body[body_slot], item);
         self.player.inv_list[list_idx] = displaced.clone();
-        self.player.inv_grid[grid_index] = 0;
+        for c in self.player.inv_grid.iter_mut() {
+            if c.abs() == cell {
+                *c = 0;
+            }
+        }
         if !displaced.is_empty() {
-            if let Some(cell) = self
-                .player
-                .inv_grid
-                .iter_mut()
-                .find(|c| **c == 0)
-            {
-                *cell = (list_idx + 1) as i8;
+            let (dw, dh) =
+                crate::game::item_dat::inventory_size(displaced.item_id as usize);
+            if let Some(top) = Self::find_free_inv_cell(&self.player.inv_grid, dw as usize, dh as usize) {
+                let v = (list_idx + 1) as i8;
+                for dy in 0..dh as usize {
+                    for dx in 0..dw as usize {
+                        let c = top + dy * 10 + dx;
+                        let anchor = dx == 0 && dy == dh as usize - 1;
+                        self.player.inv_grid[c] = if anchor { v } else { -v };
+                    }
+                }
             }
         }
         self.recalc_equipment_stats();
@@ -1663,6 +1672,30 @@ impl GameState {
         }
     }
 
+/// Find the first 10-column inventory-grid cell whose `width x height`
+/// footprint is entirely free (C++ `FindFreeSpace`/AutoPlaceItemInInventory
+/// grid search). Returns the top-left cell index.
+fn find_free_inv_cell(inv_grid: &[i8; 40], width: usize, height: usize) -> Option<usize> {
+    for row in 0..=(4 - height) {
+        for col in 0..=(10 - width) {
+            let top = row * 10 + col;
+            let mut ok = true;
+            'outer: for dy in 0..height {
+                for dx in 0..width {
+                    if inv_grid[top + dy * 10 + dx] != 0 {
+                        ok = false;
+                        break 'outer;
+                    }
+                }
+            }
+            if ok {
+                return Some(top);
+            }
+        }
+    }
+    None
+}
+
     /// Pick up any `GroundItem`s on the player's current tile.
     ///
     /// Called from `update()` so it runs every logic tick. Gold adds directly to
@@ -1762,16 +1795,21 @@ impl GameState {
                                 self.player.spd_list[idx] = pi;
                             } else {
                                 self.player.inv_list[idx] = pi;
-                                // C++ AddItemToInvGrid: the top-left grid cell
-                                // holds (InvList slot + 1). The engine places
-                                // inventory items as 1x1 cells.
-                                if let Some(cell) = self
-                                    .player
-                                    .inv_grid
-                                    .iter_mut()
-                                    .find(|c| **c == 0)
-                                {
-                                    *cell = (idx + 1) as i8;
+                                // C++ AddItemToInvGrid: find a free w x h
+                                // footprint in the 10x4 grid; the anchor cell
+                                // (bottom-left, x==0 && y==h-1) holds
+                                // (InvList slot + 1), the rest -(slot+1).
+                                let (w, h) =
+                                    crate::game::item_dat::inventory_size(item_id as usize);
+                                if let Some(top) = Self::find_free_inv_cell(&self.player.inv_grid, w as usize, h as usize) {
+                                    let v = (idx + 1) as i8;
+                                    for dy in 0..h as usize {
+                                        for dx in 0..w as usize {
+                                            let cell = top + dy * 10 + dx;
+                                            let anchor = dx == 0 && dy == h as usize - 1;
+                                            self.player.inv_grid[cell] = if anchor { v } else { -v };
+                                        }
+                                    }
                                 }
                                 self.player._p_num_inv += 1;
                             }
@@ -4748,6 +4786,36 @@ mod tests {
     /// level(difficulty) raw fixed-point units (level / 2 when > 1), capped
     /// at maxHitPoints; the engine stores HP in 32x fixed point like
     /// single-player C++.
+    /// C++ AddItemToInvGrid: a 2x2 item (Leather Armor, row 59) fills a
+    /// 2x2 footprint with the bottom-left anchor = slot + 1 and the rest
+    /// negative.
+    #[test]
+    fn test_large_item_occupies_multi_cell_footprint() {
+        use crate::game::game_state::{GroundItem, GroundItemType};
+        use crate::game::items::{Item, ItemClass, ItemMiscId};
+        use crate::game::player_exact::Player;
+
+        let mut gs = GameState::new(Player::new(), false, 42);
+        gs.player.position = Point::new(10, 10);
+        let mut armor = Item::empty();
+        armor.item_index = 59; // Leather Armor (2x2)
+        armor.item_class = ItemClass::Armor;
+        armor.misc_id = ItemMiscId::None;
+        armor.name = "Leather Armor".to_string();
+        gs.ground_items.push(GroundItem {
+            x: 10, y: 10,
+            item_type: GroundItemType::ManaPotion,
+            item_index: Some(59),
+            item: Some(armor),
+        });
+        gs.pickup_ground_items();
+        assert_eq!(gs.player.inv_grid[0], -1, "top-left cell negative");
+        assert_eq!(gs.player.inv_grid[1], -1, "top-right cell negative");
+        assert_eq!(gs.player.inv_grid[10], 1, "bottom-left anchor = slot+1");
+        assert_eq!(gs.player.inv_grid[11], -1, "bottom-right cell negative");
+        assert_eq!(gs.player._p_num_inv, 1);
+    }
+
     /// C++ EquipItem / ChangeEquipment: an inventory sword equips into the
     /// left-hand InvBody slot; the grid cell clears and equipment stats
     /// recalc.
