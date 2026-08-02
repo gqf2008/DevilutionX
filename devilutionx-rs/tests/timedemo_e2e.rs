@@ -150,6 +150,86 @@ fn headless_replay_applies_click_to_move() {
     );
 }
 
+/// Tier 3 prerequisite: run the ENTIRE WarriorLevel1to2 demo stream (all
+/// game ticks + every input) through `GameState::update` headlessly with
+/// click-to-move, and assert the pipeline completes deterministically with the
+/// player making real progress. Byte-comparing the final save against
+/// `demo_0_reference_spawn_0.sv` is the remaining Tier 3 step (the engine
+/// save writer must match C++ byte-for-byte).
+#[test]
+fn full_replay_runs_to_completion() {
+    use devilutionx_rs::engine::demo_reader::DemoPayload;
+    use devilutionx_rs::game::game_loop::{convert_screen_to_tile, tick_move_target};
+    use devilutionx_rs::game::game_state::GameState;
+    use devilutionx_rs::game::player_exact::{HeroClass, Player};
+    use rand::SeedableRng;
+
+    let data = match std::fs::read(fixture_path("demo_0.dmo")) {
+        Ok(d) => d,
+        Err(e) => panic!("demo fixture missing ({}): {e}", fixture_path("demo_0.dmo")),
+    };
+    let total_ticks = {
+        let mut driver = ReplayDriver::new(parse_demo(&data).unwrap());
+        driver.game_tick_count()
+    };
+    assert!(total_ticks > 4000, "WarriorLevel1to2 drives >4k ticks, got {total_ticks}");
+
+    fn run(
+        driver: &mut ReplayDriver,
+        total_ticks: usize,
+    ) -> (i32, i32, u32, usize) {
+        // Reset the gameplay LCG per run so both runs are byte-identical even
+        // for LCG-dependent state.
+        devilutionx_rs::engine::random::seed_gameplay_rng(12345);
+        let mut player = Player::new();
+        player.init_class_stats();
+        player._p_class = HeroClass::Warrior;
+        let mut gs = GameState::new(player, false, 12345);
+        let mut rng = rand::rngs::StdRng::seed_from_u64(0);
+        let mut move_target: Option<(i32, i32)> = None;
+        let mut ticks = 0usize;
+        let mut clicks = 0usize;
+        driver.reset();
+        while let Some(ev) = driver.peek() {
+            match ev.event_type {
+                DemoEventType::MouseButtonDown => {
+                    if let DemoPayload::MouseButton { x, y, .. } = ev.payload {
+                        let cam = gs.camera;
+                        move_target =
+                            Some(convert_screen_to_tile(x as i32, y as i32, cam.tile_x, cam.tile_y));
+                        clicks += 1;
+                    }
+                }
+                DemoEventType::GameTick => {
+                    if let Some(target) = move_target {
+                        tick_move_target(&mut gs, target, &mut move_target);
+                    }
+                    gs.update(&mut rng);
+                    ticks += 1;
+                }
+                _ => {}
+            }
+            driver.step();
+        }
+        assert!(clicks > 0, "demo should contain mouse clicks");
+        (gs.player.position.x, gs.player.position.y, gs.game_tick, ticks)
+    }
+
+    let mut d1 = ReplayDriver::new(parse_demo(&data).unwrap());
+    let mut d2 = ReplayDriver::new(parse_demo(&data).unwrap());
+    let s1 = run(&mut d1, total_ticks);
+    let s2 = run(&mut d2, total_ticks);
+    assert_eq!(s1.3, total_ticks, "all game ticks processed");
+    assert_eq!(s1, s2, "full replay is deterministic across two runs");
+    // The player made real progress from the initial spawn (56, 56).
+    let moved = (s1.0 - 56).abs() + (s1.1 - 56).abs();
+    assert!(moved > 0, "player moved from the initial spawn");
+    println!(
+        "[FullReplay] ticks={} final=({}, {}) moved={}",
+        s1.3, s1.0, s1.1, moved
+    );
+}
+
 #[test]
 fn parse_real_demo_fixture() {
     // Sanity: the fixture must be present. The upstream repo ships it.
