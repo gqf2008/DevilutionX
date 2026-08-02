@@ -4286,7 +4286,7 @@ pub fn add_acid_puddle(params: &AddMissileParameter) -> Missile {
     missile.caster = params.caster;
 
     // Duration based on monster intelligence (simplified)
-    missile.duration = rand::rng().random_range(40..95);
+    missile.duration = crate::engine::random::gameplay_rnd(40, 94);
 
     missile
 }
@@ -4317,7 +4317,7 @@ pub fn add_magma_ball(params: &AddMissileParameter) -> Missile {
     // Calculate damage
     let min_dmg = 2 * params.spell_level as i32 + 2;
     let max_dmg = 2 * params.spell_level as i32 + 4;
-    missile.damage = rand::rng().random_range(min_dmg..max_dmg);
+    missile.damage = crate::engine::random::gameplay_rnd(min_dmg, max_dmg - 1);
 
     // Calculate velocity
     let dx = params.destination.x - params.source.x;
@@ -4344,7 +4344,7 @@ pub fn add_lightning_wall(params: &AddMissileParameter) -> Missile {
     missile.duration = (params.spell_level as i32 + 1) * 20;
 
     // Damage calculation
-    missile.damage = rand::rng().random_range(1..11) + params.spell_level as i32;
+    missile.damage = crate::engine::random::gameplay_rnd(1, 10) + params.spell_level as i32;
 
     missile
 }
@@ -4391,7 +4391,7 @@ pub fn add_lightning_bow(params: &AddMissileParameter) -> Missile {
 
     missile.position.velocity.x = velocity.0;
     missile.position.velocity.y = velocity.1;
-    missile.anim_frame = rand::rng().random_range(1..9);
+    missile.anim_frame = crate::engine::random::gameplay_rnd(1, 8);
     missile.duration = 255;
 
     // Store source position
@@ -4413,7 +4413,7 @@ pub fn add_mana(params: &AddMissileParameter) -> Missile {
     missile.caster = params.caster;
 
     // Mana restoration amount (simplified - actual depends on character level and class)
-    let base_mana = (rand::rng().random_range(1..11)) << 6;
+    let base_mana = (crate::engine::random::gameplay_rnd(1, 10)) << 6;
     missile.var1 = base_mana + (params.spell_level as i32 * 6);
 
     missile.delete_flag = true; // Instant effect
@@ -4476,7 +4476,7 @@ pub fn add_charged_bolt_bow(params: &AddMissileParameter) -> Missile {
     missile.spell_level = params.spell_level as i32;
 
     // Charged bolt pattern
-    let spread = rand::rng().random_range(-2..3);
+    let spread = crate::engine::random::gameplay_rnd(-2, 2);
     let dx = params.destination.x - params.source.x + spread;
     let dy = params.destination.y - params.source.y + spread;
     let velocity = calculate_missile_velocity(dx, dy, 8);
@@ -4563,7 +4563,7 @@ pub fn add_heal_other(params: &AddMissileParameter) -> Missile {
     missile.spell_level = params.spell_level as i32;
 
     // Healing amount
-    let heal = rand::rng().random_range(1..11) + params.spell_level as i32 * 3;
+    let heal = crate::engine::random::gameplay_rnd(1, 10) + params.spell_level as i32 * 3;
     missile.var1 = heal << 6;
 
     missile.delete_flag = true; // Instant effect
@@ -4583,7 +4583,7 @@ pub fn add_immolation(params: &AddMissileParameter) -> Missile {
     missile.var1 = params.source.x;
     missile.var2 = params.source.y;
     missile.duration = 16;
-    missile.damage = rand::rng().random_range(1..11) + params.spell_level as i32 * 2;
+    missile.damage = crate::engine::random::gameplay_rnd(1, 10) + params.spell_level as i32 * 2;
 
     missile
 }
@@ -4627,7 +4627,7 @@ pub fn add_rune_of_light(params: &AddMissileParameter) -> Missile {
     missile.spell_level = params.spell_level as i32;
 
     // Calculate damage based on level
-    let dmg = 16 * (rand::rng().random_range(2..22) + params.spell_level as i32 + 2);
+    let dmg = 16 * (crate::engine::random::gameplay_rnd(2, 21) + params.spell_level as i32 + 2);
     missile.damage = dmg;
 
     // Triggers LightningWall when activated
@@ -4745,7 +4745,7 @@ pub fn add_jester(params: &AddMissileParameter) -> Missile {
     missile.spell_level = params.spell_level as i32;
 
     // Pick random spell type (stored in var1)
-    let spell = match rand::rng().random_range(0..10) {
+    let spell = match crate::engine::random::gameplay_rnd(0, 9) {
         0 | 1 => MissileID::Firebolt,
         2 => MissileID::Fireball,
         3 => MissileID::FireWallControl,
