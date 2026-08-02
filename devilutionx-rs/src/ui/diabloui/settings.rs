@@ -334,8 +334,10 @@ pub struct SettingsMenu {
 
 impl SettingsMenu {
     pub fn new() -> Self {
-        let key_actions = keymapper::default_key_actions();
-        let pad_actions = keymapper::default_pad_actions();
+        // Live tables shared with the runtime dispatcher (C++
+        // GetOptions().Keymapper/Padmapper): rebinds persist for the session.
+        let key_actions = keymapper::key_actions_global().read().unwrap().clone();
+        let pad_actions = keymapper::pad_actions_global().read().unwrap().clone();
         let categories = settings_categories(&key_actions, &pad_actions);
         Self {
             categories,
@@ -446,11 +448,20 @@ impl SettingsMenu {
         let Some(BindingAction::Key(i)) = self.binding_entry else {
             return false;
         };
-        let Some(action) = self.key_actions.get_mut(i) else {
-            return false;
-        };
         let names = keymapper::key_id_to_name();
-        action.set_value(key_name, &names)
+        let ok = {
+            let mut global = keymapper::key_actions_global().write().unwrap();
+            global
+                .get_mut(i)
+                .map(|a| a.set_value(key_name, &names))
+                .unwrap_or(false)
+        };
+        if ok {
+            if let Some(action) = self.key_actions.get_mut(i) {
+                action.set_value(key_name, &names);
+            }
+        }
+        ok
     }
 
     /// C++ `PadmapperOptions::Action::SetValue(combo)` from PadInput capture.
@@ -458,10 +469,19 @@ impl SettingsMenu {
         let Some(BindingAction::Pad(i)) = self.binding_entry else {
             return false;
         };
-        let Some(action) = self.pad_actions.get_mut(i) else {
-            return false;
+        let ok = {
+            let mut global = keymapper::pad_actions_global().write().unwrap();
+            global
+                .get_mut(i)
+                .map(|a| a.set_value(combo))
+                .unwrap_or(false)
         };
-        action.set_value(combo)
+        if ok {
+            if let Some(action) = self.pad_actions.get_mut(i) {
+                action.set_value(combo);
+            }
+        }
+        ok
     }
 
     /// Screen title (C++ shows the category / option name in the sub-levels).
@@ -803,6 +823,9 @@ mod tests {
         let categories = settings_categories(&menu.key_actions, &menu.pad_actions);
         let km = categories.iter().find(|c| c.name == "Keymapping").unwrap();
         assert!(km.entries[0].binding.is_some());
+        // Restore the global action table (tests share the session tables).
+        keymapper::key_actions_global().write().unwrap()[0]
+            .set_value("", &keymapper::key_id_to_name());
     }
 
     #[test]
@@ -825,6 +848,9 @@ mod tests {
         assert!(!menu.escape());
         assert!(!menu.in_binding_screen());
         assert_eq!(menu.title(), "Padmapping");
+        // Restore the global padmapper table.
+        keymapper::pad_actions_global().write().unwrap()[16]
+            .set_value(ControllerButtonCombo::new(ControllerButton::B));
     }
 
 }

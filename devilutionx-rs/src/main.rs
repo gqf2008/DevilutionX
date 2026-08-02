@@ -29,7 +29,7 @@ use game::player_exact::Player;
 use game::game_state::GameState;
 use game::game_loop::{run_game_loop, InterfaceMode};
 use ui::diabloui::mainmenu::{MainMenu, MainMenuSelection};
-use ui::diabloui::settings::SettingsMenu;
+use ui::diabloui::settings::{SettingsEntryType, SettingsMenu};
 use ui::diabloui::selconn::SelConnMenu;
 use ui::diabloui::selgame::{SelGameActionMenu, SelGameForm, SelGameMenu};
 use crate::net::storm::ConnType;
@@ -1680,7 +1680,27 @@ fn ui_settings_dialog(ctx: &mut DiabloContext, event_pump: &mut sdl2::EventPump)
         for event in event_pump.poll_iter() {
             match event {
                 Event::Quit { .. } => return Ok(()),
-                Event::KeyDown { keycode: Some(key), .. } => match key {
+                Event::KeyDown { keycode: Some(key), .. } => {
+                    // C++ KeyInput capture screen: any key rebinds the
+                    // selected action, then returns to the settings list
+                    // (settingsmenu.cpp KeyInput eventHandler). Esc is left
+                    // to the normal handler below to cancel without binding.
+                    if menu.in_binding_screen()
+                        && menu.binding_kind() == Some(SettingsEntryType::Key)
+                        && key != Keycode::Escape
+                    {
+                        let names = crate::controls::keymapper::key_id_to_name();
+                        let code = key.into_i32() as u32;
+                        if let Some(name) =
+                            crate::controls::keymapper::keycode_to_key_name(code, &names)
+                        {
+                            menu.set_key_binding(&name);
+                            let _ = menu.escape(); // back to the settings level
+                            engine::audio::dispatch_sfx("menu_click");
+                        }
+                        continue;
+                    }
+                    match key {
                     Keycode::Up | Keycode::W => {
                         menu.move_selection(-1);
                         engine::audio::dispatch_sfx("ui_click");
@@ -1699,6 +1719,7 @@ fn ui_settings_dialog(ctx: &mut DiabloContext, event_pump: &mut sdl2::EventPump)
                         }
                     }
                     _ => {}
+                    }
                 },
                 Event::MouseButtonUp {
                     mouse_btn: sdl2::mouse::MouseButton::Left,

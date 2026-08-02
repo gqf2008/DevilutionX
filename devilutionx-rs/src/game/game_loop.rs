@@ -555,6 +555,31 @@ pub fn convert_screen_to_tile(
     (cam_tile_x + u, cam_tile_y + v)
 }
 
+/// Dispatch a keymapper action to the game loop state — the Rust counterpart
+/// of C++ `keymapper.cpp` `HandleKeymapperEvents` producing a `GameAction`.
+/// Returns `true` when the action was handled.
+fn dispatch_keymapper_action(action_key: &str, state: &mut GameLoopState) -> bool {
+    match action_key {
+        "ToggleAutomap" => {
+            state.automap_open = !state.automap_open;
+            true
+        }
+        "Character" => {
+            state.char_panel_open = !state.char_panel_open;
+            true
+        }
+        "QuestLog" => {
+            state.quest_panel_open = !state.quest_panel_open;
+            true
+        }
+        "SpellBook" => {
+            state.spellbook_open = !state.spellbook_open;
+            true
+        }
+        _ => false,
+    }
+}
+
 fn handle_event(
     event: &Event,
     state: &mut GameLoopState,
@@ -590,17 +615,31 @@ fn handle_event(
                     state.move_target = None;
                 }
             }
-            // Panel toggles (mirrors C++ Keydown handlers in
-            // `diablo.cpp::PressKey`: `KEYCODE_C` opens the character sheet,
-            // `KEYCODE_Q` opens the quest log, `KEYCODE_B` opens the spell
-            // book, `KEYCODE_A` opens the automap). Edge-triggered via KeyDown
-            // so a single tap flips the flag; pressing again closes.
-            match *k {
-                Keycode::C => state.char_panel_open = !state.char_panel_open,
-                Keycode::Q => state.quest_panel_open = !state.quest_panel_open,
-                Keycode::B => state.spellbook_open = !state.spellbook_open,
-                Keycode::A => state.automap_open = !state.automap_open,
-                _ => {}
+            // C++ keymapper dispatch: the bound action table is the single
+            // source of truth for these panel toggles (C++ has no hard-coded
+            // C/Q/B panel keys — they live in KeymapperOptions with defaults
+            // Character/QuestLog/SpellBook, and ToggleAutomap on TAB).
+            let mut dispatched = false;
+            let names = crate::controls::keymapper::key_id_to_name();
+            if let Some(key_name) =
+                crate::controls::keymapper::keycode_to_key_name(k.into_i32() as u32, &names)
+            {
+                let actions = crate::controls::keymapper::key_actions_global()
+                    .read()
+                    .unwrap();
+                if let Some(action) =
+                    crate::controls::keymapper::find_key_action(&actions, &key_name)
+                {
+                    dispatched = dispatch_keymapper_action(&action.key, state);
+                }
+            }
+            // Fallback for keys without a keymapper binding (e.g. `A` opens
+            // the automap in this build).
+            if !dispatched {
+                match *k {
+                    Keycode::A => state.automap_open = !state.automap_open,
+                    _ => {}
+                }
             }
             // While the spell book is open, the number keys 1-9 select the
             // readied spell (`player._p_r_spell`) from the displayed list.
@@ -4003,6 +4042,31 @@ mod tests {
         assert!(LevelType::Town.is_town());
         assert!(!LevelType::Cathedral.is_town());
         assert!(LevelType::Hell.is_dungeon());
+    }
+
+    #[test]
+    fn test_keymapper_dispatch_toggles_panels() {
+        // C++ keymapper defaults: Character=C, QuestLog=Q, SpellBook=B,
+        // ToggleAutomap=TAB (diablo.cpp InitKeymapActions).
+        let mut state = GameLoopState::new();
+        let names = crate::controls::keymapper::key_id_to_name();
+        let actions = crate::controls::keymapper::key_actions_global()
+            .read()
+            .unwrap();
+        let character = crate::controls::keymapper::find_key_action(&actions, "C")
+            .expect("Character bound to C");
+        assert_eq!(character.key, "Character");
+        assert!(dispatch_keymapper_action(&character.key, &mut state));
+        assert!(state.char_panel_open, "Character opens the stats panel");
+        assert!(dispatch_keymapper_action(&character.key, &mut state));
+        assert!(!state.char_panel_open, "Character toggles closed");
+        let automap = crate::controls::keymapper::find_key_action(&actions, "TAB")
+            .expect("ToggleAutomap bound to TAB");
+        assert_eq!(automap.key, "ToggleAutomap");
+        assert!(dispatch_keymapper_action(&automap.key, &mut state));
+        assert!(state.automap_open);
+        let unknown = crate::controls::keymapper::find_key_action(&actions, "NOPE");
+        assert!(unknown.is_none(), "unbound key dispatches nothing");
     }
 
     /// Build a minimal `DungeonLevelData` with a known MIN/TIL mapping so we can

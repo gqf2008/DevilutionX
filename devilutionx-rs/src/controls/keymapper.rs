@@ -14,6 +14,7 @@
 //! keycode happens when the input layer moves to SDL3.
 
 use std::collections::HashMap;
+use std::sync::{OnceLock, RwLock};
 
 use super::controller::{ControllerButton, ControllerButtonCombo};
 
@@ -154,20 +155,20 @@ pub fn key_id_to_name() -> HashMap<u32, String> {
     }
     // F1-F12 (SDL2 values; names match C++ keyIDToKeyName F1..F24).
     for i in 0..12 {
-        map.insert(282 + i, format!("F{}", i + 1));
+        map.insert(1073741882 + i, format!("F{}", i + 1));
     }
     // Keypad (SDL2 values).
-    map.insert(256, "KEYPADNUM 0".to_string());
+    map.insert(1073741922, "KEYPADNUM 0".to_string());
     for i in 0..9 {
-        map.insert(257 + i, format!("KEYPADNUM {}", i + 1));
+        map.insert(1073741923 + i, format!("KEYPADNUM {}", i + 1));
     }
-    map.insert(308, "LALT".to_string());
-    map.insert(307, "RALT".to_string());
+    map.insert(1073742050, "LALT".to_string());
+    map.insert(1073742054, "RALT".to_string());
     map.insert(32, "SPACE".to_string());
-    map.insert(305, "RCONTROL".to_string());
-    map.insert(306, "LCONTROL".to_string());
-    map.insert(316, "PRINT".to_string());
-    map.insert(19, "PAUSE".to_string());
+    map.insert(1073742052, "RCONTROL".to_string());
+    map.insert(1073742048, "LCONTROL".to_string());
+    map.insert(1073741894, "PRINT".to_string());
+    map.insert(1073741934, "PAUSE".to_string());
     map.insert(9, "TAB".to_string());
     map.insert(2 | KEYMAPPER_MOUSE_BUTTON_MASK, "MMOUSE".to_string());
     map.insert(4 | KEYMAPPER_MOUSE_BUTTON_MASK, "X1MOUSE".to_string());
@@ -176,26 +177,26 @@ pub fn key_id_to_name() -> HashMap<u32, String> {
     map.insert(MOUSE_SCROLL_DOWN, "SCROLLDOWNMOUSE".to_string());
     map.insert(MOUSE_SCROLL_LEFT, "SCROLLLEFTMOUSE".to_string());
     map.insert(MOUSE_SCROLL_RIGHT, "SCROLLRIGHTMOUSE".to_string());
-    map.insert(96, "`".to_string());
-    map.insert(91, "[".to_string());
-    map.insert(93, "]".to_string());
-    map.insert(92, "\\".to_string());
-    map.insert(59, ";".to_string());
-    map.insert(39, "'".to_string());
-    map.insert(44, ",".to_string());
-    map.insert(46, ".".to_string());
-    map.insert(47, "/".to_string());
+    map.insert(1073741877, "`".to_string());
+    map.insert(1073741871, "[".to_string());
+    map.insert(1073741872, "]".to_string());
+    map.insert(1073741873, "\\".to_string());
+    map.insert(1073741875, ";".to_string());
+    map.insert(1073741876, "'".to_string());
+    map.insert(1073741878, ",".to_string());
+    map.insert(1073741879, ".".to_string());
+    map.insert(1073741880, "/".to_string());
     map.insert(8, "BACKSPACE".to_string());
-    map.insert(301, "CAPSLOCK".to_string());
-    map.insert(302, "SCROLLLOCK".to_string());
-    map.insert(277, "INSERT".to_string());
+    map.insert(1073741881, "CAPSLOCK".to_string());
+    map.insert(1073741895, "SCROLLLOCK".to_string());
+    map.insert(1073741897, "INSERT".to_string());
     map.insert(127, "DELETE".to_string());
-    map.insert(278, "HOME".to_string());
-    map.insert(279, "END".to_string());
-    map.insert(267, "KEYPAD /".to_string());
-    map.insert(268, "KEYPAD *".to_string());
-    map.insert(271, "KEYPAD ENTER".to_string());
-    map.insert(266, "KEYPAD DECIMAL".to_string());
+    map.insert(1073741898, "HOME".to_string());
+    map.insert(1073741901, "END".to_string());
+    map.insert(1073741924, "KEYPAD /".to_string());
+    map.insert(1073741925, "KEYPAD *".to_string());
+    map.insert(1073741921, "KEYPAD ENTER".to_string());
+    map.insert(1073741932, "KEYPAD DECIMAL".to_string());
     map
 }
 
@@ -208,7 +209,11 @@ pub fn keycode_to_key_name(
     keycode: u32,
     names: &std::collections::HashMap<u32, String>,
 ) -> Option<String> {
-    if (b'A' as u32..=b'Z' as u32).contains(&keycode) || (b'0' as u32..=b'9' as u32).contains(&keycode) {
+    if (b'a' as u32..=b'z' as u32).contains(&keycode) {
+        // C++ settingsmenu normalises letters to upper-case (settingsmenu.cpp:487-489).
+        return Some((keycode as u8 as char).to_ascii_uppercase().to_string());
+    }
+    if (b'0' as u32..=b'9' as u32).contains(&keycode) {
         return Some((keycode as u8 as char).to_string());
     }
     names.get(&keycode).cloned()
@@ -396,6 +401,21 @@ pub fn find_pad_action<'a>(actions: &'a [PadAction], button: ControllerButton) -
     actions.iter().find(|a| a.bound_input.button == button)
 }
 
+/// Live keymapper actions shared by the settings menu and the runtime
+/// dispatcher — the Rust counterpart of C++ `GetOptions().Keymapper.actions`
+/// (options.cpp `KeymapperOptions`). The settings UI rebinds through the
+/// `SettingsMenu`, the game loop dispatches through `find_key_action`.
+pub fn key_actions_global() -> &'static RwLock<Vec<KeyAction>> {
+    static ACTIONS: OnceLock<RwLock<Vec<KeyAction>>> = OnceLock::new();
+    ACTIONS.get_or_init(|| RwLock::new(default_key_actions()))
+}
+
+/// Live padmapper actions (C++ `GetOptions().Padmapper.actions`).
+pub fn pad_actions_global() -> &'static RwLock<Vec<PadAction>> {
+    static ACTIONS: OnceLock<RwLock<Vec<PadAction>>> = OnceLock::new();
+    ACTIONS.get_or_init(|| RwLock::new(default_pad_actions()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -517,6 +537,22 @@ mod tests {
             combo_description(ControllerButtonCombo::with_modifier(DPadUp, Back), false),
             "Select+Up"
         );
+    }
+
+    #[test]
+    fn keycode_to_key_name_maps_sdl2_values() {
+        let names = key_id_to_name();
+        // Letters are SDL2 keycodes 97..122 and normalise to upper-case.
+        assert_eq!(keycode_to_key_name(97, &names).as_deref(), Some("A"));
+        assert_eq!(keycode_to_key_name(122, &names).as_deref(), Some("Z"));
+        assert_eq!(keycode_to_key_name(48, &names).as_deref(), Some("0"));
+        assert_eq!(keycode_to_key_name(57, &names).as_deref(), Some("9"));
+        // Special keys use the SDL2 scan-code-based keycodes.
+        assert_eq!(keycode_to_key_name(1073741882, &names).as_deref(), Some("F1"));
+        assert_eq!(keycode_to_key_name(9, &names).as_deref(), Some("TAB")); // SDLK_TAB = '\t'
+        assert_eq!(keycode_to_key_name(1073742050, &names).as_deref(), Some("LALT"));
+        assert_eq!(keycode_to_key_name(32, &names).as_deref(), Some("SPACE"));
+        assert_eq!(keycode_to_key_name(999999, &names), None, "unknown key not mappable");
     }
 
     #[test]
