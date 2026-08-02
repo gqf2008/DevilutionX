@@ -1376,6 +1376,7 @@ fn render_world_pipeline(
     grid: &impl crate::engine::scrollrt::DPieceGrid,
     view_pos: TilePoint,
     viewport_h: i32,
+    entities: &dyn Fn(&mut crate::engine::surface::Surface, &crate::engine::scrollrt::Lighting),
 ) {
     let palette = crate::engine::palette::Palette::from_rgb_bytes(&level.palette.colors)
         .unwrap_or_else(crate::engine::palette::Palette::new);
@@ -1480,6 +1481,10 @@ fn render_world_pipeline(
             viewport_h,
             &lighting,
         );
+        // Entities (monsters with CLX frames) render into the palette
+        // backbuffer before the palette-converted upload (C++ DrawView draws
+        // them on the surface). Depth order: caller sorts by wx+wy.
+        entities(&mut surface, &lighting);
     }
     let _ = window.present_backbuffer(&palette);
 }
@@ -1545,13 +1550,45 @@ fn draw_and_blit(
     let view_pos = TilePoint::new(cam_tile_x, cam_tile_y);
     let mut drew_pipeline = false;
 
+    // Palette-surface entities: monsters with a raw CLX frame are drawn into
+    // the 8-bit backbuffer (C++ RenderCl2Sprite with the tile's light table)
+    // instead of the canvas RGBA-texture path. Depth-sorted by wx+wy.
+    let mut monster_entities: Vec<(i32, i32, &crate::engine::clx_sprite::ClxSprite)> = Vec::new();
+    if let Some(sprites) = game_state.monster_sprites.as_ref() {
+        for (_, m) in game_state.monster_manager.iter() {
+            if !m.is_alive() {
+                continue;
+            }
+            if let Some(sprite) = sprites.get(&m.monster_type) {
+                if let Some(frame) = sprite.frame.as_ref() {
+                    monster_entities.push((m.x, m.y, frame));
+                }
+            }
+        }
+        monster_entities.sort_by_key(|(x, y, _)| x + y);
+    }
+    let monster_entities_closure = |surface: &mut crate::engine::surface::Surface,
+                                    lighting: &crate::engine::scrollrt::Lighting| {
+        for (wx, wy, frame) in &monster_entities {
+            let (sx, sy) = tile_to_screen(*wx, *wy, cam_tile_x, cam_tile_y);
+            // Anchor the sprite's feet at the tile centre (same as the RGBA path).
+            let pos = crate::engine::types::Point::new(sx - frame.width() as i32 / 2, sy);
+            crate::engine::clx_render::clx_draw(
+                surface,
+                pos,
+                frame,
+                Some(lighting.table_for(*wx, *wy)),
+            );
+        }
+    };
+
     if game_state.in_dungeon {
         if let (Some(level), Some(layout)) = (&game_state.dungeon_level_data, &game_state.dungeon_layout) {
-            render_world_pipeline(window, level, layout, view_pos, viewport_h);
+            render_world_pipeline(window, level, layout, view_pos, viewport_h, &monster_entities_closure);
             drew_pipeline = true;
         }
     } else if let (Some(level), Some(layout)) = (&game_state.level_data, &game_state.town_layout) {
-        render_world_pipeline(window, level, layout, view_pos, viewport_h);
+        render_world_pipeline(window, level, layout, view_pos, viewport_h, &monster_entities_closure);
         drew_pipeline = true;
     }
 
@@ -1586,7 +1623,16 @@ fn draw_and_blit(
                 (id, m.x, m.y, m.monster_type, m.ai_state)
             }).collect();
         let sprites = game_state.monster_sprites.as_ref();
-        draw_dungeon_monsters(window, &monsters, sprites, cam_tile_x, cam_tile_y, screen_center_x, screen_center_y);
+        // Monsters with a palette frame were already drawn into the backbuffer;
+        // the canvas pass only draws the coloured-block fallbacks.
+        let canvas_only: Vec<_> = monsters
+            .iter()
+            .filter(|(_, _, _, mtype, _)| {
+                sprites.and_then(|s| s.get(mtype)).map_or(true, |s| s.frame.is_none())
+            })
+            .cloned()
+            .collect();
+        draw_dungeon_monsters(window, &canvas_only, sprites, cam_tile_x, cam_tile_y, screen_center_x, screen_center_y);
     }
 
     // Draw ground loot (dropped by slain monsters) before the player sprite so

@@ -86,10 +86,27 @@ pub fn load_monster_sprite(archive: &mut MpqArchive, monster_type: &MonsterType)
     let frame = sheet.first_frame(0)?;
 
     let rgba = frame.decode_rgba(&palette);
+
+    // Rebuild the frame as the Arc-backed `clx_sprite::ClxSprite` that
+    // `clx_draw` consumes (header: [header_size][width][height] + RLE data).
+    let mut clx_buf = Vec::with_capacity(6 + frame.pixel_data.len());
+    clx_buf.extend_from_slice(&6u16.to_le_bytes());
+    clx_buf.extend_from_slice(&frame.width.to_le_bytes());
+    clx_buf.extend_from_slice(&frame.height.to_le_bytes());
+    clx_buf.extend_from_slice(&frame.pixel_data);
+    let clx_frame = crate::engine::clx_sprite::ClxSprite::new(
+        std::sync::Arc::new(clx_buf),
+        0,
+        (6 + frame.pixel_data.len()) as u32,
+    );
+
     let sprite = MonsterSprite {
         width: frame.width,
         height: frame.height,
         rgba,
+        // Keep the palette-indexed frame so the renderer can draw the monster
+        // into the 8-bit backbuffer with the light table (C++ RenderCl2Sprite).
+        frame: Some(clx_frame),
     };
     Some(sprite)
 }

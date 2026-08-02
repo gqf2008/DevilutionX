@@ -496,6 +496,10 @@ pub struct MonsterSprite {
     pub height: u16,
     /// Top-to-bottom RGBA bytes (`width * height * 4`).
     pub rgba: Vec<u8>,
+    /// Raw palette-indexed CLX frame (direction 0 / frame 0). Used to draw
+    /// the monster into the 8-bit palette backbuffer with the light table
+    /// (C++ `RenderCl2Sprite`); `None` keeps the RGBA-texture path.
+    pub frame: Option<crate::engine::clx_sprite::ClxSprite>,
 }
 
 impl GameState {

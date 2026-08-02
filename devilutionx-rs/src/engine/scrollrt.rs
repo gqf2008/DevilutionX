@@ -336,7 +336,7 @@ use super::lighting::{LIGHT_TABLE_SIZE, NUM_LIGHTING_LEVELS, LIGHTS_MAX};
 const MAXDUN: i32 = 112;
 
 /// 渲染光照上下文：逐 tile 光照级别网格（C++ `dLight`）+ 光照表（C++
-/// `LightTables`）。`table_for` 由 tile 的光照级别选出对应的颜色重映射表。
+/// `LightTables`）。`table_for` 由 tile 的光照级别选出对应的颜色重映射表（pub，实体/精灵入面用）。
 /// 城镇传入全 0 网格 → 恒等表（全亮）；地牢传入含玩家光晕的网格。
 pub struct Lighting<'a> {
     /// dLight 网格（MAXDUN×MAXDUN 扁平），值 0(全亮)..15(全黑)。
@@ -399,7 +399,7 @@ impl<'a> Lighting<'a> {
     }
 
     /// 查 tile 的光照表（越界按全亮处理）。
-    fn table_for(&self, x: i32, y: i32) -> &'a [u8; LIGHT_TABLE_SIZE] {
+    pub fn table_for(&self, x: i32, y: i32) -> &'a [u8; LIGHT_TABLE_SIZE] {
         let level = if x >= 0 && y >= 0 && x < MAXDUN && y < MAXDUN {
             self.dlight
                 .get(y as usize * MAXDUN as usize + x as usize)
