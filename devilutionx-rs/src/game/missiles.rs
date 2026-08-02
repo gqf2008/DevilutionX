@@ -3553,7 +3553,7 @@ pub fn add_charged_bolt(params: &AddMissileParameter) -> Missile {
     missile.damage = params.damage;
     missile.duration = 256;
     missile.light_flag = true;
-    missile.random = rand::random::<i32>() % 15 + 1;
+    missile.random = crate::engine::random::gameplay_rnd(1, 15);
 
     update_missile_velocity(&mut missile, params.destination, 8);
 
@@ -3713,9 +3713,9 @@ pub fn add_healing(params: &AddMissileParameter) -> Missile {
     // Warriors/Barbarians/Monks: hp *= 2
     // Rogues/Bards: hp += hp / 2
 
-    let base_heal = rand::random::<i32>() % 10 + 1;
-    let level_bonus = (params.spell_level + 1) * (rand::random::<i32>() % 4 + 1);
-    let spell_bonus = params.spell_level * (rand::random::<i32>() % 6 + 1);
+    let base_heal = crate::engine::random::gameplay_rnd(1, 10);
+    let level_bonus = (params.spell_level + 1) * (crate::engine::random::gameplay_rnd(1, 4));
+    let spell_bonus = params.spell_level * (crate::engine::random::gameplay_rnd(1, 6));
     missile.damage = (base_heal + level_bonus + spell_bonus) * 64;
 
     missile.delete_flag = true; // Instant effect
@@ -3739,11 +3739,11 @@ pub fn add_nova(params: &AddMissileParameter) -> Missile {
     // Damage calculation
     if params.source_id >= 0 {
         // Player cast
-        let base_damage = rand::random::<i32>() % 30 + 5; // simplified rnd_sum(6, 5)
+        let base_damage = crate::engine::random::gameplay_rnd(5, 34); // simplified rnd_sum(6, 5)
         missile.damage = scale_spell_effect(base_damage / 2, params.spell_level);
     } else {
         // Trap cast
-        missile.damage = rand::random::<i32>() % 9 + 3; // simplified
+        missile.damage = crate::engine::random::gameplay_rnd(3, 11); // simplified
     }
 
     missile.duration = 1;
@@ -3769,7 +3769,7 @@ pub fn add_inferno(params: &AddMissileParameter) -> Missile {
 
     // Damage calculation
     if params.caster == MissileCaster::TargetMonsters {
-        let base = rand::random::<i32>() % (params.spell_level + 1) + rand::random::<i32>() % 2;
+        let base = crate::engine::random::gameplay_rnd(0, params.spell_level) + crate::engine::random::gameplay_rnd(0, 1);
         missile.damage = 8 * base + 16;
         missile.damage += missile.damage / 2;
     }
@@ -3812,7 +3812,7 @@ pub fn add_flame_wave(params: &AddMissileParameter) -> Missile {
     missile.spell_level = params.spell_level;
 
     // Damage calculation
-    missile.damage = rand::random::<i32>() % 10 + params.spell_level + 1;
+    missile.damage = crate::engine::random::gameplay_rnd(0, 9) + params.spell_level + 1;
 
     update_missile_velocity(&mut missile, params.destination, 16);
     missile.duration = 255;
@@ -3904,7 +3904,7 @@ pub fn add_apocalypse(params: &AddMissileParameter) -> Missile {
 
     // Damage calculation
     let level = params.spell_level;
-    missile.damage = rand::random::<i32>() % (level * 6 + 1) + level;
+    missile.damage = crate::engine::random::gameplay_rnd(0, level * 6) + level;
 
     missile.duration = 255;
     missile
@@ -3922,7 +3922,7 @@ pub fn add_fire_wall(params: &AddMissileParameter) -> Missile {
     missile.spell_level = params.spell_level;
 
     // Damage calculation
-    let base_damage = rand::random::<i32>() % 10 + rand::random::<i32>() % 10 + 2;
+    let base_damage = crate::engine::random::gameplay_rnd(0, 9) + crate::engine::random::gameplay_rnd(0, 9) + 2;
     missile.damage = (base_damage + params.spell_level) << 3;
 
     update_missile_velocity(&mut missile, params.destination, 16);
@@ -3957,7 +3957,7 @@ pub fn add_elemental(params: &AddMissileParameter) -> Missile {
     }
 
     // Damage calculation
-    let base_damage = rand::random::<i32>() % 20 + params.spell_level * 2 + 4;
+    let base_damage = crate::engine::random::gameplay_rnd(0, 19) + params.spell_level * 2 + 4;
     missile.damage = scale_spell_effect(base_damage / 2, params.spell_level);
 
     update_missile_velocity(&mut missile, dest, 16);
@@ -3982,7 +3982,7 @@ pub fn add_flash_bottom(params: &AddMissileParameter) -> Missile {
     missile.spell_level = params.spell_level;
 
     // Damage calculation depends on source type
-    let base_damage = rand::random::<i32>() % 20 * (params.spell_level + 1) + params.spell_level + 1;
+    let base_damage = crate::engine::random::gameplay_rnd(0, 19) * (params.spell_level + 1) + params.spell_level + 1;
     missile.damage = scale_spell_effect(base_damage, params.spell_level);
     missile.damage += missile.damage / 2;
 
@@ -4000,7 +4000,7 @@ pub fn add_flash_top(params: &AddMissileParameter) -> Missile {
     missile.spell_level = params.spell_level;
 
     if params.caster == MissileCaster::TargetMonsters {
-        let base_damage = rand::random::<i32>() % 20 * (params.spell_level + 1) + params.spell_level + 1;
+        let base_damage = crate::engine::random::gameplay_rnd(0, 19) * (params.spell_level + 1) + params.spell_level + 1;
         missile.damage = scale_spell_effect(base_damage, params.spell_level);
         missile.damage += missile.damage / 2;
     }
@@ -4029,7 +4029,7 @@ pub fn add_acid(params: &AddMissileParameter) -> Missile {
     missile.var2 = params.source.y;
 
     if params.damage == 0 {
-        missile.damage = rand::random::<i32>() % 15 + 5; // ProjectileMonsterDamage simplified
+        missile.damage = crate::engine::random::gameplay_rnd(5, 19); // ProjectileMonsterDamage simplified
     } else {
         missile.damage = params.damage;
     }

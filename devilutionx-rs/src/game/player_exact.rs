@@ -1410,7 +1410,7 @@ pub fn plr_hit_monst(
     let min_dam = player._p_i_min_dam;
     let max_dam = player._p_i_max_dam;
     let mut dam = if max_dam > min_dam {
-        rand::random::<i32>().abs() % (max_dam - min_dam + 1) + min_dam
+        crate::engine::random::gameplay_rnd(min_dam, max_dam)
     } else {
         min_dam
     };
@@ -1439,7 +1439,7 @@ pub fn plr_hit_plr(
     let min_dam = attacker._p_i_min_dam;
     let max_dam = attacker._p_i_max_dam;
     let mut dam = if max_dam > min_dam {
-        rand::random::<i32>().abs() % (max_dam - min_dam + 1) + min_dam
+        crate::engine::random::gameplay_rnd(min_dam, max_dam)
     } else {
         min_dam
     };
