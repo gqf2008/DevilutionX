@@ -1646,8 +1646,10 @@ impl GameState {
                     );
                 }
                 GroundItemType::HealingPotion | GroundItemType::ManaPotion => {
-                    // Inventory/belt integration is deferred; just log the pickup.
-                    // Real drops carry the fully generated item (C++ SetupAllItems).
+                    // Real drops carry the fully generated item (C++
+                    // SetupAllItems). Put the potion into the first free belt
+                    // slot (C++ AutoPlaceItemInBelt); if the belt is full, put
+                    // it back on the ground.
                     let name = g
                         .item
                         .as_ref()
@@ -1658,7 +1660,29 @@ impl GameState {
                                 .map(|d| d.name)
                         })
                         .unwrap_or_else(|| g.item_type.display_name());
-                    println!("[Pickup] picked up {}", name);
+                    let item_id = g.item_index.unwrap_or_else(|| match g.item_type {
+                        GroundItemType::ManaPotion => 79, // itemdat.tsv row: Potion of Mana
+                        _ => 77, // Potion of Healing
+                    }) as i32;
+                    let stored = self
+                        .player
+                        .spd_list
+                        .iter_mut()
+                        .find(|s| s.is_empty());
+                    match stored {
+                        Some(slot) => {
+                            *slot = crate::game::player_exact::PlayerItem {
+                                item_id,
+                                equipped: false,
+                                _itype: crate::game::item_dat::ItemType::Misc,
+                            };
+                            println!("[Pickup] picked up {} into belt slot", name);
+                        }
+                        None => {
+                            println!("[Pickup] belt full; {} left on the ground", name);
+                            self.ground_items.push(g);
+                        }
+                    }
                 }
             }
         }
@@ -4624,6 +4648,46 @@ mod tests {
     /// level(difficulty) raw fixed-point units (level / 2 when > 1), capped
     /// at maxHitPoints; the engine stores HP in 32x fixed point like
     /// single-player C++.
+    /// C++ AutoPlaceItemInBelt: potion pickups land in the first free belt
+    /// slot (itemdat.tsv row id), and a full belt leaves the item on the
+    /// ground instead of losing it.
+    #[test]
+    fn test_potion_pickup_fills_belt() {
+        use crate::game::game_state::{GroundItem, GroundItemType};
+        use crate::game::player_exact::Player;
+
+        let mut gs = GameState::new(Player::new(), false, 42);
+        gs.player.position = Point::new(10, 10);
+        gs.ground_items.push(GroundItem {
+            x: 10,
+            y: 10,
+            item_type: GroundItemType::HealingPotion,
+            item_index: None,
+            item: None,
+        });
+        gs.pickup_ground_items();
+        assert_eq!(gs.ground_items.len(), 0, "potion consumed");
+        assert_eq!(gs.player.spd_list[0].item_id, 77, "Potion of Healing row 77");
+
+        // Belt full: item stays on the ground.
+        for slot in gs.player.spd_list.iter_mut() {
+            *slot = crate::game::player_exact::PlayerItem {
+                item_id: 1,
+                equipped: false,
+                _itype: crate::game::item_dat::ItemType::Misc,
+            };
+        }
+        gs.ground_items.push(GroundItem {
+            x: 10,
+            y: 10,
+            item_type: GroundItemType::ManaPotion,
+            item_index: None,
+            item: None,
+        });
+        gs.pickup_ground_items();
+        assert_eq!(gs.ground_items.len(), 1, "belt full -> left on ground");
+    }
+
     #[test]
     fn test_monster_hp_regen_matches_cpp() {
         use crate::game::monster::{Monster, MonsterType};
