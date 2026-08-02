@@ -413,6 +413,17 @@ impl ReplayDriver {
         Some(ev)
     }
 
+    /// Number of `GameTick` events in the demo. Each GameTick advances the
+    /// engine by one logic tick (the demo records `progressToNextGameTick` as
+    /// sub-tick frame timing, not extra ticks).
+    pub fn game_tick_count(&self) -> usize {
+        self.demo
+            .events
+            .iter()
+            .filter(|e| e.event_type == DemoEventType::GameTick)
+            .count()
+    }
+
     /// Run through every demo event, returning an aggregate summary.
     ///
     /// Tier 1 TODO: between events, run the engine logic ticks implied by

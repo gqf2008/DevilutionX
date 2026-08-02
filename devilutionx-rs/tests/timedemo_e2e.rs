@@ -22,6 +22,61 @@ fn fixture_path(name: &str) -> String {
     )
 }
 
+/// Tier 1 headless driver: run the demo's GameTick events through a real
+/// `GameState` update, headlessly (no SDL). The input events are not yet
+/// translated into actions (that is Tier 2), but this proves the engine loop
+/// can be driven deterministically from the demo stream.
+#[test]
+fn headless_replay_drives_game_ticks() {
+    let data = match std::fs::read(fixture_path("demo_0.dmo")) {
+        Ok(d) => d,
+        Err(e) => panic!("demo fixture missing ({}): {e}", fixture_path("demo_0.dmo")),
+    };
+    let demo = parse_demo(&data).expect("demo should parse");
+    let mut driver = ReplayDriver::new(demo);
+    let total_ticks = driver.game_tick_count();
+    assert!(total_ticks > 1000, "WarriorLevel1to2 drives thousands of game ticks, got {total_ticks}");
+
+    // Bounded headless run: the full 4.8k ticks are slow; 200 ticks exercise
+    // player/monster/simple-missile processing deterministically.
+    fn run_ticks(driver: &mut ReplayDriver, limit: usize) -> devilutionx_rs::game::game_state::GameState {
+        use devilutionx_rs::game::game_state::GameState;
+        use devilutionx_rs::game::player_exact::{HeroClass, Player};
+        use rand::SeedableRng;
+        let mut player = Player::new();
+        player.init_class_stats();
+        player._p_class = HeroClass::Warrior;
+        let mut gs = GameState::new(player, false, 12345);
+        let mut rng = rand::rngs::StdRng::seed_from_u64(0);
+        let mut tick = 0;
+        driver.reset();
+        while tick < limit {
+            match driver.peek() {
+                Some(ev) if ev.event_type == DemoEventType::GameTick => {
+                    gs.update(&mut rng);
+                    tick += 1;
+                }
+                Some(_) => {
+                    driver.step();
+                }
+                None => break,
+            }
+        }
+        assert_eq!(tick, limit, "demo has enough GameTick events");
+        gs
+    }
+
+    let mut d1 = ReplayDriver::new(parse_demo(&data).unwrap());
+    let mut d2 = ReplayDriver::new(parse_demo(&data).unwrap());
+    let gs1 = run_ticks(&mut d1, 200);
+    let gs2 = run_ticks(&mut d2, 200);
+    assert_eq!(
+        (gs1.player.position.x, gs1.player.position.y, gs1.player._p_hit_points, gs1.game_tick),
+        (gs2.player.position.x, gs2.player.position.y, gs2.player._p_hit_points, gs2.game_tick),
+        "headless replay is deterministic across two runs"
+    );
+}
+
 #[test]
 fn parse_real_demo_fixture() {
     // Sanity: the fixture must be present. The upstream repo ships it.
