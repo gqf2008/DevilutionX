@@ -1313,16 +1313,14 @@ impl GameState {
             // Update enemy position (C++ line 4170-4182)
             self.update_monster_enemy(monster_id);
 
-            // Check for monster-player combat
-            self.check_monster_combat(monster_id, rng);
-
             // Process doors if monster can open them (C++ via MonstCheckDoors)
             self.process_monster_doors(monster_id);
 
-            // Simple AI movement (M-monsters): idle/wander in place, or chase the
-            // player when within aggro range. Updates the monster's world tile so
-            // the renderer follows. No attack here (combat handled above).
+            // AI + movement first (sets mode/goal, may step toward the player),
+            // then combat resolves the melee attack the AI chose (C++
+            // ProcessMonsters: AiProc then MonsterAttack on MeleeAttack).
             self.update_monster_movement(monster_id, rng);
+            self.check_monster_combat(monster_id, rng);
         }
     }
 
@@ -1353,12 +1351,19 @@ impl GameState {
     }
 
     /// Check if monster should attack player
+    ///
+    /// C++ resolves melee when the AI set `MonsterMode::MeleeAttack`
+    /// (MonsterAttack). The engine keeps an adjacency fallback so monsters
+    /// that never ran the AI still fight, and resets the mode to Stand so the
+    /// AI can re-decide next tick.
     fn check_monster_combat(&mut self, monster_id: usize, rng: &mut impl Rng) {
         // Get monster position (need to clone to avoid borrow checker issues)
         let (monster_pos, can_attack) = {
             if let Some(monster) = self.monster_manager.get_monster(monster_id) {
                 let dist = walking_distance(monster.position(), self.player.position);
-                (monster.position(), dist <= 1)
+                let mode_attack =
+                    monster.mode == crate::game::monster::MonsterMode::MeleeAttack;
+                (monster.position(), dist <= 1 || mode_attack)
             } else {
                 return;
             }
@@ -1368,6 +1373,10 @@ impl GameState {
             // Attack player
             if let Some(monster) = self.monster_manager.get_monster(monster_id) {
                 let _ = monster_attack_player(monster, &mut self.player, rng, self.current_dungeon_level);
+            }
+            // Reset the attack mode so the AI can re-decide next tick.
+            if let Some(monster) = self.monster_manager.get_monster_mut(monster_id) {
+                monster.mode = crate::game::monster::MonsterMode::Stand;
             }
         }
     }
@@ -1959,9 +1968,9 @@ impl GameState {
         for monster_id in monster_ids {
             self.regenerate_monster_hp(monster_id);
             self.update_monster_enemy(monster_id);
-            self.check_monster_combat(monster_id, rng);
             self.process_monster_doors(monster_id);
             self.update_monster_movement(monster_id, rng);
+            self.check_monster_combat(monster_id, rng);
         }
     }
 
