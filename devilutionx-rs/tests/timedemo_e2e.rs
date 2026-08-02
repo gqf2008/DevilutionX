@@ -457,6 +457,93 @@ fn loads_reference_save_into_game_state() {
     assert_eq!(gs.player.inv_grid, pack.inv_grid, "InvGrid loaded");
 }
 
+/// Diagnostic: run the demo replay *from the saved state* (Tier 1
+/// load_from_save) and report the first byte difference per SaveGameData
+/// section against the C++ reference save. The engine simulation is not
+/// byte-exact yet (level-gen / monster RNG divergence), so this prints the
+/// gap instead of asserting equality; the final acceptance stays in
+/// `replay_warrior_level1to2`.
+#[test]
+fn replay_from_saved_state_reports_reference_diff() {
+    use rand::SeedableRng;
+    use devilutionx_rs::game::game_loop::{convert_screen_to_tile, tick_move_target};
+    use devilutionx_rs::game::codec::codec_decode;
+    use devilutionx_rs::game::game_state::GameState;
+    use devilutionx_rs::game::loadsave::CppGameHeader;
+    use devilutionx_rs::game::pack::PlayerPack;
+    use devilutionx_rs::game::player_exact::Player;
+
+    const PASSWORD_SPAWN_SINGLE: &str = "adslhfb1";
+    let data = match std::fs::read(fixture_path("demo_0.dmo")) {
+        Ok(d) => d,
+        Err(e) => panic!("demo fixture missing ({}): {e}", fixture_path("demo_0.dmo")),
+    };
+    let mut save = load_save_archive(fixture_path("spawn_0.sv")).expect("open save");
+    let hero = codec_decode(&save.read_entry("hero").unwrap(), PASSWORD_SPAWN_SINGLE);
+    let pack = PlayerPack::from_bytes(&hero);
+    let decoded = codec_decode(&save.read_entry("game").unwrap(), PASSWORD_SPAWN_SINGLE);
+    let header = CppGameHeader::parse(&decoded).expect("game header parses");
+    let seeds = CppGameHeader::parse_level_seeds(&decoded, 17).expect("seed table");
+
+    // Start the replay from the saved state (C++ RunTimedemo loads the save).
+    devilutionx_rs::engine::random::seed_gameplay_rng(12345);
+    let mut gs = GameState::new(Player::new(), false, 12345);
+    gs.load_from_save(&pack, &header, &seeds);
+    let mut rng = rand::rngs::StdRng::seed_from_u64(0);
+    let mut driver = ReplayDriver::new(parse_demo(&data).unwrap());
+    let mut move_target: Option<(i32, i32)> = None;
+    while let Some(ev) = driver.peek() {
+        match ev.event_type {
+            DemoEventType::MouseButtonDown => {
+                if let DemoPayload::MouseButton { x, y, .. } = ev.payload {
+                    let cam = gs.camera;
+                    move_target = Some(convert_screen_to_tile(
+                        x as i32, y as i32, cam.tile_x, cam.tile_y,
+                    ));
+                }
+            }
+            DemoEventType::GameTick => {
+                if let Some(target) = move_target {
+                    tick_move_target(&mut gs, target, &mut move_target);
+                }
+                gs.update(&mut rng);
+            }
+            _ => {}
+        }
+        driver.step();
+    }
+    let actual = gs.write_save_game_v3();
+    assert_eq!(&actual[..4], b"SHAR");
+
+    // Decode the C++ reference save (post-replay, written by RunTimedemo).
+    let mut ref_save = load_save_archive(fixture_path("demo_0_reference_spawn_0.sv"))
+        .expect("open reference save");
+    let reference = codec_decode(
+        &ref_save.read_entry("game").unwrap(),
+        PASSWORD_SPAWN_SINGLE,
+    );
+    let n = actual.len().min(reference.len());
+    let first = (0..n).find(|&i| actual[i] != reference[i]);
+    println!("[ReplayDiff] actual={}B reference={}B first_diff={:?}",
+        actual.len(), reference.len(), first.map(|i| (i, actual[i], reference[i])));
+    if let Some(i) = first {
+        // Classify the section by the fixed SaveGameData offsets.
+        let section = if i < 43 { "header" }
+            else if i < 43 + 17 * 8 { "level seeds" }
+            else if i < 43 + 17 * 8 + 21680 { "player" }
+            else if i < 43 + 17 * 8 + 21680 + 704 { "quests" }
+            else if i < 43 + 17 * 8 + 21680 + 704 + 96 { "portals" }
+            else if i < 43 + 17 * 8 + 21680 + 704 + 96 + 800 { "kill counts" }
+            else { "dungeon body / grids" };
+        println!("[ReplayDiff] first differing section: {section} at byte {i}");
+    } else if actual.len() == reference.len() {
+        println!("[ReplayDiff] BYTE-IDENTICAL game entry!");
+    }
+    // Structural validity is the hard assertion; byte equality is the
+    // eventual acceptance (tracked in replay_warrior_level1to2).
+    assert!(actual.len() > 60_000, "post-replay entry structurally complete");
+}
+
 /// Tier 1..3 acceptance: load `spawn_0.sv`, replay `demo_0.dmo` headlessly through
 /// the engine game loop, and byte-compare the final save against the reference.
 ///
