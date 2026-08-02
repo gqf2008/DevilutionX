@@ -2290,6 +2290,14 @@ pub fn item_to_binary(item: &crate::game::items::Item) -> BinaryItemData {
 /// The engine only tracks item id / equip state / weapon type, so the rest of
 /// the fields keep C++ defaults; `item_idx` carries the C++ item index.
 fn player_item_to_binary(item: &crate::game::player_exact::PlayerItem) -> BinaryItemData {
+    // Real drops carry the full generated item (C++ SetupAllItems output);
+    // serialise every modelled field via item_to_binary so the SaveItem
+    // section keeps the seed/affixes/unique/name like C++.
+    if let Some(full) = &item.full {
+        let mut b = item_to_binary(full);
+        b.item_idx = item.item_id;
+        return b;
+    }
     let mut b = BinaryItemData::default();
     b.item_idx = item.item_id;
     // C++ fills Item fields from AllItemsList at item creation (GetItemAttrs);
@@ -3921,6 +3929,34 @@ mod tests {
     }
 
     #[test]
+    /// A real drop with the full generated item serialises its seed and
+    /// affix data into the player's SaveItem (C++ SetupAllItems output).
+    #[test]
+    fn test_player_item_full_serialises_seed_and_affix() {
+        use crate::game::player_exact::PlayerItem;
+        let mut full = crate::game::items::Item::empty();
+        full.item_index = 119; // Short Sword
+        full.seed = 0xA1B2C3D4;
+        full.bonus_damage = 7;
+        full.name = "Short Sword of the Bear".to_string();
+        full.base_name = "Short Sword".to_string();
+        let it = PlayerItem {
+            item_id: 119,
+            equipped: false,
+            _itype: crate::game::item_dat::ItemType::Sword,
+            full: Some(full),
+        };
+        let b = player_item_to_binary(&it);
+        let mut h = SaveHelper::new(512);
+        b.to_binary(&mut h, false);
+        let d = h.into_data();
+        assert_eq!(d.len(), 368, "SaveItem is 368 bytes");
+        assert_eq!(&d[0..4], &0xA1B2C3D4u32.to_le_bytes(), "seed from the full item");
+        assert_eq!(&d[244..248], &7i32.to_le_bytes(), "plDam (affix bonus)");
+        assert_eq!(&d[125..148], b"Short Sword of the Bear", "identified name");
+        assert_eq!(&d[360..364], &119i32.to_le_bytes(), "IDidx");
+    }
+
     fn test_player_item_maps_base_attrs_from_tsv_row() {
         use crate::game::player_exact::PlayerItem;
         let mut it = PlayerItem::empty();

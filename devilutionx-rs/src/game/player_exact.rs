@@ -324,6 +324,10 @@ pub struct PlayerItem {
     /// Equipped weapon type (C++ `Item._itype`), used by the melee damage
     /// modifiers (sword/mace vs Undead/Animal/Demon in PlrHitMonst).
     pub _itype: crate::game::item_dat::ItemType,
+    /// Fully generated item for real drops (C++ `SetupAllItems` output);
+    /// `None` for empty slots and the legacy demo potions. When present,
+    /// `save_player` serialises the full SaveItem (seed/affixes/unique).
+    pub full: Option<crate::game::items::Item>,
 }
 
 /// Type alias for backwards compatibility
@@ -335,11 +339,12 @@ impl PlayerItem {
             item_id: 0,
             equipped: false,
             _itype: crate::game::item_dat::ItemType::None,
+            full: None,
         }
     }
 
     pub fn is_empty(&self) -> bool {
-        self.item_id == 0
+        self.item_id == 0 && self.full.is_none()
     }
 }
 

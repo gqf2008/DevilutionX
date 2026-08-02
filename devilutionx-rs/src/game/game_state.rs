@@ -1701,6 +1701,7 @@ impl GameState {
                                 item_id,
                                 equipped: false,
                                 _itype: itype,
+                                full: g.item.clone(),
                             };
                             if where_ == "inventory" {
                                 self.player._p_num_inv += 1;
@@ -4735,6 +4736,7 @@ mod tests {
                 item_id: 1,
                 equipped: false,
                 _itype: crate::game::item_dat::ItemType::Misc,
+                full: None,
             };
         }
         gs.ground_items.push(GroundItem {
