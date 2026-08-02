@@ -911,6 +911,9 @@ pub fn descend_to_level(game_state: &mut GameState, level: u8) -> Result<(), Str
     // barrels) and finally the scatter monster packs.
     let level_types = crate::game::monster::get_level_m_types(level, game_state.is_spawn);
     crate::engine::random::seed_gameplay_rng(seed);
+    // C++ InitGolems runs first in LoadGameLevelDungeon (diablo.cpp:3145).
+    game_state.monster_manager.clear();
+    init_golems(game_state);
     place_dungeon_objects(game_state);
     // C++ AddDoor: doors start closed (closed micros baked into dPiece).
     game_state.init_doors_closed();
@@ -1215,6 +1218,34 @@ fn object_area_ok(
     true
 }
 
+/// C++ `InitGolems` (monster.cpp:3679-3686): reserve the golem slots by
+/// placing four holding-cell golems at `GolemHoldingCell` (1,0) facing South.
+/// Runs *before* `InitObjects`/`InitMonsters`, so each golem's `InitMonster`
+/// RNG draws (tick counter, frame, HP roll, rndItemSeed, aiSeed) are part of
+/// the placement stream and the golems are the first entries in the saved
+/// ActiveMonsters list.
+fn init_golems(game_state: &mut GameState) {
+    use crate::game::monster::{Monster, MonsterAIState, MonsterMode, MonsterType};
+    use crate::game::types::{Direction, Point};
+    for _ in 0..4usize {
+        let mut m = Monster::new_with_rng(
+            (game_state.monster_manager.active_count() + 1) as u32,
+            MonsterType::Golem,
+            1,
+            0,
+            game_state.current_dungeon_level,
+            &mut rand::rngs::StdRng::seed_from_u64(0),
+        );
+        m.facing = Direction::South;
+        // Slot 0 = Golem (C++ AddMonsterType(MT_GOLEM, PLACE_SPECIAL) first).
+        m.level_type = 0;
+        m.enemy_position = Point::new(1, 0);
+        m.ai_state = MonsterAIState::Idle;
+        m.mode = MonsterMode::Stand;
+        game_state.monster_manager.add_monster(m);
+    }
+}
+
 /// C++ `InitObjects` (objects.cpp:3846-3860) for Cathedral L1, in exact draw
 /// order (the gameplay RNG has just been re-seeded by the caller, mirroring
 /// `SetRndSeedForDungeonLevel`): `DiscardRandomValues(1)`, then
@@ -1314,8 +1345,8 @@ fn place_dungeon_monsters(
     spawn_y: i32,
     mut level_types: crate::game::monster::LevelMonsterTypes,
 ) {
-    // Start each descent with a clean monster roster.
-    game_state.monster_manager.clear();
+    // The caller clears the roster and adds the holding-cell golems first
+    // (C++ InitGolems); this pass only places the scatter packs.
     game_state.monster_sprites = None;
 
     let layout = match &game_state.dungeon_layout {
@@ -1480,6 +1511,9 @@ pub fn prepare_dungeon_for_replay(game_state: &mut GameState, level: u8) -> bool
     // monsters from the precomputed roster.
     let level_types = crate::game::monster::get_level_m_types(level, game_state.is_spawn);
     crate::engine::random::seed_gameplay_rng(seed);
+    // C++ InitGolems runs first in LoadGameLevelDungeon (diablo.cpp:3145).
+    game_state.monster_manager.clear();
+    init_golems(game_state);
     place_dungeon_objects(game_state);
     game_state.init_doors_closed();
 
