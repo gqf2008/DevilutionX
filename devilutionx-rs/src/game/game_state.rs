@@ -2233,7 +2233,11 @@ impl GameState {
             })
             .collect();
         let mut ph = SaveHelper::new(22000);
-        loadsave::save_player(&mut ph, &self.player, false);
+        // C++ SavePlayer writes the player's light id (`_plid`); the engine
+        // keeps the index in GameState.player_light_index.
+        let mut save_player = self.player.clone();
+        save_player.light_id = self.player_light_index;
+        loadsave::save_player(&mut ph, &save_player, false);
         let player_pack = ph.into_data();
         let quests: Vec<crate::game::quest_new::Quest> =
             self.quests.quests.iter().take(16).cloned().collect();
