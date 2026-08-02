@@ -39,6 +39,7 @@ pub mod dialogs;
 pub mod hero_select;
 pub mod mainmenu;
 pub mod selconn;
+pub mod selgame;
 pub mod settings;
 pub mod ui_core;
 pub mod ui_item;

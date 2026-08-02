@@ -30,6 +30,8 @@ use game::game_loop::{run_game_loop, InterfaceMode};
 use ui::diabloui::mainmenu::{MainMenu, MainMenuSelection};
 use ui::diabloui::settings::SettingsMenu;
 use ui::diabloui::selconn::SelConnMenu;
+use ui::diabloui::selgame::{SelGameActionMenu, SelGameForm, SelGameMenu};
+use crate::net::storm::ConnType;
 use ui::diabloui::UiContext;
 use std::env;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -1869,6 +1871,203 @@ fn ui_sel_conn_dialog(ctx: &mut DiabloContext, event_pump: &mut sdl2::EventPump)
     Ok(result)
 }
 
+/// Render the selgame dialog level (C++ `UiSelGameDialog`): a title, a
+/// right-side list (actions or difficulties) and the focused row's
+/// description on the left.
+fn render_sel_game(
+    canvas: &mut sdl2::render::Canvas<sdl2::video::Window>,
+    font: &mut PixelFont,
+    title: &str,
+    rows: &[String],
+    selected: usize,
+    description: &str,
+    assets: &UiAssetsSnapshot,
+    fade: u8,
+) -> Result<(), String> {
+    let creator = canvas.texture_creator();
+    let (ui_x, ui_y) = ui_origin();
+
+    canvas.set_draw_color(Color::RGB(0, 0, 0));
+    canvas.clear();
+    if let Some(bg) = &assets.mainmenu_bg {
+        render_ui_image(canvas, &creator, bg, ui_x, ui_y, fade)?;
+    } else {
+        canvas.set_draw_color(Color::RGB(10, 10, 20));
+        canvas.clear();
+    }
+
+    let title_x = ui_x + (640 - font.text_width(title)) / 2;
+    font.render_text(canvas, title, title_x, ui_y + 40, mod_color(Color::RGB(200, 200, 200), fade));
+
+    // Right-side list.
+    let list_x = ui_x + 300;
+    let list_y = ui_y + 130;
+    let item_w: i32 = 285;
+    let item_h: i32 = 30;
+    for (i, row) in rows.iter().enumerate() {
+        let item_y = list_y + i as i32 * item_h;
+        let is_sel = i == selected;
+        if is_sel {
+            canvas.set_draw_color(mod_color(Color::RGB(40, 32, 16), fade));
+            let _ = canvas.fill_rect(Rect::new(list_x, item_y, item_w as u32, item_h as u32));
+        }
+        let color = if is_sel {
+            mod_color(Color::RGB(255, 215, 0), fade)
+        } else {
+            mod_color(Color::RGB(170, 170, 170), fade)
+        };
+        let text_w = font.text_width(row);
+        font.render_text(canvas, row, list_x + (item_w - text_w) / 2, item_y + (item_h - font.line_height()) / 2, color);
+    }
+
+    // Left-side description.
+    let desc = description.replace("\n", " ");
+    font.render_text(canvas, &desc, ui_x + 35, ui_y + 220, mod_color(Color::RGB(150, 150, 150), fade));
+    Ok(())
+}
+
+/// Hit-test the selgame list rows.
+fn hit_test_sel_game_item(mouse_x: i32, mouse_y: i32, item_count: usize) -> Option<usize> {
+    let (ui_x, ui_y) = ui_origin();
+    let list_x = ui_x + 300;
+    let list_y = ui_y + 130;
+    let item_w: i32 = 285;
+    let item_h: i32 = 30;
+    if mouse_x < list_x || mouse_x >= list_x + item_w {
+        return None;
+    }
+    for i in 0..item_count {
+        let item_y = list_y + i as i32 * item_h;
+        if mouse_y >= item_y && mouse_y < item_y + item_h {
+            return Some(i);
+        }
+    }
+    None
+}
+
+/// Game setup dialog (C++ `UiSelGameDialog`, selgame.cpp). For the loopback
+/// provider C++ skips the action list and goes straight to the create-game
+/// difficulty form; other providers get Create / Create Public / Join first.
+fn ui_sel_game_dialog(
+    ctx: &mut DiabloContext,
+    event_pump: &mut sdl2::EventPump,
+    conn: ConnType,
+) -> Result<Option<SelGameForm>, String> {
+    let assets = snapshot_ui_assets();
+    let start_time = Instant::now();
+    let mut fade_ctx = UiContext::new();
+    fade_ctx.start_fade_in(0);
+
+    let action = if conn == ConnType::Loopback {
+        Some(ui::diabloui::selgame::SelGameAction::CreateGame)
+    } else {
+        None
+    };
+
+    // Stage 1: action selection (skipped for loopback).
+    let mut action_menu = SelGameActionMenu::new();
+    if action.is_none() {
+        let picked = 'action_loop: loop {
+            for event in event_pump.poll_iter() {
+                match event {
+                    Event::Quit { .. } => return Ok(None),
+                    Event::KeyDown { keycode: Some(key), .. } => match key {
+                        Keycode::Up | Keycode::W => action_menu.move_selection(-1),
+                        Keycode::Down | Keycode::S => action_menu.move_selection(1),
+                        Keycode::Return | Keycode::Space => {
+                            break 'action_loop action_menu.selected_action();
+                        }
+                        Keycode::Escape => return Ok(None),
+                        _ => {}
+                    },
+                    Event::MouseButtonUp { mouse_btn: sdl2::mouse::MouseButton::Left, x, y, .. } => {
+                        if let Some(idx) = hit_test_sel_game_item(x, y, action_menu.item_count()) {
+                            action_menu.set_selection(idx);
+                            break 'action_loop action_menu.selected_action();
+                        }
+                    }
+                    Event::MouseMotion { x, y, .. } => {
+                        if let Some(idx) = hit_test_sel_game_item(x, y, action_menu.item_count()) {
+                            action_menu.set_selection(idx);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            let now_ms = start_time.elapsed().as_millis() as u32;
+            let _ = fade_ctx.update_fade(now_ms);
+            let fade = fade_ctx.fade_value.min(255) as u8;
+            let rows: Vec<String> = (0..action_menu.item_count())
+                .map(|i| action_menu.row_label(i))
+                .collect();
+            render_sel_game(
+                ctx.window.canvas_mut(),
+                &mut ctx.font,
+                "Select Action",
+                &rows,
+                action_menu.selected_index(),
+                action_menu.selected_description(),
+                &assets,
+                fade,
+            )?;
+            std::thread::sleep(std::time::Duration::from_millis(16));
+        };
+        let _ = picked;
+    }
+
+    // Stage 2: difficulty selection (create form).
+    let mut diff_menu = SelGameMenu::new();
+    let picked_action = action.unwrap_or_else(|| action_menu.selected_action());
+    let difficulty = 'diff_loop: loop {
+        for event in event_pump.poll_iter() {
+            match event {
+                Event::Quit { .. } => return Ok(None),
+                Event::KeyDown { keycode: Some(key), .. } => match key {
+                    Keycode::Up | Keycode::W => diff_menu.move_selection(-1),
+                    Keycode::Down | Keycode::S => diff_menu.move_selection(1),
+                    Keycode::Return | Keycode::Space => {
+                        break 'diff_loop diff_menu.selected_difficulty();
+                    }
+                    Keycode::Escape => return Ok(None),
+                    _ => {}
+                },
+                Event::MouseButtonUp { mouse_btn: sdl2::mouse::MouseButton::Left, x, y, .. } => {
+                    if let Some(idx) = hit_test_sel_game_item(x, y, diff_menu.item_count()) {
+                        diff_menu.set_selection(idx);
+                        break 'diff_loop diff_menu.selected_difficulty();
+                    }
+                }
+                Event::MouseMotion { x, y, .. } => {
+                    if let Some(idx) = hit_test_sel_game_item(x, y, diff_menu.item_count()) {
+                        diff_menu.set_selection(idx);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let now_ms = start_time.elapsed().as_millis() as u32;
+        let _ = fade_ctx.update_fade(now_ms);
+        let fade = fade_ctx.fade_value.min(255) as u8;
+        let rows: Vec<String> = (0..diff_menu.item_count()).map(|i| diff_menu.row_label(i)).collect();
+        render_sel_game(
+            ctx.window.canvas_mut(),
+            &mut ctx.font,
+            "Select Difficulty",
+            &rows,
+            diff_menu.selected_index(),
+            diff_menu.selected_description(),
+            &assets,
+            fade,
+        )?;
+        std::thread::sleep(std::time::Duration::from_millis(16));
+    };
+
+    Ok(Some(SelGameForm {
+        action: picked_action,
+        difficulty,
+    }))
+}
+
 fn ui_main_menu_dialog(
     name: &str,
     ctx: &mut DiabloContext,
@@ -2022,6 +2221,17 @@ fn init_multiplayer_menu(ctx: &mut DiabloContext, event_pump: &mut sdl2::EventPu
     };
     println!("[InitMultiPlayerMenu] Connection: {:?}", conn);
     // TODO: SNetInitializeProvider(provider, gameData) + NetInit + hosting/joining.
+
+    // 2b. UiSelGameDialog: pick create/join + difficulty (selgame.cpp).
+    let Some(form) = ui_sel_game_dialog(ctx, event_pump, conn)? else {
+        println!("[InitMultiPlayerMenu] Game setup cancelled");
+        return Ok(true);
+    };
+    println!(
+        "[InitMultiPlayerMenu] Game setup: action={:?} difficulty={:?}",
+        form.action, form.difficulty
+    );
+    // TODO: CreateGame/JoinGame via the network layer (multi.cpp).
 
     // 3. Reuse the single-player hero select as a placeholder until the
     // multiplayer hero menu is ported.
