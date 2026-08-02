@@ -203,7 +203,7 @@ fn l1_seed_2588_diff_cells() {
             let got = gen.dungeon[y][x] as u16;
             let want = tiles[y * 40 + x];
             if got != want {
-                if diffs < 12 {
+                if diffs < 200 {
                     println!("[L1-2588] cell ({},{}) rust={} cpp={}", x, y, got, want);
                 }
                 diffs += 1;
@@ -218,10 +218,10 @@ fn l1_seed_2588_diff_cells() {
 /// diffed against `l1repro.exe 1545811660` (current C++ HEAD).
 #[test]
 fn l1_dump_rust_grid_timedemo_seed() {
-    let mut gen = CathedralGenerator::new();
-    gen.generate(DungeonType::Cathedral, 1545811660);
+    let mut a = CathedralGenerator::new();
+    a.generate(DungeonType::Cathedral, 2588);
     for y in 0..40usize {
-        let row: Vec<String> = (0..40usize).map(|x| (gen.dungeon[y][x] as u8).to_string()).collect();
+        let row: Vec<String> = (0..40usize).map(|x| (a.dungeon[y][x] as u8).to_string()).collect();
         println!("{}", row.join(" "));
     }
 }

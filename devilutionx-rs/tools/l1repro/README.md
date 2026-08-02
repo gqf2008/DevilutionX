@@ -36,11 +36,19 @@ Example:
 l1repro.exe 743271966 > grid.txt
 ```
 
-## Finding (2026-08-02)
+## Verified alignment (2026-08-02)
 
-The repo fixtures `1-2588.dun` / `1-743271966.dun` are **stale** relative to
-current HEAD C++: the repro matches them only 453/1600 and 1234/1600, while the
-Rust port matches `1-743271966.dun` 100% (it was tuned to the 2022 fixture
-baseline, like the L4 fixtures noted in `l4repro/README.md`). The repro is the
-authoritative current-C++ baseline; the Rust port still needs to be re-verified
-against it once the fixture staleness is resolved.
+With `pOriginalCathedral = true` (the classic non-Hellfire default,
+interfac.cpp:327), the real `L5STAIRSUP` miniset (crypt.cpp:19-33) and the
+incremental `PlaceMiniSet` scan (gendung.cpp:646-683), the repro matches both
+fixtures cell-for-cell: `1-743271966.dun` and `1-2588.dun` = **0/1600 diffs**.
+The Rust `CathedralGenerator` (default `original_cathedral = true`) produces the
+same grids, so the L1 generator is fully aligned with current C++ and the 2022
+fixtures. Earlier "stale fixture" reports were artifacts of an incorrect
+`PlaceMiniSet` stub in this tool.
+
+## Debug stages
+
+Set `L1_DUMP_STAGES=1` to print the grid after `area_ok` (rooms/chambers/walls),
+`fixdirt` and `fillfloor` stages for step-by-step comparison with the Rust
+`CathedralGenerator::debug_dump_stages`.

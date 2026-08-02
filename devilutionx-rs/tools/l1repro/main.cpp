@@ -44,8 +44,23 @@ void AddCryptObjects(int, int, int, int) {}
 void DRLG_CheckQuests(WorldTilePosition) {}
 bool UseMultiplayerQuests() { return false; }
 int UberRow = 0;
+bool g_dumpStages = false;
 int UberCol = 0;
-const Miniset L5STAIRSUP {};
+const Miniset L5STAIRSUP {
+	{ 4, 4 },
+	{
+	    { 22, 22, 22, 22 },
+	    { 2, 2, 2, 2 },
+	    { 13, 13, 13, 13 },
+	    { 13, 13, 13, 13 },
+	},
+	{
+	    { 0, 66, 23, 0 },
+	    { 63, 64, 65, 0 },
+	    { 0, 67, 68, 0 },
+	    { 0, 0, 0, 0 },
+	}
+};
 void DRLG_MRectTrans(RectangleOf<unsigned char, unsigned char>) {}
 bool PlaceCryptStairs(lvl_entry) { return true; }
 void SetCryptRoom() {}
@@ -141,13 +156,39 @@ void FloodTransparencyValues(uint8_t floorID)
 
 std::optional<Point> PlaceMiniSet(const Miniset &miniset, int tries, bool drlg1Quirk)
 {
-	for (int i = 0; i < tries; i++) {
-		WorldTilePosition position = { static_cast<WorldTileCoord>(GenerateRnd(DMAXX)), static_cast<WorldTileCoord>(GenerateRnd(DMAXY)) };
-		if (position.x + miniset.size.width > DMAXX || position.y + miniset.size.height > DMAXY)
+	const int sw = miniset.size.width;
+	const int sh = miniset.size.height;
+	Point position { GenerateRnd(DMAXX - sw), GenerateRnd(DMAXY - sh) };
+	for (int i = 0; i < tries; i++, position.x++) {
+		if (position.x == DMAXX - sw) {
+			position.x = 0;
+			position.y++;
+			if (position.y == DMAXY - sh) {
+				position.y = 0;
+			}
+		}
+		if (drlg1Quirk) {
+			bool valid = true;
+			if (position.x <= 12) {
+				position.x++;
+				valid = false;
+			}
+			if (position.y <= 12) {
+				position.y++;
+				valid = false;
+			}
+			if (!valid)
+				continue;
+		}
+		if (g_dumpStages) printf("DEBUG pm miniset sw=%d sh=%d search0={%d,%d,%d,%d} search1={%d,%d,%d,%d}\n", sw, sh, miniset.search[0][0], miniset.search[0][1], miniset.search[0][2], miniset.search[0][3], miniset.search[1][0], miniset.search[1][1], miniset.search[1][2], miniset.search[1][3]);
+		if (i < 12)
+			if (g_dumpStages) printf("DEBUG pm i=%d x=%d y=%d tile=%d\n", i, position.x, position.y, dungeon[position.x][position.y]);
+		if (SetPieceRoom.contains(position))
 			continue;
-		if (!miniset.matches({ position.x, position.y }, drlg1Quirk))
+		if (!miniset.matches(position))
 			continue;
-		miniset.place({ position.x, position.y });
+		if (g_dumpStages) printf("DEBUG pm SUCCESS x=%d y=%d\n", position.x, position.y);
+		miniset.place(position);
 		return position;
 	}
 	return {};
@@ -188,16 +229,46 @@ int main(int argc, char **argv)
 	SetPiece = WorldTileRectangle(WorldTilePosition { 0, 0 }, WorldTileSize { 0, 0 });
 
 	Player dummy;
-	dummy.pOriginalCathedral = false;
+	dummy.pOriginalCathedral = true;
 	MyPlayer = &dummy;
 
 	SetRndSeed(seed);
-	GenerateLevel(ENTRY_MAIN);
-
-	for (int y = 0; y < DMAXY; y++) {
-		for (int x = 0; x < DMAXX; x++) {
-			printf("%d%c", dungeon[x][y], x == DMAXX - 1 ? '\n' : ' ');
-		}
+	// Instrumented step-by-step run (mirrors GenerateLevel, dumping each stage).
+	const char *dumpStages = std::getenv("L1_DUMP_STAGES");
+	g_dumpStages = dumpStages != nullptr;
+	SetRndSeed(seed);
+	while (true) {
+		DRLG_InitTrans();
+		do {
+			LevelSeeds[currlevel] = GetLCGEngineState();
+			FirstRoom();
+		} while (FindArea() < 533);
+		InitDungeonFlags();
+		MakeDmt();
+		FillChambers();
+		FixTilesPatterns();
+		AddWall();
+		if (dumpStages) { printf("\nSTAGE area_ok\n"); for (int y=0;y<DMAXY;y++){for(int x=0;x<DMAXX;x++)printf("%d%c",dungeon[x][y],x==DMAXX-1?'\n':' ');} }
+		if (g_dumpStages) printf("RNGSTATE %u\n", GetLCGEngineState());
+		FloodTransparencyValues(13);
+		if (PlaceStairs(ENTRY_MAIN))
+			break;
+	}
+	FixTransparency();
+	FixDirtTiles();
+	if (dumpStages) { printf("\nSTAGE fixdirt\n"); for (int y=0;y<DMAXY;y++){for(int x=0;x<DMAXX;x++)printf("%d%c",dungeon[x][y],x==DMAXX-1?'\n':' ');} }
+	FixCornerTiles();
+	Substitution();
+	ApplyShadowsPatterns();
+	const int numt = GenerateRnd(5) + 5;
+	for (int i = 0; i < numt; i++)
+		PlaceMiniSet(LAMPS, DMAXX * DMAXY, true);
+	FillFloor();
+	if (dumpStages) {
+		printf("\nSTAGE fillfloor\n");
+		for (int y = 0; y < DMAXY; y++) { for (int x = 0; x < DMAXX; x++) printf("%d%c", dungeon[x][y], x == DMAXX - 1 ? '\n' : ' '); }
+	} else {
+		for (int y = 0; y < DMAXY; y++) { for (int x = 0; x < DMAXX; x++) printf("%d%c", dungeon[x][y], x == DMAXX - 1 ? '\n' : ' '); }
 	}
 	return 0;
 }

@@ -707,8 +707,9 @@ pub struct CathedralGenerator {
     pub themes: Vec<ThemeLocation>,
 
     /// Legacy original-cathedral stairs (`pOriginalCathedral`): when true the
-    /// C++ engine places L5STAIRSUP instead of STAIRSUP. Defaults to true to
-    /// match the C++ test fixtures (TestInitGame sets it true).
+    /// C++ engine places L5STAIRSUP instead of STAIRSUP. C++ sets it to
+    /// `!gbIsHellfire` (interfac.cpp:327) and old saves default it to true, so
+    /// classic non-Hellfire games (and the .dun fixtures) use L5STAIRSUP.
     pub original_cathedral: bool,
 
     /// Seeded RNG (matches Diablo's `SetRndSeed`/`GenerateRnd`/`FlipCoin`).
@@ -1814,6 +1815,50 @@ impl CathedralGenerator {
     /// Faithfully reproduces the C++ pipeline: re-roll the room layout until
     /// it is large enough and stairs can be placed, then run the final tile
     /// fix-up passes (dirt/corner substitution, shadows, lamps, floor fill).
+    /// Diagnostic: run the generation pipeline step-by-step and print the
+    /// grid after each stage (for l1repro comparison). Debug only.
+    pub fn debug_dump_stages(&mut self, seed: u32) {
+        self.rng.set_seed(seed);
+        loop {
+            loop {
+                self.first_room();
+                if self.find_area() >= 533 {
+                    break;
+                }
+            }
+            self.init_dungeon();
+            self.make_dmt();
+            self.fill_chambers();
+            self.fix_tiles_patterns();
+            self.add_wall();
+            println!("STAGE area_ok");
+            self.dump_grid();
+            if self.place_stairs() {
+                break;
+            }
+        }
+        self.fix_dirt_tiles();
+        println!("STAGE fixdirt");
+        self.dump_grid();
+        self.fix_corner_tiles();
+        self.substitution();
+        self.apply_shadows_patterns();
+        let num_lamps = self.rng.generate(5) + 5;
+        for _ in 0..num_lamps {
+            self.place_miniset(&lamps_miniset(), DUNGEON_SIZE * DUNGEON_SIZE, true);
+        }
+        self.fill_floor();
+        println!("STAGE fillfloor");
+        self.dump_grid();
+    }
+
+    fn dump_grid(&self) {
+        for y in 0..DUNGEON_SIZE {
+            let row: Vec<String> = (0..DUNGEON_SIZE).map(|x| (self.dungeon[y][x] as u8).to_string()).collect();
+            println!("{}", row.join(" "));
+        }
+    }
+
     pub fn generate(&mut self, _level_type: DungeonType, seed: u32) {
         // Seed the Diablo LCG before generation so results are deterministic
         // and reproduce the C++ `SetRndSeed(seed)` behaviour exactly.
