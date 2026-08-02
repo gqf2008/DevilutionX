@@ -954,7 +954,7 @@ fn place_dungeon_monsters(game_state: &mut GameState, spawn_x: i32, spawn_y: i32
         // Pick a random floor tile not already occupied by another monster.
         let mut attempts = 0;
         let (tx, ty) = loop {
-            let idx = rng.random_range(0..floor_tiles.len());
+            let idx = crate::engine::random::gameplay_rnd(0, floor_tiles.len() as i32 - 1) as usize;
             let p = floor_tiles[idx];
             if !occupied.contains(&p) {
                 break p;
@@ -966,7 +966,7 @@ fn place_dungeon_monsters(game_state: &mut GameState, spawn_x: i32, spawn_y: i32
         };
         occupied.push((tx, ty));
 
-        let monster_type = types[rng.random_range(0..types.len())];
+        let monster_type = types[crate::engine::random::gameplay_rnd(0, types.len() as i32 - 1) as usize];
         // Build the monster on its spawn tile. `Monster::new` seeds enemy/target
         // with the monster's own tile (a safe no-op until `update_ai` repoints
         // them at the player) and home_x/home_y with the spawn tile (used to

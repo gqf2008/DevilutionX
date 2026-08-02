@@ -868,7 +868,7 @@ impl QuestManager {
         for pool in pools {
             if pool.len() > 1 {
                 // Randomly deactivate one quest from each pool
-                let deactivate_idx = rng.random_range(0..pool.len());
+                let deactivate_idx = crate::engine::random::gameplay_rnd(0, pool.len() as i32 - 1) as usize;
                 let quest_id = pool[deactivate_idx];
                 let idx = quest_id as usize;
                 if idx < MAXQUESTS {

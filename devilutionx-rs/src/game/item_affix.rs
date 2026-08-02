@@ -1940,8 +1940,6 @@ pub fn select_affix(
     only_good: bool,
     alignment: GoodOrEvil,
 ) -> Option<&AffixData> {
-    let mut rng = rand::rng();
-
     // Build list of eligible affixes with their weights
     let mut eligible: Vec<(&AffixData, i32)> = Vec::new();
 
@@ -1980,7 +1978,7 @@ pub fn select_affix(
     let total_weight: i32 = eligible.iter().map(|(_, w)| w).sum();
 
     // Random selection
-    let mut roll = rng.random_range(0..total_weight);
+    let mut roll = crate::engine::random::gameplay_rnd(0, total_weight - 1);
 
     for (affix, weight) in &eligible {
         roll -= weight;
@@ -2053,7 +2051,6 @@ pub static STAFF_SPELLS: &[(SpellId, i32)] = &[
 
 /// Get random staff spell for given level
 pub fn get_staff_spell(level: i32) -> Option<(SpellId, i32)> {
-    let mut rng = rand::rng();
     let eligible: Vec<_> = STAFF_SPELLS
         .iter()
         .filter(|(_, min_mag)| *min_mag <= level * 2)
@@ -2063,7 +2060,7 @@ pub fn get_staff_spell(level: i32) -> Option<(SpellId, i32)> {
         return Some(STAFF_SPELLS[0]);
     }
 
-    let idx = rng.random_range(0..eligible.len());
+    let idx = crate::engine::random::gameplay_rnd(0, eligible.len() as i32 - 1) as usize;
     Some(*eligible[idx])
 }
 
@@ -2897,7 +2894,7 @@ pub fn is_item_available(index: usize, hellfire: bool, spawn: bool, test_bard: b
 pub fn get_item_index_for_droppable<F>(
     consider_drop_rate: bool,
     is_item_okay: F,
-    rng: &mut impl Rng,
+    _rng: &mut impl Rng,
     hellfire: bool,
     spawn: bool,
     test_bard: bool,
@@ -2932,7 +2929,7 @@ where
     if ril.is_empty() {
         return None;
     }
-    let target = rng.random_range(0..cumulative);
+    let target = crate::engine::random::gameplay_rnd(0, cumulative as i32 - 1) as u32;
     for &(i, cw) in ril.iter() {
         if target < cw {
             return Some(i);
@@ -2989,7 +2986,7 @@ pub fn rnd_all_items(
 ) -> Option<usize> {
     // C++ RndAllItems: `if (GenerateRnd(100) > 25) return IDI_GOLD;`
     // (IDI_GOLD = 0 in itemdat.h `_item_indexes`, matching ItemId::Gold).
-    if rng.random_range(0..100) > 25 {
+    if crate::engine::random::gameplay_rnd(0, 99) > 25 {
         return Some(super::item_dat::ItemId::Gold as usize);
     }
 
