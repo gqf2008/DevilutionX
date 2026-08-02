@@ -708,6 +708,13 @@ fn handle_event(
                 // C++ `TalkToTowner` path. We also open a placeholder panel for
                 // gossip-only NPCs so the player gets feedback.
                 if let Some((nx, ny, _name, kind)) = game_state.npc_at_tile(wx, wy) {
+                    // C++ TalkToWitch runs before the store for Adria: the
+                    // mushroom-quest dialogue may consume the click
+                    // (towners.cpp:341-373).
+                    if kind == 6 /* Witch */ && game_state.talk_to_witch().is_some() {
+                        state.move_target = None;
+                        return true;
+                    }
                     if GameState::npc_runs_shop(kind) {
                         game_state.open_shop(kind);
                         println!(

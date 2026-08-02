@@ -403,6 +403,10 @@ pub struct GameState {
     /// dying player and drives the death screen + respawn flow.
     pub player_dead: bool,
 
+    /// Live quest state (C++ `Quests[]`); wired for the towner
+    /// dialogue state machines (e.g. the Mushroom quest TalkToWitch).
+    pub quests: crate::game::quest_new::QuestManager,
+
     /// Whether the shop panel is currently open. Toggled on by clicking near a
     /// shop-capable NPC (Griswold/Pepin/Adria/Wirt) and toggled off by clicking
     /// CLOSE or pressing ESC. While true, [`game_loop`] draws the shop overlay
@@ -559,6 +563,11 @@ impl GameState {
             player_light_index: crate::game::lighting::NO_LIGHT,
             explored: vec![false; 112 * 112],
             floating_numbers: crate::game::floatingnumbers::FloatingNumbers::new(),
+            quests: {
+                let mut q = crate::game::quest_new::QuestManager::new();
+                q.init_quests(false, seed as u32);
+                q
+            },
             towners: Self::build_towner_list(),
             player_dead: false,
             shop_open: false,
@@ -690,6 +699,81 @@ impl GameState {
     /// Gillian, Cow) are gossip-only and don't open the shop UI.
     pub fn npc_runs_shop(kind: u8) -> bool {
         matches!(kind, 0 | 1 | 6 | 8)
+    }
+
+    /// C++ `TalkToWitch` (towners.cpp:341-373): the Adria mushroom-quest
+    /// dialogue state machine. Runs when the player clicks Adria; returns the
+    /// speech id shown (C++ `InitQTextMsg`) or `None` when no quest dialogue
+    /// fired and the store UI should open instead.
+    ///
+    /// Upstream `2c1a364da` adds `_qvar2 != TEXT_MUSH11` so the brain dialog
+    /// is only shown once.
+    pub fn talk_to_witch(&mut self) -> Option<crate::game::quest_new::SpeechId> {
+        use crate::game::quest_new::{MushroomQuestState as QS, QuestId, QuestState, SpeechId};
+        let quest = &mut self.quests.quests[QuestId::Mushroom as usize];
+        if quest._qactive == QuestState::NotAvailable {
+            return None;
+        }
+        if quest._qactive == QuestState::Init {
+            if Self::remove_inventory_item(&mut self.player, 19 /* IDI_FUNGALTM */) {
+                quest._qactive = QuestState::Active;
+                quest._qlog = true;
+                quest._qvar1 = QS::TomeGiven as u8;
+                return Some(SpeechId::Mush8);
+            }
+        }
+        if quest._qactive == QuestState::Active {
+            if quest._qvar1 >= QS::TomeGiven as u8 && quest._qvar1 < QS::MushGiven as u8 {
+                if Self::remove_inventory_item(&mut self.player, 17 /* IDI_MUSHROOM */) {
+                    quest._qvar1 = QS::MushGiven as u8;
+                    quest._qmsg = SpeechId::Mush10;
+                    return Some(SpeechId::Mush10);
+                }
+                if quest._qmsg != SpeechId::Mush9 {
+                    quest._qmsg = SpeechId::Mush9;
+                    return Some(SpeechId::Mush9);
+                }
+            }
+            if quest._qvar1 >= QS::MushGiven as u8 {
+                if Self::has_inventory_item(&self.player, 18 /* IDI_BRAIN */)
+                    && quest._qvar2 != SpeechId::Mush11 as u8
+                {
+                    quest._qmsg = SpeechId::Mush11;
+                    quest._qvar2 = SpeechId::Mush11 as u8;
+                    return Some(SpeechId::Mush11);
+                }
+                if Self::has_inventory_item(&self.player, 20 /* IDI_SPECELIX */) {
+                    quest._qactive = QuestState::Done;
+                    return Some(SpeechId::Mush12);
+                }
+            }
+        }
+        None
+    }
+
+    /// True when the player carries the item anywhere (C++ `HasInventoryItem`
+    /// + belt, used by TalkToWitch).
+    fn has_inventory_item(player: &crate::game::player_exact::Player, item_id: i32) -> bool {
+        player.inv_list.iter().any(|i| i.item_id == item_id)
+            || player.spd_list.iter().any(|i| i.item_id == item_id)
+    }
+
+    /// Remove one instance of the item from inventory or belt (C++
+    /// `RemoveInventoryItemById`). Returns true when an instance was removed.
+    fn remove_inventory_item(
+        player: &mut crate::game::player_exact::Player,
+        item_id: i32,
+    ) -> bool {
+        use crate::game::player_exact::PlayerItem;
+        if let Some(slot) = player.inv_list.iter_mut().find(|i| i.item_id == item_id) {
+            *slot = PlayerItem::empty();
+            return true;
+        }
+        if let Some(slot) = player.spd_list.iter_mut().find(|i| i.item_id == item_id) {
+            *slot = PlayerItem::empty();
+            return true;
+        }
+        false
     }
 
     /// Display name for the shop owned by the given towner `kind`, used in the
@@ -4149,6 +4233,59 @@ mod tests {
             .1
             .light_id;
         assert_eq!(li2, -1, "light id reset to NO_LIGHT");
+    }
+
+    #[test]
+    fn test_talk_to_witch_mushroom_quest_state_machine() {
+        use crate::game::player_exact::PlayerItem;
+        use crate::game::quest_new::{MushroomQuestState as QS, QuestId, QuestState, SpeechId};
+
+        fn give(player: &mut crate::game::player_exact::Player, item_id: i32) {
+            let mut it = PlayerItem::empty();
+            it.item_id = item_id;
+            player.inv_list[0] = it;
+        }
+
+        let mut gs = GameState::new(Player::new(), true, 42);
+        let qidx = QuestId::Mushroom as usize;
+
+        // Quest not available -> no quest dialogue (store opens instead).
+        gs.quests.quests[qidx]._qactive = QuestState::NotAvailable;
+        assert_eq!(gs.talk_to_witch(), None);
+
+        // QUEST_INIT + Fungal Tome -> activate, QS_TOMEGIVEN, show MUSH8.
+        gs.quests.quests[qidx]._qactive = QuestState::Init;
+        gs.quests.quests[qidx]._qvar1 = 0;
+        give(&mut gs.player, 19); // IDI_FUNGALTM
+        assert_eq!(gs.talk_to_witch(), Some(SpeechId::Mush8));
+        assert_eq!(gs.quests.quests[qidx]._qactive, QuestState::Active);
+        assert_eq!(gs.quests.quests[qidx]._qvar1, QS::TomeGiven as u8);
+        assert!(!GameState::has_inventory_item(&gs.player, 19), "tome consumed");
+
+        // QS_TOMEGIVEN + Black Mushroom -> QS_MUSHGIVEN, MUSH10.
+        give(&mut gs.player, 17); // IDI_MUSHROOM
+        assert_eq!(gs.talk_to_witch(), Some(SpeechId::Mush10));
+        assert_eq!(gs.quests.quests[qidx]._qvar1, QS::MushGiven as u8);
+        assert!(!GameState::has_inventory_item(&gs.player, 17));
+
+        // QS_MUSHGIVEN + Brain -> MUSH11 once, then guarded by _qvar2
+        // (upstream 2c1a364da).
+        give(&mut gs.player, 18); // IDI_BRAIN
+        assert_eq!(gs.talk_to_witch(), Some(SpeechId::Mush11));
+        assert_eq!(gs.quests.quests[qidx]._qvar2, SpeechId::Mush11 as u8);
+        assert_eq!(gs.talk_to_witch(), None, "brain dialog guarded by _qvar2");
+
+        // QS_MUSHGIVEN + Spectral Elixir -> QUEST_DONE, MUSH12.
+        give(&mut gs.player, 20); // IDI_SPECELIX
+        assert_eq!(gs.talk_to_witch(), Some(SpeechId::Mush12));
+        assert_eq!(gs.quests.quests[qidx]._qactive, QuestState::Done);
+
+        // Missing mushroom while TomeGiven shows MUSH9 (once).
+        let mut gs2 = GameState::new(Player::new(), true, 42);
+        gs2.quests.quests[qidx]._qactive = QuestState::Active;
+        gs2.quests.quests[qidx]._qvar1 = QS::TomeGiven as u8;
+        assert_eq!(gs2.talk_to_witch(), Some(SpeechId::Mush9));
+        assert_eq!(gs2.talk_to_witch(), None, "MUSH9 not repeated");
     }
 
 }
