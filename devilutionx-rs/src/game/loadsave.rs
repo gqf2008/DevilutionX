@@ -1768,6 +1768,54 @@ impl CppGameHeader {
 }
 
 // ============================================================================
+// SaveGameData fixed sections (kill counts / unique flags / grids)
+// ============================================================================
+
+/// C++ `MonsterKillCounts` block (loadsave.cpp:2814-2817): 138 counts
+/// (MonstersData.size()) as BE i32, padded with `(MaxMonsters - 138) * 4`
+/// bytes for vanilla compatibility (MaxMonsters = 200).
+pub fn write_kill_counts(helper: &mut SaveHelper, counts: &[i32]) {
+    const MONSTER_COUNT: usize = 138; // monstdat.tsv rows / MonstersData.size()
+    const MAX_MONSTERS: usize = 200; // C++ MaxMonsters (monster.h)
+    for c in counts.iter().take(MONSTER_COUNT) {
+        helper.write_be_i32(*c);
+    }
+    helper.skip(4 * (MAX_MONSTERS - MONSTER_COUNT));
+}
+
+/// C++ `UniqueItemFlags` block (loadsave.cpp:2846-2848): 128 × LE u8.
+pub fn write_unique_flags(helper: &mut SaveHelper, flags: &[bool]) {
+    const UNIQUE_FLAG_COUNT: usize = 128; // C++ UniqueItemFlags[128]
+    for f in flags.iter().take(UNIQUE_FLAG_COUNT) {
+        helper.write_u8(if *f { 1 } else { 0 });
+    }
+    helper.skip(UNIQUE_FLAG_COUNT - flags.len().min(UNIQUE_FLAG_COUNT));
+}
+
+/// Write a 112×112 u8 grid row-major (C++ `for j { for i { WriteLE } }`), used
+/// for dLight / dFlags / dPlayer / dPreLight.
+pub fn write_grid_u8(helper: &mut SaveHelper, grid: &[u8]) {
+    const N: usize = 112;
+    debug_assert!(grid.len() >= N * N, "grid too small");
+    for y in 0..N {
+        for x in 0..N {
+            helper.write_u8(grid[y * N + x]);
+        }
+    }
+}
+
+/// Write a 112×112 i32 grid row-major big-endian (C++ dMonster block).
+pub fn write_grid_i32_be(helper: &mut SaveHelper, grid: &[i32]) {
+    const N: usize = 112;
+    debug_assert!(grid.len() >= N * N, "grid too small");
+    for y in 0..N {
+        for x in 0..N {
+            helper.write_be_i32(grid[y * N + x]);
+        }
+    }
+}
+
+// ============================================================================
 // C++ SaveQuest / SavePortal (loadsave.cpp:1762-1789 / 1811-1818)
 // ============================================================================
 

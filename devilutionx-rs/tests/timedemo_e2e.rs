@@ -481,6 +481,43 @@ fn quest_portal_writers_round_trip() {
     assert!(!setlvl);
 }
 
+/// SaveGameData fixed sections must match the C++ byte layout: kill counts
+/// (138 × BE i32 + padding to MaxMonsters 200), 128 unique flags, and the
+/// 112×112 light/flag grids.
+#[test]
+fn save_game_fixed_sections_match_cpp_layout() {
+    use devilutionx_rs::game::loadsave::{
+        SaveHelper, write_grid_i32_be, write_grid_u8, write_kill_counts, write_unique_flags,
+    };
+
+    // MonsterKillCounts: 138 counts + 62 padding = 800 bytes.
+    let counts = vec![7i32; 138];
+    let mut h = SaveHelper::new(800);
+    write_kill_counts(&mut h, &counts);
+    let d = h.into_data();
+    assert_eq!(d.len(), 800, "kill-count block is 800 bytes");
+    assert_eq!(&d[0..4], &7i32.to_be_bytes(), "first count is BE i32");
+    assert!(d[552..].iter().all(|&b| b == 0), "padding to MaxMonsters is zero");
+
+    // UniqueItemFlags: 128 × LE u8.
+    let flags = vec![true; 128];
+    let mut h = SaveHelper::new(128);
+    write_unique_flags(&mut h, &flags);
+    let d = h.into_data();
+    assert_eq!(d.len(), 128, "unique-flag block is 128 bytes");
+    assert!(d.iter().all(|&b| b == 1));
+
+    // 112×112 u8 grid (dLight/dFlags/dPlayer/dPreLight).
+    let mut h = SaveHelper::new(112 * 112);
+    write_grid_u8(&mut h, &vec![9u8; 112 * 112]);
+    assert_eq!(h.into_data().len(), 112 * 112, "u8 grid is 12544 bytes");
+
+    // 112×112 BE i32 grid (dMonster).
+    let mut h = SaveHelper::new(112 * 112 * 4);
+    write_grid_i32_be(&mut h, &vec![1i32; 112 * 112]);
+    assert_eq!(h.into_data().len(), 112 * 112 * 4, "i32 grid is 50176 bytes");
+}
+
 /// Tier 3 foundation: the Rust `CppGameHeader` writer must reproduce the
 /// C++ `SaveGameData` header + level-seed table byte-for-byte. Decodes the
 /// real C++ reference save, re-serialises the parsed header/seeds, and
