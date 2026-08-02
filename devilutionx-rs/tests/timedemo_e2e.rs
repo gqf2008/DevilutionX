@@ -898,6 +898,49 @@ fn engine_state_serialises_cpp_game_entry() {
     assert!(entry.len() > 60_000, "entry is long enough for the grids");
 }
 
+/// A cast town portal must serialise into the SaveGameData portals segment
+/// (C++ SavePortal: 24 bytes each, after the 16 quests).
+#[test]
+fn town_portal_serialises_in_save_entry() {
+    use devilutionx_rs::game::game_state::GameState;
+    use devilutionx_rs::game::player_exact::Player;
+
+    let mut gs = GameState::new(Player::new(), false, 42);
+    gs.in_dungeon = true;
+    gs.current_dungeon_level = 1;
+    gs.is_town = false;
+    gs.player.position.x = 30;
+    gs.player.position.y = 31;
+
+    gs.add_town_portal();
+    assert!(gs.portals[0].open, "portal opened");
+    assert_eq!(gs.portals[0].level, 1);
+    assert_eq!(gs.portals[0].position, (30, 31));
+
+    let entry = gs.write_save_game_v3();
+    let portal_off = 43 + 17 * 8 + 21680 + 16 * 44;
+    assert_eq!(
+        &entry[portal_off..portal_off + 4],
+        &1u32.to_le_bytes(),
+        "portal 0 open flag (LE u32)"
+    );
+    assert_eq!(
+        &entry[portal_off + 4..portal_off + 8],
+        &30i32.to_le_bytes(),
+        "portal 0 position x"
+    );
+    assert_eq!(
+        &entry[portal_off + 8..portal_off + 12],
+        &31i32.to_le_bytes(),
+        "portal 0 position y"
+    );
+    assert_eq!(
+        &entry[portal_off + 12..portal_off + 16],
+        &1i32.to_le_bytes(),
+        "portal 0 level"
+    );
+}
+
 /// Tier 3 foundation: the Rust `CppGameHeader` writer must reproduce the
 /// C++ `SaveGameData` header + level-seed table byte-for-byte. Decodes the
 /// real C++ reference save, re-serialises the parsed header/seeds, and

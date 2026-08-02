@@ -219,6 +219,17 @@ pub struct GroundItem {
     pub item: Option<crate::game::items::Item>,
 }
 
+/// A town portal (C++ `Portal`, portal.cpp): open flag + position + target
+/// level / level type / set-level flag, matching the SavePortal layout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PortalState {
+    pub open: bool,
+    pub position: (i32, i32),
+    pub level: i32,
+    pub ltype: i32,
+    pub setlvl: bool,
+}
+
 /// Main game state integrating all subsystems
 ///
 /// **C++ Reference**: Global game state variables in `Source/diablo.cpp`
@@ -391,6 +402,8 @@ pub struct GameState {
     pub dcorpse: Vec<i8>,
     /// Unique items already spawned (C++ UniqueItemFlags[128]).
     pub unique_flags: [bool; 128],
+    /// Town portals (C++ Portals[MAXPORTAL]).
+    pub portals: [PortalState; 4],
     /// Active floating damage numbers (C++ `qol/floatingnumbers.cpp`).
     pub floating_numbers: crate::game::floatingnumbers::FloatingNumbers,
 
@@ -583,6 +596,7 @@ impl GameState {
             kill_counts: [0; 138],
             dcorpse: vec![0; 112 * 112],
             unique_flags: [false; 128],
+            portals: [PortalState::default(); 4],
             floating_numbers: crate::game::floatingnumbers::FloatingNumbers::new(),
             quests: {
                 let mut q = crate::game::quest_new::QuestManager::new();
@@ -2144,6 +2158,22 @@ impl GameState {
         self.camera.tile_y = self.player.position.y;
     }
 
+    /// C++ `AddTownPortal` (portal.cpp): open a town portal at the player's
+    /// current position, recording the current level and level type.
+    pub fn add_town_portal(&mut self) {
+        if let Some(p) = self.portals.iter_mut().find(|p| !p.open) {
+            p.open = true;
+            p.position = (self.player.position.x, self.player.position.y);
+            p.level = if self.is_town {
+                0
+            } else {
+                self.current_dungeon_level as i32
+            };
+            p.ltype = if self.is_town { 0 } else { 1 };
+            p.setlvl = false;
+        }
+    }
+
     /// Serialise the current engine state as a C++-compatible `SaveGameData`
     /// `game` entry (loadsave.cpp:2762-2935). States the Rust engine models
     /// (player, monsters, objects, simple missiles, dropped items, dynamic
@@ -2183,7 +2213,11 @@ impl GameState {
         let player_pack = ph.into_data();
         let quests: Vec<crate::game::quest_new::Quest> =
             self.quests.quests.iter().take(16).cloned().collect();
-        let portals = vec![(false, (0, 0), 0, 0, false); 4];
+        let portals: Vec<(bool, (i32, i32), i32, i32, bool)> = self
+            .portals
+            .iter()
+            .map(|p| (p.open, p.position, p.level, p.ltype, p.setlvl))
+            .collect();
         let kill = self.kill_counts.to_vec();
 
         // Dungeon body (monsters, missiles, objects, lights, vision).
