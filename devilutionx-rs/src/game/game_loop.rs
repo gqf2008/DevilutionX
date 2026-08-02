@@ -800,11 +800,10 @@ pub fn descend_to_level(game_state: &mut GameState, level: u8) -> Result<(), Str
     // TIL mega, so we detect by matching that mega's micro1 value in the
     // generated d_piece grid). L2-L4 up-stairs (between dungeon levels) are a
     // follow-up once stair placement per level is wired.
-    let up_stairs = if level == 1 {
-        find_dungeon_up_stairs(&layout, &art)
-    } else {
-        None
-    };
+    // C++ InitL*Triggers PrevLevel scan: locate the up-stair tile for every
+    // level so `dungeon_up_stairs` is populated (L1 = EntranceStairs TIL
+    // mega, L2/L3/L4 = dPiece 266/170/82).
+    let up_stairs = find_level_up_stairs(level, &layout, &art);
     if let Some((sx, sy)) = up_stairs {
         println!("[Descend] up-stair (to town) located at micro-tile ({}, {})", sx, sy);
     } else {
@@ -911,6 +910,32 @@ fn find_dungeon_up_stairs(
     if target == 0 {
         return None;
     }
+    for y in 0..layout.height {
+        for x in 0..layout.width {
+            if layout.d_piece[y * layout.width + x] == target {
+                return Some((x as i32, y as i32));
+            }
+        }
+    }
+    None
+}
+
+/// Locate the up-stair tile for any dungeon level, mirroring the C++
+/// `InitL*Triggers` PrevLevel scans (trigs.cpp): L1 resolves the
+/// EntranceStairs TIL mega via `find_dungeon_up_stairs`; L2/L3/L4 scan the
+/// d_piece grid for the C++ stair tile ids 266 / 170 / 82.
+fn find_level_up_stairs(
+    level: u8,
+    layout: &crate::game::game_state::DungeonLayout,
+    art: &crate::engine::dungeon::DungeonLevelData,
+) -> Option<(i32, i32)> {
+    let target = match level {
+        1 => return find_dungeon_up_stairs(layout, art),
+        2 => 266,
+        3 => 170,
+        4 => 82,
+        _ => return None,
+    };
     for y in 0..layout.height {
         for x in 0..layout.width {
             if layout.d_piece[y * layout.width + x] == target {
@@ -4828,6 +4853,7 @@ mod tests {
         check_stairs_transition(&mut gs);
         assert!(gs.in_dungeon, "town down-stair enters the dungeon");
         assert_eq!(gs.current_dungeon_level, 1, "town down-stair → L1");
+        assert!(gs.dungeon_up_stairs.is_some(), "L1 EntranceStairs mega located");
 
         // Descend L1 → L2 → L3 → L4 via planted NextLevel triggers at the
         // (re-centred) spawn point of each freshly generated level.
@@ -4874,5 +4900,53 @@ mod tests {
         assert!(gs.is_town);
     }
 
+    #[test]
+    fn test_find_level_up_stairs_detects_cpp_tiles() {
+        use crate::engine::dungeon::{DungeonLevelData, DungeonType, MinData, PaletteData, SolData, TilData, TilEntry};
+        use crate::game::game_state::DungeonLayout;
+
+        fn layout_with(tile: u16) -> DungeonLayout {
+            let (w, h) = (8usize, 8usize);
+            let mut d_piece = vec![0u16; w * h];
+            d_piece[2 * w + 1] = tile; // (1, 2)
+            DungeonLayout {
+                d_piece,
+                width: w,
+                height: h,
+                trans_val: vec![0; w * h],
+                pre_light: vec![15; w * h],
+                floor_tiles: Vec::new(),
+            }
+        }
+        // L1 resolves the EntranceStairs TIL mega (index 12) from the art.
+        let mut til = Vec::new();
+        for i in 0..20u16 {
+            til.push(TilEntry {
+                micro1: i,
+                micro2: i + 1,
+                micro3: i + 2,
+                micro4: i + 3,
+            });
+        }
+        til[12].micro1 = 99; // unique target so the scan is unambiguous
+        let art = DungeonLevelData {
+            dungeon_type: DungeonType::Cathedral,
+            palette: PaletteData::default(),
+            sol: SolData { properties: vec![] },
+            min: MinData { mega_tiles: vec![], blocks_per_tile: 10 },
+            til: TilData { tiles: til },
+            level_cel: vec![],
+        };
+        assert_eq!(
+            find_level_up_stairs(1, &layout_with(99), &art),
+            Some((1, 2)),
+            "L1 EntranceStairs TIL mega"
+        );
+        assert_eq!(find_level_up_stairs(2, &layout_with(266), &art), Some((1, 2)), "L2 dPiece 266");
+        assert_eq!(find_level_up_stairs(3, &layout_with(170), &art), Some((1, 2)), "L3 dPiece 170");
+        assert_eq!(find_level_up_stairs(4, &layout_with(82), &art), Some((1, 2)), "L4 dPiece 82");
+        assert_eq!(find_level_up_stairs(4, &layout_with(999), &art), None, "no stair tile");
+        assert_eq!(find_level_up_stairs(5, &layout_with(82), &art), None, "unsupported level");
+    }
 
 }
