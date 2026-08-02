@@ -210,5 +210,18 @@ fn l1_seed_2588_diff_cells() {
             }
         }
     }
+    println!("[L1-2588] total differing cells: {}", diffs);/// Dump the Rust Cathedral grid for the timedemo's L1 seed so it can be
     println!("[L1-2588] total differing cells: {}", diffs);
+}
+
+/// Dump the Rust Cathedral grid for the timedemo's L1 seed so it can be
+/// diffed against `l1repro.exe 1545811660` (current C++ HEAD).
+#[test]
+fn l1_dump_rust_grid_timedemo_seed() {
+    let mut gen = CathedralGenerator::new();
+    gen.generate(DungeonType::Cathedral, 1545811660);
+    for y in 0..40usize {
+        let row: Vec<String> = (0..40usize).map(|x| (gen.dungeon[y][x] as u8).to_string()).collect();
+        println!("{}", row.join(" "));
+    }
 }

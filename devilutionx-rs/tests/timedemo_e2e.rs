@@ -445,6 +445,7 @@ fn loads_reference_save_into_game_state() {
     let seeds = CppGameHeader::parse_level_seeds(&decoded, 17).expect("seed table");
 
     let mut gs = GameState::new(Player::new(), false, 42);
+    println!("[SeedProbe] timedemo L1 seed = {}", seeds[1].0);
     gs.load_from_save(&pack, &header, &seeds);
     assert_eq!(gs.player.get_name(), "timedemo", "hero name loaded");
     assert_eq!(gs.player._p_class as u8, 0, "Warrior");
