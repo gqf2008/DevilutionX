@@ -1409,7 +1409,7 @@ fn render_world_pipeline(
     // enables that region for see-through rendering.
     let mut trans_val_grid = vec![0i8; 112 * 112];
     let mut trans_list = [false; 16];
-    {
+    let visible_tiles = {
         for y in 0..112 {
             for x in 0..112 {
                 if let Some(v) = grid.trans_val(x, y) {
@@ -1430,18 +1430,28 @@ fn render_world_pipeline(
             }
             crate::game::lighting::tile_allows_light(grid.d_piece(p.x, p.y), sol)
         };
-        let visible_tiles = crate::game::lighting::LightManager::cast_vision_rays(
+        crate::game::lighting::LightManager::cast_vision_rays(
             origin,
             PLAYER_VISION_RADIUS,
             |p| p.x >= 0 && p.x < 112 && p.y >= 0 && p.y < 112,
             tile_allows_light,
-        );
-        for tile in visible_tiles {
-            let v = trans_val_grid[(tile.y * 112 + tile.x) as usize];
-            if v > 0 && (v as usize) < trans_list.len() {
-                trans_list[v as usize] = true;
-            }
+        )
+    };
+    for tile in &visible_tiles {
+        let v = trans_val_grid[(tile.y * 112 + tile.x) as usize];
+        if v > 0 && (v as usize) < trans_list.len() {
+            trans_list[v as usize] = true;
         }
+    }
+    // Wall occlusion: DoVision's rays stop at BlockLight walls and C++ never
+    // draws beyond them, so tiles the rays cannot reach render fully dark
+    // (approximating the unexplored/black fog with no stale-frame buffer).
+    if level.dungeon_type != crate::engine::dungeon::DungeonType::Town {
+        let mut visible_mask = vec![false; 112 * 112];
+        for tile in &visible_tiles {
+            visible_mask[(tile.y * 112 + tile.x) as usize] = true;
+        }
+        crate::game::lighting::apply_light_occlusion(&mut dlight, 112, 112, &visible_mask);
     }
     let lighting = crate::engine::scrollrt::Lighting::with_transparency(
         &dlight,

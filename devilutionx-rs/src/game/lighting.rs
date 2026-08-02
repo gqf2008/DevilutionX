@@ -255,6 +255,23 @@ pub fn tile_allows_light(piece: u16, sol: &SolData) -> bool {
     !sol.get(piece as usize).contains(TileProperties::BLOCK_LIGHT)
 }
 
+/// Mask `dLight` so tiles the player's vision rays cannot reach render fully
+/// dark.
+///
+/// C++ never draws beyond `DoVision`'s rays (they stop at `BlockLight` walls),
+/// so walls occlude the light halo even though `DoLighting` itself is a pure
+/// radial falloff. The Rust renderer redraws every frame without a stale-frame
+/// buffer, so it approximates "not visible" with the darkest light level.
+pub fn apply_light_occlusion(dlight: &mut [u8], width: usize, height: usize, visible: &[bool]) {
+    debug_assert_eq!(dlight.len(), width * height);
+    debug_assert_eq!(visible.len(), width * height);
+    for i in 0..(width * height) {
+        if !visible[i] {
+            dlight[i] = LIGHTS_MAX;
+        }
+    }
+}
+
 impl LightManager {
     /// Create a new light manager
     pub fn new() -> Self {
@@ -1738,6 +1755,52 @@ mod tests {
         let wall2 = |p: Point| (p.x == 51 && p.y == 50);
         let visible2 = LightManager::cast_vision_rays(observer, 8, |p| p.x >= 0 && p.x < 112 && p.y >= 0 && p.y < 112, |p| !wall2(p));
         assert!(visible2.contains(&Point::new(51, 51)), "diagonal tile visible with one open adjacent");
+    }
+
+    #[test]
+    fn test_apply_light_occlusion_masks_hidden_tiles() {
+        // 3x3: only the centre tile is visible.
+        let mut dlight = vec![0u8; 9];
+        let mut visible = vec![false; 9];
+        visible[4] = true;
+        apply_light_occlusion(&mut dlight, 3, 3, &visible);
+        assert_eq!(dlight[4], 0, "visible tile stays lit");
+        for i in 0..9 {
+            if i != 4 {
+                assert_eq!(dlight[i], LIGHTS_MAX, "hidden tile {i} fully dark");
+            }
+        }
+        // Already-dark values stay dark; lit values are not raised.
+        let mut dlight = vec![3u8; 9];
+        apply_light_occlusion(&mut dlight, 3, 3, &visible);
+        assert_eq!(dlight[4], 3, "visible tile unchanged");
+        assert_eq!(dlight[0], LIGHTS_MAX, "hidden tile forced to max darkness");
+    }
+
+    #[test]
+    fn test_apply_light_occlusion_wall_occludes_light() {
+        // Player at (50,50) with a wall directly east at (53,50): the vision
+        // ray stops at the wall, so the tile beyond must render dark while
+        // the tile before the wall stays lit (C++ wall occlusion).
+        let origin = Point::new(50, 50);
+        let visible = LightManager::cast_vision_rays(
+            origin,
+            8,
+            |p| p.x >= 0 && p.x < 112 && p.y >= 0 && p.y < 112,
+            |p| !(p.x == 53 && p.y == 50),
+        );
+        let mut mask = vec![false; 112 * 112];
+        for p in &visible {
+            mask[(p.y * 112 + p.x) as usize] = true;
+        }
+
+        let mut dlight = vec![0u8; 112 * 112];
+        apply_light_occlusion(&mut dlight, 112, 112, &mask);
+        assert_eq!(dlight[50 * 112 + 50], 0, "player tile lit");
+        assert_eq!(dlight[50 * 112 + 52], 0, "tile before wall lit");
+        assert_eq!(dlight[50 * 112 + 53], 0, "wall tile itself lit");
+        assert_eq!(dlight[50 * 112 + 54], LIGHTS_MAX, "tile beyond wall occluded");
+        assert_eq!(dlight[50 * 112 + 58], LIGHTS_MAX, "far east tile occluded");
     }
 
     #[test]
