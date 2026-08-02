@@ -1031,15 +1031,25 @@ fn place_dungeon_monsters(game_state: &mut GameState, spawn_x: i32, spawn_y: i32
         return;
     }
 
-    // Cathedral-appropriate monster types (matches MonsterType::for_dungeon).
+    // Level-appropriate monster types: the level number maps 1:1 to the
+    // C++ dungeon type (1=L1 Cathedral .. 4=L4 Hell, 5/6 = Hellfire
+    // Nest/Crypt), and `MonsterId::for_dungeon` returns the real
+    // `_monster_id`s for that dungeon. C++ `GetLevelMTypes` additionally
+    // filters by `MonstersData` level ranges and the image budget.
     use crate::game::monster::MonsterType;
-    let types = [
-        MonsterType::Zombie,
-        MonsterType::FallenOne,
-        MonsterType::Skeleton,
-        MonsterType::Scavenger,
-        MonsterType::SkeletonArcher,
-    ];
+    let level = game_state.current_dungeon_level;
+    let dungeon_type = match level {
+        2 => crate::game::types::DungeonType::Catacombs,
+        3 => crate::game::types::DungeonType::Caves,
+        4 => crate::game::types::DungeonType::Hell,
+        5 => crate::game::types::DungeonType::Nest,
+        6 => crate::game::types::DungeonType::Crypt,
+        _ => crate::game::types::DungeonType::Cathedral,
+    };
+    let mut types = MonsterType::for_dungeon(dungeon_type);
+    if types.is_empty() {
+        types.push(MonsterType::Zombie);
+    }
 
     // Deterministic per-level spawns: C++ places monsters through the gameplay
     // RNG seeded by `SetRndSeedForDungeonLevel` (DungeonSeeds[currlevel]).
