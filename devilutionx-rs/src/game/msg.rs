@@ -605,6 +605,30 @@ impl MsgHandler {
     }
 
 
+    /// 发送打开门命令（C++ `NetSendCmdLoc(CMD_OPENDOOR, position)`，body = TCmdLoc）。
+    pub fn send_open_door(&mut self, x: i8, y: i8) -> bool {
+        let cmd = TCmdLoc::new(CmdId::OpenDoor, x, y);
+        let data = unsafe {
+            std::slice::from_raw_parts(
+                &cmd as *const _ as *const u8,
+                std::mem::size_of::<TCmdLoc>(),
+            )
+        };
+        self.send_buffer.write(data)
+    }
+
+    /// 发送关闭门命令（C++ `NetSendCmdLoc(CMD_CLOSEDOOR, position)`，body = TCmdLoc）。
+    pub fn send_close_door(&mut self, x: i8, y: i8) -> bool {
+        let cmd = TCmdLoc::new(CmdId::CloseDoor, x, y);
+        let data = unsafe {
+            std::slice::from_raw_parts(
+                &cmd as *const _ as *const u8,
+                std::mem::size_of::<TCmdLoc>(),
+            )
+        };
+        self.send_buffer.write(data)
+    }
+
     /// 发送攻击怪物命令
     pub fn send_attack_id(&mut self, monster_id: i16) -> bool {
         let cmd = TCmdParam1::new(CmdId::AttackId, monster_id);
@@ -1719,6 +1743,53 @@ mod tests {
         assert_eq!(data[0], CmdId::WalkXY.to_u8());
         assert_eq!(data[1], 10);
         assert_eq!(data[2], 20);
+    }
+
+    #[test]
+    fn test_msg_handler_send_open_door() {
+        let mut handler = MsgHandler::new(0, false);
+        assert!(handler.send_open_door(33, 47));
+
+        let data = handler.get_send_data().unwrap();
+        assert_eq!(data[0], CmdId::OpenDoor.to_u8());
+        assert_eq!(data[1], 33);
+        assert_eq!(data[2], 47);
+    }
+
+    #[test]
+    fn test_msg_handler_send_close_door() {
+        let mut handler = MsgHandler::new(0, false);
+        assert!(handler.send_close_door(12, 8));
+
+        let data = handler.get_send_data().unwrap();
+        assert_eq!(data[0], CmdId::CloseDoor.to_u8());
+        assert_eq!(data[1], 12);
+        assert_eq!(data[2], 8);
+    }
+
+    #[test]
+    fn test_msg_handler_door_commands_round_trip() {
+        // C++ `parse_cmd` (msg.cpp): CMD_OPENDOOR / CMD_CLOSEDOOR carry a
+        // TCmdLoc ([cmd][x][y]); the parser must round-trip both.
+        let mut handler = MsgHandler::new(0, false);
+        assert!(handler.send_open_door(5, 6));
+        assert!(handler.send_close_door(9, 10));
+
+        let data = handler.get_send_data().unwrap();
+        assert_eq!(data.len(), 6);
+        assert_eq!(&data[0..3], &[CmdId::OpenDoor.to_u8(), 5, 6]);
+        assert_eq!(&data[3..6], &[CmdId::CloseDoor.to_u8(), 9, 10]);
+
+        let mut rx = MsgHandler::new(0, false);
+        assert!(rx.receive(&data));
+        let (cmd1, d1) = rx.parse_command().unwrap();
+        assert_eq!(cmd1, CmdId::OpenDoor);
+        assert_eq!(d1[1], 5);
+        assert_eq!(d1[2], 6);
+        let (cmd2, d2) = rx.parse_command().unwrap();
+        assert_eq!(cmd2, CmdId::CloseDoor);
+        assert_eq!(d2[1], 9);
+        assert_eq!(d2[2], 10);
     }
 
     #[test]
