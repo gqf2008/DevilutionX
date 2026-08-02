@@ -582,6 +582,45 @@ fn write_game_data_v3_section_order_and_offsets() {
     assert_eq!(&out[out.len() - misc.len()..], &misc[..], "misc tail");
 }
 
+/// The SaveGameData dungeon body must follow the C++ order: active monster
+/// ids + SaveMonster bodies, the 125+125 missile index arrays, object id
+/// arrays + SaveObject bodies, then lights and vision.
+#[test]
+fn dungeon_body_writer_matches_cpp_layout() {
+    use devilutionx_rs::game::loadsave::{
+        BinaryLightData, BinaryMonsterData, BinaryObjectData, SaveHelper, write_dungeon_body,
+    };
+
+    let m = BinaryMonsterData::default();
+    let mut mh = SaveHelper::new(512);
+    m.to_binary(&mut mh, 1, 0, 0, 0);
+    let monster_len = mh.into_data().len();
+    assert!(monster_len > 100, "SaveMonster body is substantial");
+
+    let o = BinaryObjectData::default();
+    let l = BinaryLightData::default();
+    let mut h = SaveHelper::new(4096);
+    write_dungeon_body(
+        &mut h,
+        &[(7u32, m)],
+        1, 0, 0, 0,
+        &[0i8, 5i8],
+        &[1i8],
+        &[o],
+        &[(0u8, l)],
+        &[],
+    );
+    let d = h.into_data();
+
+    assert_eq!(&d[0..4], &7u32.to_be_bytes(), "active monster id BE u32");
+    let missiles_off = 4 + monster_len;
+    assert_eq!(&d[missiles_off..missiles_off + 3], &[0, 1, 2], "missile active array 0..125");
+    let objects_off = missiles_off + 250;
+    assert_eq!(&d[objects_off..objects_off + 2], &[0, 5], "active object ids");
+    assert_eq!(d[objects_off + 2], 1, "available object id");
+    assert!(d.len() > 24, "body is substantial");
+}
+
 /// Tier 3 foundation: the Rust `CppGameHeader` writer must reproduce the
 /// C++ `SaveGameData` header + level-seed table byte-for-byte. Decodes the
 /// real C++ reference save, re-serialises the parsed header/seeds, and

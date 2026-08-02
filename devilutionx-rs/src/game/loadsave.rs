@@ -1425,6 +1425,24 @@ impl BinaryLightData {
 
         l
     }
+
+    /// Write to binary helper (matches C++ SaveLighting, loadsave.cpp:1791-1809).
+    /// `vision` toggles the `_lid` and `_lflags` fields.
+    pub fn to_binary(&self, helper: &mut SaveHelper, vision: bool) {
+        helper.write_le_i32(self.position_x);
+        helper.write_le_i32(self.position_y);
+        helper.write_le_i32(self.radius);
+        helper.write_le_i32(if vision { 1 } else { 0 }); // _lid
+        helper.write_le_u32(if self.is_invalid { 1 } else { 0 });
+        helper.write_le_u32(if self.has_changed { 1 } else { 0 });
+        helper.skip(4); // Unused
+        helper.write_le_i32(self.old_x);
+        helper.write_le_i32(self.old_y);
+        helper.write_le_i32(self.old_radius);
+        helper.write_le_i32(self.offset_x);
+        helper.write_le_i32(self.offset_y);
+        helper.write_le_u32(if vision { 1 } else { 0 }); // _lflags
+    }
 }
 
 // ============================================================================
@@ -1892,6 +1910,71 @@ pub fn parse_portal(decoded: &[u8], offset: usize) -> Option<((bool, (i32, i32),
     let ltype = le_i32(offset + 16);
     let setlvl = le_i32(offset + 20) != 0;
     Some(((open, pos, level, ltype, setlvl), offset + 24))
+}
+
+// ============================================================================
+// SaveGameData dungeon body (C++ loadsave.cpp:2808-2844)
+// ============================================================================
+
+
+/// Serialise the dungeon-only body of `SaveGameData` in the C++ order
+/// (loadsave.cpp:2808-2844): active monster ids (BE u32) + `SaveMonster`
+/// bodies, the missile active/available index arrays (125 each) + missile
+/// bodies (not yet mapped; callers pass the fixed arrays only), the active +
+/// available object id arrays (127 total) + `SaveObject` bodies, then the
+/// light list (`SaveLighting`) and vision list.
+pub fn write_dungeon_body(
+    helper: &mut SaveHelper,
+    active_monsters: &[(u32, BinaryMonsterData)],
+    monster_level: i8,
+    experience: u16,
+    to_hit: u8,
+    to_hit_special: u8,
+    active_object_ids: &[i8],
+    available_object_ids: &[i8],
+    objects: &[BinaryObjectData],
+    lights: &[(u8, BinaryLightData)],
+    vision: &[BinaryLightData],
+) {
+    // ActiveMonsters (BE u32 ids) + SaveMonster bodies.
+    for (id, _) in active_monsters {
+        helper.write_be_u32(*id);
+    }
+    for (_, m) in active_monsters {
+        m.to_binary(helper, monster_level, experience, to_hit, to_hit_special);
+    }
+    // Missile index arrays (C++ writes 0..125 as ActiveMissiles then the
+    // AvailableMissiles tail; bodies are not yet mapped).
+    for i in 0..MAX_MISSILES_FOR_SAVE {
+        helper.write_u8(i as u8);
+    }
+    helper.skip(MAX_MISSILES_FOR_SAVE); // AvailableMissiles tail
+    // Object id arrays (active then available, 127 total).
+    for id in active_object_ids {
+        helper.write_i8(*id);
+    }
+    for id in available_object_ids {
+        helper.write_i8(*id);
+    }
+    for o in objects {
+        o.to_binary(helper);
+    }
+    // Lights: count (BE i32) + ids (LE u8) + SaveLighting bodies.
+    helper.write_be_i32(lights.len() as i32);
+    for (id, _) in lights {
+        helper.write_u8(*id);
+    }
+    for (_, l) in lights {
+        l.to_binary(helper, false);
+    }
+    // Vision: C++ writes VisionId (= players+1) then count then one
+    // SaveLighting per player.
+    let vision_count = vision.len() as i32;
+    helper.write_be_i32(vision_count + 1);
+    helper.write_be_i32(vision_count);
+    for v in vision {
+        v.to_binary(helper, true);
+    }
 }
 
 // ============================================================================
