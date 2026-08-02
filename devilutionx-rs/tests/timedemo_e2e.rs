@@ -177,7 +177,7 @@ fn full_replay_runs_to_completion() {
     fn run(
         driver: &mut ReplayDriver,
         total_ticks: usize,
-    ) -> (i32, i32, u32, usize) {
+    ) -> (i32, i32, u32, usize, Vec<u8>) {
         // Reset the gameplay LCG per run so both runs are byte-identical even
         // for LCG-dependent state.
         devilutionx_rs::engine::random::seed_gameplay_rng(12345);
@@ -212,7 +212,10 @@ fn full_replay_runs_to_completion() {
             driver.step();
         }
         assert!(clicks > 0, "demo should contain mouse clicks");
-        (gs.player.position.x, gs.player.position.y, gs.game_tick, ticks)
+        // Post-replay: serialise the engine state into a C++-compatible game
+        // entry and carry it out for structural validation.
+        let entry = gs.write_save_game_v3();
+        (gs.player.position.x, gs.player.position.y, gs.game_tick, ticks, entry)
     }
 
     let mut d1 = ReplayDriver::new(parse_demo(&data).unwrap());
@@ -220,7 +223,10 @@ fn full_replay_runs_to_completion() {
     let s1 = run(&mut d1, total_ticks);
     let s2 = run(&mut d2, total_ticks);
     assert_eq!(s1.3, total_ticks, "all game ticks processed");
-    assert_eq!(s1, s2, "full replay is deterministic across two runs");
+    // Core replay state is deterministic; the serialised entry includes
+    // live quest-pool state that is not guaranteed byte-identical, so compare
+    // the gameplay result fields (position / tick / processed ticks) only.
+    assert_eq!((s1.0, s1.1, s1.2, s1.3), (s2.0, s2.1, s2.2, s2.3), "full replay is deterministic");
     // The player made real progress from the initial spawn (56, 56).
     let moved = (s1.0 - 56).abs() + (s1.1 - 56).abs();
     assert!(moved > 0, "player moved from the initial spawn");
@@ -228,6 +234,13 @@ fn full_replay_runs_to_completion() {
         "[FullReplay] ticks={} final=({}, {}) moved={}",
         s1.3, s1.0, s1.1, moved
     );
+    // The post-replay game entry is a valid C++-compatible SaveGameData.
+    let entry = &s1.4;
+    assert_eq!(&entry[..4], b"SHAR", "post-replay entry has spawn magic");
+    let hdr = devilutionx_rs::game::loadsave::CppGameHeader::parse(entry)
+        .expect("post-replay entry header parses");
+    assert!(hdr.leveltype <= 1, "post-replay entry level type is sane");
+    assert!(entry.len() > 60_000, "post-replay entry is structurally complete (got {})", entry.len());
 }
 
 #[test]
