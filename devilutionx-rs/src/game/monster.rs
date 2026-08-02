@@ -631,7 +631,7 @@ impl Monster {
     ) -> Self {
         let mut m = Self::new(id, monster_type, x, y, level_modifier);
         let base = monster_type.base_stats();
-        let rolled = rng.random_range(base.hp_min..=base.hp);
+        let rolled = crate::engine::random::gameplay_rnd(base.hp_min, base.hp);
         let max_hp = std::cmp::max(rolled << 5, 64);
         m.hp = max_hp;
         m.max_hp = max_hp;
@@ -875,7 +875,7 @@ impl MonsterSpawner {
         }
 
         for _ in 0..count {
-            let pos_idx = rng.random_range(0..valid_positions.len());
+            let pos_idx = crate::engine::random::gameplay_rnd(0, valid_positions.len() as i32 - 1) as usize;
             let pos = valid_positions[pos_idx];
 
             // Check if position is already occupied
@@ -884,7 +884,7 @@ impl MonsterSpawner {
                 continue;
             }
 
-            let monster_type = available_types[rng.random_range(0..available_types.len())];
+            let monster_type = available_types[crate::engine::random::gameplay_rnd(0, available_types.len() as i32 - 1) as usize];
             let monster = Monster::new(self.next_id, monster_type, pos.x, pos.y, level);
             self.next_id += 1;
 
@@ -955,10 +955,9 @@ pub fn zombie_ai(monster: &mut Monster) {
         return;
     }
 
-    let mut rng = rand::rng();
-    let roll = rng.random_range(0..100);
+    let roll = crate::engine::random::gameplay_rnd(0, 99) as u8;
 
-    if roll < 2 * (monster.intelligence as i32) + 10 {
+    if (roll as i32) < 2 * (monster.intelligence as i32) + 10 {
         let dist = monster.distance_to(monster.enemy_position.x, monster.enemy_position.y);
         if dist >= 2 {
             if dist >= 2 * (monster.intelligence as i32) + 4 {
@@ -988,23 +987,22 @@ pub fn skeleton_ai(monster: &mut Monster) {
     monster.facing = md;
 
     let dist = monster.distance_to(monster.enemy_position.x, monster.enemy_position.y);
-    let mut rng = rand::rng();
 
     if dist >= 2 {
-        let roll = rng.random_range(0..100);
-        if roll >= 35 - 4 * (monster.intelligence as i32) {
+        let roll = crate::engine::random::gameplay_rnd(0, 99) as u8;
+        if (roll as i32) >= 35 - 4 * (monster.intelligence as i32) {
             // Random walk towards enemy
             monster.mode = MonsterMode::MoveSideways;
         } else {
             // Wait
-            ai_delay(monster, 15 - 2 * (monster.intelligence as i32) + rng.random_range(0..10));
+            ai_delay(monster, 15 - 2 * (monster.intelligence as i32) + crate::engine::random::gameplay_rnd(0, (10) - 1));
         }
     } else {
-        let roll = rng.random_range(0..100);
-        if roll < 2 * (monster.intelligence as i32) + 20 {
+        let roll = crate::engine::random::gameplay_rnd(0, 99) as u8;
+        if (roll as i32) < 2 * (monster.intelligence as i32) + 20 {
             monster.mode = MonsterMode::MeleeAttack;
         } else {
-            ai_delay(monster, 2 * (5 - monster.intelligence as i32) + rng.random_range(0..10));
+            ai_delay(monster, 2 * (5 - monster.intelligence as i32) + crate::engine::random::gameplay_rnd(0, (10) - 1));
         }
     }
 }
@@ -1021,12 +1019,11 @@ pub fn skeleton_bow_ai(monster: &mut Monster) {
     monster.facing = md;
 
     let dist = monster.distance_to(monster.enemy_position.x, monster.enemy_position.y);
-    let mut rng = rand::rng();
-    let roll = rng.random_range(0..100);
+    let roll = crate::engine::random::gameplay_rnd(0, 99) as u8;
 
     // Try to maintain distance
     if dist < 4 {
-        if roll < 2 * (monster.intelligence as i32) + 13 {
+        if (roll as i32) < 2 * (monster.intelligence as i32) + 13 {
             // Back away
             monster.facing = md.opposite();
             monster.mode = MonsterMode::MoveSideways;
@@ -1035,7 +1032,7 @@ pub fn skeleton_bow_ai(monster: &mut Monster) {
     }
 
     // Try ranged attack
-    if rng.random_range(0..100) < 2 * (monster.intelligence as i32) + 3 {
+    if crate::engine::random::gameplay_rnd(0, 99) < 2 * (monster.intelligence as i32) + 3 {
         monster.mode = MonsterMode::RangedAttack;
     }
 }
@@ -1049,8 +1046,7 @@ pub fn scavenger_ai(monster: &mut Monster) {
     }
 
     let dist = monster.distance_to(monster.enemy_position.x, monster.enemy_position.y);
-    let mut rng = rand::rng();
-    let roll = rng.random_range(0..100);
+    let roll = crate::engine::random::gameplay_rnd(0, 99) as u8;
 
     // Check for healing goal
     if monster.goal == MonsterGoal::Healing {
@@ -1067,12 +1063,12 @@ pub fn scavenger_ai(monster: &mut Monster) {
     }
 
     if dist >= 2 {
-        if roll < 4 * (monster.intelligence as i32) + 15 {
+        if (roll as i32) < 4 * (monster.intelligence as i32) + 15 {
             monster.facing = get_monster_direction(monster);
             monster.mode = MonsterMode::MoveSideways;
         }
     } else {
-        if roll < 4 * (monster.intelligence as i32) + 25 {
+        if (roll as i32) < 4 * (monster.intelligence as i32) + 25 {
             monster.mode = MonsterMode::MeleeAttack;
         }
     }
@@ -1186,14 +1182,13 @@ pub fn fallen_ai(monster: &mut Monster) {
     let md = get_monster_direction(monster);
     monster.facing = md;
 
-    let mut rng = rand::rng();
-    let roll = rng.random_range(0..100);
+    let roll = crate::engine::random::gameplay_rnd(0, 99) as u8;
 
     if dist >= 2 {
-        if roll < 4 * (monster.intelligence as i32) + 15 {
+        if (roll as i32) < 4 * (monster.intelligence as i32) + 15 {
             monster.mode = MonsterMode::MoveSideways;
         }
-    } else if roll < 4 * (monster.intelligence as i32) + 20 {
+    } else if (roll as i32) < 4 * (monster.intelligence as i32) + 20 {
         monster.mode = MonsterMode::MeleeAttack;
     }
 }
@@ -1225,14 +1220,13 @@ pub fn bat_ai(monster: &mut Monster) {
     }
 
     let dist = monster.distance_to(monster.enemy_position.x, monster.enemy_position.y);
-    let mut rng = rand::rng();
-    let roll = rng.random_range(0..100);
+    let roll = crate::engine::random::gameplay_rnd(0, 99) as u8;
 
     if dist >= 2 {
-        if roll < (monster.intelligence as i32) + 13 {
+        if (roll as i32) < (monster.intelligence as i32) + 13 {
             monster.mode = MonsterMode::MoveSideways;
         }
-    } else if roll < 4 * (monster.intelligence as i32) + 8 {
+    } else if (roll as i32) < 4 * (monster.intelligence as i32) + 8 {
         monster.mode = MonsterMode::MeleeAttack;
         // Plan to retreat after attack
         monster.goal = MonsterGoal::Retreat;
@@ -1252,17 +1246,16 @@ pub fn overlord_ai(monster: &mut Monster) {
     monster.facing = md;
 
     let dist = monster.distance_to(monster.enemy_position.x, monster.enemy_position.y);
-    let mut rng = rand::rng();
-    let roll = rng.random_range(0..100);
+    let roll = crate::engine::random::gameplay_rnd(0, 99) as u8;
 
     if dist >= 2 {
-        if roll < 4 * (monster.intelligence as i32) + 20 {
+        if (roll as i32) < 4 * (monster.intelligence as i32) + 20 {
             monster.mode = MonsterMode::MoveSideways;
         }
     } else {
-        if roll < 4 * (monster.intelligence as i32) + 15 {
+        if (roll as i32) < 4 * (monster.intelligence as i32) + 15 {
             monster.mode = MonsterMode::MeleeAttack;
-        } else if roll < 4 * (monster.intelligence as i32) + 20 {
+        } else if (roll as i32) < 4 * (monster.intelligence as i32) + 20 {
             monster.mode = MonsterMode::SpecialMeleeAttack;
         }
     }
@@ -1280,8 +1273,7 @@ pub fn diablo_ai(monster: &mut Monster) {
     monster.facing = md;
 
     let dist = monster.distance_to(monster.enemy_position.x, monster.enemy_position.y);
-    let mut rng = rand::rng();
-    let roll = rng.random_range(0..100);
+    let roll = crate::engine::random::gameplay_rnd(0, 99) as u8;
 
     // Phase behavior based on HP
     let hp_percent = (monster.hp * 100) / monster.max_hp.max(1);
@@ -1335,11 +1327,10 @@ pub fn leoric_ai(monster: &mut Monster) {
 
     let md = get_monster_direction(monster);
     let dist = monster.distance_to(monster.enemy_position.x, monster.enemy_position.y);
-    let mut rng = rand::rng();
-    let roll = rng.random_range(0..100);
+    let roll = crate::engine::random::gameplay_rnd(0, 99) as u8;
 
     // Check if should summon skeletons
-    if dist >= 3 && roll < 4 * (monster.intelligence as i32) + 35 {
+    if dist >= 3 && (roll as i32) < 4 * (monster.intelligence as i32) + 35 {
         // Try to summon a skeleton
         monster.mode = MonsterMode::SpecialStand;
         return;
@@ -1347,13 +1338,13 @@ pub fn leoric_ai(monster: &mut Monster) {
 
     // Normal behavior
     if dist >= 2 {
-        if roll < (monster.intelligence as i32) + 25 {
-            ai_delay(monster, rng.random_range(0..10) + 10);
+        if (roll as i32) < (monster.intelligence as i32) + 25 {
+            ai_delay(monster, crate::engine::random::gameplay_rnd(0, (10) - 1) + 10);
         } else {
             monster.facing = md;
             monster.mode = MonsterMode::MoveSideways;
         }
-    } else if roll < (monster.intelligence as i32) + 20 {
+    } else if (roll as i32) < (monster.intelligence as i32) + 20 {
         monster.facing = md;
         monster.mode = MonsterMode::MeleeAttack;
     }
@@ -1371,8 +1362,7 @@ pub fn lazarus_ai(monster: &mut Monster) {
     monster.facing = md;
 
     let dist = monster.distance_to(monster.enemy_position.x, monster.enemy_position.y);
-    let mut rng = rand::rng();
-    let roll = rng.random_range(0..100);
+    let roll = crate::engine::random::gameplay_rnd(0, 99) as u8;
 
     // Prefer ranged magic attacks
     if dist >= 3 {
@@ -1411,17 +1401,16 @@ pub fn snake_ai(monster: &mut Monster) {
     monster.facing = md;
 
     let dist = monster.distance_to(monster.enemy_position.x, monster.enemy_position.y);
-    let mut rng = rand::rng();
-    let roll = rng.random_range(0..100);
+    let roll = crate::engine::random::gameplay_rnd(0, 99) as u8;
 
     // Snakes charge directly at enemies
     if dist >= 2 {
-        if roll < 4 * (monster.intelligence as i32) + 35 {
+        if (roll as i32) < 4 * (monster.intelligence as i32) + 35 {
             monster.mode = MonsterMode::Charge;
         } else if roll < 60 {
             monster.mode = MonsterMode::MoveSideways;
         }
-    } else if roll < 4 * (monster.intelligence as i32) + 40 {
+    } else if (roll as i32) < 4 * (monster.intelligence as i32) + 40 {
         monster.mode = MonsterMode::MeleeAttack;
     }
 }
@@ -1438,8 +1427,7 @@ pub fn succubus_ai(monster: &mut Monster) {
     monster.facing = md;
 
     let dist = monster.distance_to(monster.enemy_position.x, monster.enemy_position.y);
-    let mut rng = rand::rng();
-    let roll = rng.random_range(0..100);
+    let roll = crate::engine::random::gameplay_rnd(0, 99) as u8;
 
     // Succubus prefers ranged attacks
     if dist >= 4 {
@@ -1499,8 +1487,7 @@ pub fn mage_ai(monster: &mut Monster) {
     monster.facing = md;
 
     let dist = monster.distance_to(monster.enemy_position.x, monster.enemy_position.y);
-    let mut rng = rand::rng();
-    let roll = rng.random_range(0..100);
+    let roll = crate::engine::random::gameplay_rnd(0, 99) as u8;
 
     // Check if should heal self
     let hp_percent = (monster.hp * 100) / monster.max_hp.max(1);
@@ -1547,14 +1534,13 @@ pub fn rhino_ai(monster: &mut Monster) {
 
     let md = get_monster_direction(monster);
     let dist = monster.distance_to(monster.enemy_position.x, monster.enemy_position.y);
-    let mut rng = rand::rng();
-    let roll = rng.random_range(0..100);
+    let roll = crate::engine::random::gameplay_rnd(0, 99) as u8;
 
     if dist >= 2 {
-        if monster.goal == MonsterGoal::Move || (dist >= 5 && rng.random_range(0..4) != 0) {
+        if monster.goal == MonsterGoal::Move || (dist >= 5 && crate::engine::random::gameplay_rnd(0, (4) - 1) != 0) {
             if monster.goal != MonsterGoal::Move {
                 monster.goal_var1 = 0;
-                monster.goal_var2 = rng.random_range(0..2) as i8;
+                monster.goal_var2 = crate::engine::random::gameplay_rnd(0, (2) - 1) as i8;
             }
             monster.goal = MonsterGoal::Move;
             if monster.goal_var1 as i32 >= 2 * dist {
@@ -1562,7 +1548,7 @@ pub fn rhino_ai(monster: &mut Monster) {
             } else {
                 monster.goal_var1 += 1;
                 // Round walk movement
-                ai_delay(monster, rng.random_range(10..20));
+                ai_delay(monster, crate::engine::random::gameplay_rnd(10, (20) - 1));
             }
         }
     } else {
@@ -1576,7 +1562,7 @@ pub fn rhino_ai(monster: &mut Monster) {
         } else {
             if dist >= 2 {
                 if roll >= 2 * monster.intelligence + 33 {
-                    ai_delay(monster, rng.random_range(10..20));
+                    ai_delay(monster, crate::engine::random::gameplay_rnd(10, (20) - 1));
                 } else {
                     monster.mode = MonsterMode::MoveNorthwards;
                 }
@@ -1601,7 +1587,6 @@ pub fn sneak_ai(monster: &mut Monster) {
 
     let dist_threshold = (5 - monster.intelligence) as i32;
     let dist = monster.distance_to(monster.enemy_position.x, monster.enemy_position.y);
-    let mut rng = rand::rng();
 
     // Check retreat conditions
     if monster.var1 == MonsterMode::HitRecovery as i16 {
@@ -1619,7 +1604,7 @@ pub fn sneak_ai(monster: &mut Monster) {
     }
     monster.facing = md;
 
-    let roll = rng.random_range(0..100);
+    let roll = crate::engine::random::gameplay_rnd(0, 99) as u8;
 
     if dist < dist_threshold && monster.flags.contains(MonsterFlags::HIDDEN) {
         // Fade in when close
@@ -1657,8 +1642,7 @@ pub fn counselor_ai(monster: &mut Monster) {
     monster.facing = md;
 
     let dist = monster.distance_to(monster.enemy_position.x, monster.enemy_position.y);
-    let mut rng = rand::rng();
-    let roll = rng.random_range(0..100);
+    let roll = crate::engine::random::gameplay_rnd(0, 99) as u8;
 
     // Counselors like to teleport when damaged
     let hp_percent = (monster.hp * 100) / monster.max_hp.max(1);
@@ -1706,8 +1690,7 @@ pub fn mega_ai(monster: &mut Monster) {
     monster.facing = md;
 
     let dist = monster.distance_to(monster.enemy_position.x, monster.enemy_position.y);
-    let mut rng = rand::rng();
-    let roll = rng.random_range(0..100);
+    let roll = crate::engine::random::gameplay_rnd(0, 99) as u8;
 
     if dist >= 5 {
         // Long range - fireball attack or move
@@ -1723,7 +1706,7 @@ pub fn mega_ai(monster: &mut Monster) {
         } else if roll < 60 {
             monster.mode = MonsterMode::MoveNorthwards;
         } else {
-            ai_delay(monster, rng.random_range(5..15));
+            ai_delay(monster, crate::engine::random::gameplay_rnd(5, (15) - 1));
         }
     } else {
         // Close combat
@@ -1774,15 +1757,14 @@ pub fn warlord_ai(monster: &mut Monster) {
     monster.facing = md;
 
     let dist = monster.distance_to(monster.enemy_position.x, monster.enemy_position.y);
-    let mut rng = rand::rng();
-    let roll = rng.random_range(0..100);
+    let roll = crate::engine::random::gameplay_rnd(0, 99) as u8;
 
     // Warlord is aggressive
     if dist >= 2 {
         if roll < 60 {
             monster.mode = MonsterMode::MoveNorthwards;
         } else {
-            ai_delay(monster, rng.random_range(5..10));
+            ai_delay(monster, crate::engine::random::gameplay_rnd(5, (10) - 1));
         }
     } else if roll < 80 {
         start_attack(monster);
@@ -1803,8 +1785,7 @@ pub fn hork_demon_ai(monster: &mut Monster) {
     monster.facing = md;
 
     let dist = monster.distance_to(monster.enemy_position.x, monster.enemy_position.y);
-    let mut rng = rand::rng();
-    let roll = rng.random_range(0..100);
+    let roll = crate::engine::random::gameplay_rnd(0, 99) as u8;
 
     if dist >= 3 {
         if roll < 40 {
@@ -1834,8 +1815,7 @@ pub fn lazarus_minion_ai(monster: &mut Monster) {
     monster.facing = md;
 
     let dist = monster.distance_to(monster.enemy_position.x, monster.enemy_position.y);
-    let mut rng = rand::rng();
-    let roll = rng.random_range(0..100);
+    let roll = crate::engine::random::gameplay_rnd(0, 99) as u8;
 
     // Minions are aggressive casters
     if dist >= 4 {
@@ -1955,8 +1935,7 @@ pub fn monster_death(monster: &mut Monster) {
 ///
 /// **C++ Reference**: `MonsterAttack()` in monster.cpp
 pub fn monster_attack_check(monster: &Monster, target_ac: i32) -> bool {
-    let mut rng = rand::rng();
-    let hit_roll = rng.random_range(0..100);
+    let hit_roll = crate::engine::random::gameplay_rnd(0, 99);
     let hit_chance = monster.to_hit - target_ac;
     hit_roll < hit_chance
 }
@@ -1965,13 +1944,12 @@ pub fn monster_attack_check(monster: &Monster, target_ac: i32) -> bool {
 ///
 /// **C++ Reference**: `MonsterAttackPlayer()` in monster.cpp
 pub fn calculate_monster_damage(monster: &Monster) -> i32 {
-    let mut rng = rand::rng();
     let min = monster.min_damage as i32;
     let max = monster.max_damage as i32;
     if max <= min {
         min
     } else {
-        rng.random_range(min..=max)
+        crate::engine::random::gameplay_rnd(min, max)
     }
 }
 
@@ -2098,8 +2076,7 @@ pub fn lazarus_teleport(monster: &mut Monster) -> bool {
     let retreat_dir = get_retreat_direction(monster);
 
     // Calculate teleport destination (5-8 tiles away)
-    let mut rng = rand::rng();
-    let dist = rng.random_range(5..=8);
+    let dist = crate::engine::random::gameplay_rnd(5, 8);
 
     let dest_x = monster.x + retreat_dir.dx() * dist;
     let dest_y = monster.y + retreat_dir.dy() * dist;
@@ -2416,9 +2393,7 @@ pub fn succubus_lightning(monster: &mut Monster) {
 /// **C++ Reference**: Mage AI ranged attack
 pub fn mage_fireball(monster: &mut Monster) {
     if can_see_enemy(monster) {
-        let damage = rand::rng().random_range(
-            monster.min_damage as i32..=monster.max_damage as i32
-        );
+        let damage = crate::engine::random::gameplay_rnd(monster.min_damage as i32, monster.max_damage as i32);
         start_ranged_attack_with_missile(monster, MonsterMissile::Fireball, damage);
     }
 }
@@ -2483,12 +2458,11 @@ pub fn get_missile_for_intelligence(intelligence: u8) -> MonsterMissile {
 
 /// Calculate missile damage based on monster stats
 pub fn calculate_missile_damage(monster: &Monster) -> i32 {
-    let mut rng = rand::rng();
     let min = monster.min_damage as i32;
     let max = monster.max_damage as i32;
 
     if max > min {
-        rng.random_range(min..=max)
+        crate::engine::random::gameplay_rnd(min, max)
     } else {
         min
     }
@@ -2672,7 +2646,6 @@ pub fn dir_ok(monster: &Monster, dir: Direction) -> bool {
 /// Tries to walk in the given direction, with fallback to adjacent directions.
 /// Returns true if walk was started, false otherwise.
 pub fn random_walk(monster: &mut Monster, dir: Direction) -> bool {
-    let mut rng = rand::rng();
 
     // Try the primary direction first
     if dir_ok(monster, dir) {
@@ -2681,7 +2654,7 @@ pub fn random_walk(monster: &mut Monster, dir: Direction) -> bool {
     }
 
     // Try adjacent directions randomly
-    let try_left_first = rng.random::<bool>();
+    let try_left_first = crate::engine::random::gameplay_rnd(0, 1) == 0;
 
     let left = dir.left();
     let right = dir.right();
@@ -2737,7 +2710,6 @@ pub fn random_walk(monster: &mut Monster, dir: Direction) -> bool {
 ///
 /// **C++ Reference**: `RandomWalk2()` in `Source/monster.cpp:1681-1697`
 pub fn random_walk2(monster: &mut Monster, dir: Direction) -> bool {
-    let mut rng = rand::rng();
 
     // Try the primary direction first
     if dir_ok(monster, dir) {
@@ -2746,7 +2718,7 @@ pub fn random_walk2(monster: &mut Monster, dir: Direction) -> bool {
     }
 
     // Only try immediate adjacent directions
-    let try_left_first = rng.random::<bool>();
+    let try_left_first = crate::engine::random::gameplay_rnd(0, 1) == 0;
 
     if try_left_first {
         if dir_ok(monster, dir.left()) {
@@ -3211,7 +3183,7 @@ pub fn ai_ranged_avoidance(monster: &mut Monster) {
             let dir_ok = true; // Placeholder: need DirOK check
             if monster.goal_var1 >= (2 * distance as i16) && dir_ok {
                 monster.goal = MonsterGoal::Normal;
-            } else if v < (500 * (monster.intelligence as i32 + 1) >> lessmissiles) {
+            } else if (v as i32) < (500 * (monster.intelligence as i32 + 1) >> lessmissiles) {
                 // Attack if intelligent enough and line clear
                 // C++: LineClearMissile(monster.position.tile, monster.enemyPosition)
                 let line_clear = true; // Placeholder
@@ -3249,15 +3221,15 @@ pub fn ai_ranged_avoidance(monster: &mut Monster) {
             v = rand::random::<i32>() % 100;
 
             // Walk if intelligent enough or already moving
-            let should_walk = v < 1000 * (monster.intelligence as i32 + 5) ||
+            let should_walk = (v as i32) < 1000 * (monster.intelligence as i32 + 5) ||
                 (is_monster_mode_move(monster.var1 as u8) &&
                  monster.var2 == 0 &&
-                 v < 1000 * (monster.intelligence as i32 + 8));
+                 (v as i32) < 1000 * (monster.intelligence as i32 + 8));
 
             if should_walk {
                 random_walk(monster, md);
             }
-        } else if v < 1000 * (monster.intelligence as i32 + 6) {
+        } else if (v as i32) < 1000 * (monster.intelligence as i32 + 6) {
             // Close range - melee attack
             monster.facing = md;
             start_attack(monster);
@@ -3484,8 +3456,7 @@ pub fn should_ranged_attack(monster: &Monster) -> bool {
     }
 
     // Intelligence check - smarter monsters are more likely to use ranged
-    let mut rng = rand::rng();
-    let intelligence_check = rng.random_range(0..100);
+    let intelligence_check = crate::engine::random::gameplay_rnd(0, 99);
     intelligence_check < (monster.intelligence as i32 * 10 + 20)
 }
 
@@ -3503,8 +3474,7 @@ pub fn should_special_attack(monster: &Monster) -> bool {
     }
 
     // Intelligence-based chance
-    let mut rng = rand::rng();
-    let chance = rng.random_range(0..100);
+    let chance = crate::engine::random::gameplay_rnd(0, 99);
     chance < (monster.intelligence as i32 * 5 + 10)
 }
 
@@ -3679,8 +3649,7 @@ pub fn should_change_target(monster: &Monster, max_range: i32) -> bool {
 ///
 /// **C++ Reference**: Various AI wander behaviors
 pub fn wander(monster: &mut Monster) -> bool {
-    let mut rng = rand::rng();
-    let dir_idx = rng.random_range(0..8);
+    let dir_idx = crate::engine::random::gameplay_rnd(0, 7) as usize;
     let dir = Direction::ALL[dir_idx];
     random_walk(monster, dir)
 }
@@ -3694,8 +3663,7 @@ pub fn circle_target(monster: &mut Monster) -> bool {
                                     monster.enemy_position.y);
 
     // Try to move perpendicular to the target direction
-    let mut rng = rand::rng();
-    let perp_dir = if rng.random::<bool>() { dir.left().left() } else { dir.right().right() };
+    let perp_dir = if crate::engine::random::gameplay_rnd(0, 1) == 0 { dir.left().left() } else { dir.right().right() };
 
     if dir_ok(monster, perp_dir) {
         walk_in_direction(monster, perp_dir);
@@ -3792,9 +3760,8 @@ pub fn monster_attack_monster(_attacker: &Monster, target: &mut Monster, hit_cha
     }
 
     // Calculate damage
-    let mut rng = rand::rng();
     let dam = if max_dam > min_dam {
-        rng.random_range(min_dam..=max_dam)
+        crate::engine::random::gameplay_rnd(min_dam, max_dam)
     } else {
         min_dam
     };
@@ -3821,12 +3788,11 @@ pub fn is_hard_hit(target: &Monster, damage: i32) -> bool {
 ///
 /// **C++ Reference**: monster.cpp damage calculations
 pub fn calc_monster_damage(monster: &Monster) -> i32 {
-    let mut rng = rand::rng();
     let min = monster.min_damage as i32;
     let max = monster.max_damage as i32;
 
     if max > min {
-        rng.random_range(min..=max)
+        crate::engine::random::gameplay_rnd(min, max)
     } else {
         min
     }
@@ -4330,15 +4296,14 @@ pub fn ai_rhino(monster: &mut Monster) {
         check_doors(monster);
     }
 
-    let mut rng = rand::rng();
-    let v = rng.random_range(0..100);
+    let v = crate::engine::random::gameplay_rnd(0, 99) as u8;
     let distance = distance_to_enemy(monster);
 
     if distance >= 2 {
         if monster.goal == MonsterGoal::Move || (distance >= 5 && !flip_coin(4)) {
             if monster.goal != MonsterGoal::Move {
                 monster.goal_var1 = 0;
-                monster.goal_var2 = rng.random_range(0..2);
+                monster.goal_var2 = crate::engine::random::gameplay_rnd(0, 1) as i8;
             }
             monster.goal = MonsterGoal::Move;
 
@@ -4349,7 +4314,7 @@ pub fn ai_rhino(monster: &mut Monster) {
             } else {
                 let mut turn_dir = monster.goal_var2;
                 if !round_walk(monster, md, &mut turn_dir) {
-                    ai_delay(monster, rng.random_range(10..20));
+                    ai_delay(monster, crate::engine::random::gameplay_rnd(10, (20) - 1));
                 }
                 monster.goal_var2 = turn_dir;
             }
@@ -4361,7 +4326,7 @@ pub fn ai_rhino(monster: &mut Monster) {
 
     if monster.goal == MonsterGoal::Normal {
         // Try charge attack if far enough and line clear
-        if distance >= 5 && v < 2 * monster.intelligence as i32 + 43 &&
+        if distance >= 5 && (v as i32) < 2 * monster.intelligence as i32 + 43 &&
            line_clear_missile(monster.x, monster.y, monster.enemy_position.x, monster.enemy_position.y) {
             // Add Rhino charge missile
             // if let Some(_missile) = add_rhino_charge(monster) {
@@ -4372,16 +4337,16 @@ pub fn ai_rhino(monster: &mut Monster) {
             random_walk(monster, md);
         } else if distance >= 2 {
             // Walk towards enemy
-            let v2 = rng.random_range(0..100);
+            let v2 = crate::engine::random::gameplay_rnd(0, 99);
             if v2 >= 2 * monster.intelligence as i32 + 33 &&
                (!is_monster_mode_move(monster.var1 as u8) ||
                 monster.var2 != 0 ||
                 v2 >= 2 * monster.intelligence as i32 + 83) {
-                ai_delay(monster, rng.random_range(10..20));
+                ai_delay(monster, crate::engine::random::gameplay_rnd(10, (20) - 1));
             } else {
                 random_walk(monster, md);
             }
-        } else if v < 2 * monster.intelligence as i32 + 28 {
+        } else if (v as i32) < 2 * monster.intelligence as i32 + 28 {
             // Melee attack
             monster.facing = md;
             start_attack(monster);
@@ -4420,8 +4385,7 @@ pub fn ai_sneak(monster: &mut Monster) {
 
         // Unseen picks random perpendicular direction
         if is_unseen_type(monster) {
-            let mut rng = rand::rng();
-            md = if rng.random_range(0..2) == 0 {
+                    md = if crate::engine::random::gameplay_rnd(0, (2) - 1) == 0 {
                 md.right()
             } else {
                 md.left()
@@ -4440,17 +4404,17 @@ pub fn ai_sneak(monster: &mut Monster) {
         start_fadeout(monster, md, true);
     } else if monster.goal == MonsterGoal::Retreat ||
               (distance >= 2 &&
-               ((monster.var2 > 20 && v < 4 * monster.intelligence as i32 + 14) ||
+               ((monster.var2 > 20 && (v as i32) < 4 * monster.intelligence as i32 + 14) ||
                 (is_monster_mode_move(monster.var1 as u8) &&
                  monster.var2 == 0 &&
-                 v < 4 * monster.intelligence as i32 + 64))) {
+                 (v as i32) < 4 * monster.intelligence as i32 + 64))) {
         monster.goal_var1 += 1;
         let turn_dir = monster.goal_var2;  // Copy to avoid borrow conflict
         random_walk(monster, md);
     }
 
     if monster.mode == MonsterMode::Stand {
-        if distance >= 2 || v >= 4 * monster.intelligence as i32 + 10 {
+        if distance >= 2 || (v as i32) >= 4 * monster.intelligence as i32 + 10 {
             // Stay in stand animation
         } else {
             start_attack(monster);
@@ -4471,8 +4435,7 @@ pub fn ai_counselor(monster: &mut Monster) {
         check_doors(monster);
     }
 
-    let mut rng = rand::rng();
-    let v = rng.random_range(0..100);
+    let v = crate::engine::random::gameplay_rnd(0, 99) as u8;
     let distance = distance_to_enemy(monster);
 
     match monster.goal {
@@ -4508,7 +4471,7 @@ pub fn ai_counselor(monster: &mut Monster) {
         MonsterGoal::Normal => {
             if distance >= 2 {
                 // Try ranged attack or teleport
-                if v < 5 * (monster.intelligence as i32 + 10) &&
+                if (v as i32) < 5 * (monster.intelligence as i32 + 10) &&
                    line_clear_missile(monster.x, monster.y, monster.enemy_position.x, monster.enemy_position.y) {
                     // Cast spell based on intelligence (using available missile types)
                     let spell = match monster.intelligence {
@@ -4516,17 +4479,15 @@ pub fn ai_counselor(monster: &mut Monster) {
                         1 => MonsterMissile::ChargedBolt,
                         _ => MonsterMissile::Fireball,
                     };
-                    let damage = rng.random_range(
-                        monster.min_damage as i32..=monster.max_damage as i32
-                    );
+                    let damage = crate::engine::random::gameplay_rnd(monster.min_damage as i32, monster.max_damage as i32);
                     start_ranged_attack_with_missile(monster, spell, damage);
-                } else if rng.random_range(0..100) < 30 {
+                } else if crate::engine::random::gameplay_rnd(0, 99) < 30 {
                     // Teleport away
                     monster.goal = MonsterGoal::Move;
                     monster.goal_var1 = 0;
                     start_fadeout(monster, md, false);
                 } else {
-                    ai_delay(monster, rng.random_range(0..10) + 2 * (5 - monster.intelligence as i32));
+                    ai_delay(monster, crate::engine::random::gameplay_rnd(0, (10) - 1) + 2 * (5 - monster.intelligence as i32));
                 }
             } else {
                 // Close range
@@ -4536,12 +4497,12 @@ pub fn ai_counselor(monster: &mut Monster) {
                     monster.goal = MonsterGoal::Retreat;
                     monster.goal_var1 = 0;
                     start_fadeout(monster, md, false);
-                } else if rng.random_range(0..100) < 2 * monster.intelligence as i32 + 20 {
+                } else if crate::engine::random::gameplay_rnd(0, 99) < 2 * monster.intelligence as i32 + 20 {
                     // Melee attack
                     start_attack(monster);
                     // add_flash effects (placeholder)
                 } else {
-                    ai_delay(monster, rng.random_range(0..10) + 2 * (5 - monster.intelligence as i32));
+                    ai_delay(monster, crate::engine::random::gameplay_rnd(0, (10) - 1) + 2 * (5 - monster.intelligence as i32));
                 }
             }
         }
@@ -4549,7 +4510,7 @@ pub fn ai_counselor(monster: &mut Monster) {
     }
 
     if monster.mode == MonsterMode::Stand {
-        ai_delay(monster, rng.random_range(0..10) + 5);
+        ai_delay(monster, crate::engine::random::gameplay_rnd(0, (10) - 1) + 5);
     }
 }
 
@@ -4574,8 +4535,7 @@ pub fn ai_mega(monster: &mut Monster) {
         check_doors(monster);
     }
 
-    let mut rng = rand::rng();
-    let mut v = rng.random_range(0..100);
+    let mut v = crate::engine::random::gameplay_rnd(0, 99);
 
     // Movement logic
     if distance >= 2 &&
@@ -4584,13 +4544,13 @@ pub fn ai_mega(monster: &mut Monster) {
         if monster.goal == MonsterGoal::Move || distance >= 3 {
             if monster.goal != MonsterGoal::Move {
                 monster.goal_var1 = 0;
-                monster.goal_var2 = rng.random_range(0..2);
+                monster.goal_var2 = crate::engine::random::gameplay_rnd(0, 1) as i8;
             }
             monster.goal = MonsterGoal::Move;
             monster.goal_var3 = 4;
 
             if monster.goal_var1 < (2 * distance as i16) || !dir_ok(monster, md) {
-                if v < 5 * (monster.intelligence as i32 + 16) {
+                if (v as i32) < 5 * (monster.intelligence as i32 + 16) {
                     let mut turn_dir = monster.goal_var2;
                     round_walk(monster, md, &mut turn_dir);
                     monster.goal_var2 = turn_dir;
@@ -4607,20 +4567,20 @@ pub fn ai_mega(monster: &mut Monster) {
     // Attack logic
     if monster.goal == MonsterGoal::Normal {
         // Inferno attack (simplified - InfernoControl not in enum, use Inferno)
-        if ((distance >= 3 && v < 5 * (monster.intelligence as i32 + 2)) ||
-            v < 5 * (monster.intelligence as i32 + 1) ||
+        if ((distance >= 3 && (v as i32) < 5 * (monster.intelligence as i32 + 2)) ||
+            (v as i32) < 5 * (monster.intelligence as i32 + 1) ||
             monster.goal_var3 == 4) &&
            line_clear_missile(monster.x, monster.y, monster.enemy_position.x, monster.enemy_position.y) {
             start_special_ranged_attack(monster, MonsterMissile::Inferno, 0);
         } else if distance >= 2 {
-            v = rng.random_range(0..100);
-            if v < 2 * (5 * monster.intelligence as i32 + 25) ||
+            v = crate::engine::random::gameplay_rnd(0, 99);
+            if (v as i32) < 2 * (5 * monster.intelligence as i32 + 25) ||
                (is_monster_mode_move(monster.var1 as u8) &&
                 monster.var2 == 0 &&
-                v < 2 * (5 * monster.intelligence as i32 + 40)) {
+                (v as i32) < 2 * (5 * monster.intelligence as i32 + 40)) {
                 random_walk(monster, md);
             }
-        } else if rng.random_range(0..100) < 10 * (monster.intelligence as i32 + 4) {
+        } else if crate::engine::random::gameplay_rnd(0, 99) < 10 * (monster.intelligence as i32 + 4) {
             // Close range: inferno or melee
             monster.facing = md;
             if flip_coin(2) {
@@ -4633,7 +4593,7 @@ pub fn ai_mega(monster: &mut Monster) {
     }
 
     if monster.mode == MonsterMode::Stand {
-        ai_delay(monster, rng.random_range(0..10) + 5);
+        ai_delay(monster, crate::engine::random::gameplay_rnd(0, (10) - 1) + 5);
     }
 }
 
@@ -4719,8 +4679,7 @@ pub fn ai_hork_demon(monster: &mut Monster) {
         check_doors(monster);
     }
 
-    let mut rng = rand::rng();
-    let mut v = rng.random_range(0..100);
+    let mut v = crate::engine::random::gameplay_rnd(0, 99);
     let distance = distance_to_enemy(monster);
 
     // Movement logic
@@ -4729,7 +4688,7 @@ pub fn ai_hork_demon(monster: &mut Monster) {
     } else if monster.goal == MonsterGoal::Move || (distance >= 5 && !flip_coin(4)) {
         if monster.goal != MonsterGoal::Move {
             monster.goal_var1 = 0;
-            monster.goal_var2 = rng.random_range(0..2);
+            monster.goal_var2 = crate::engine::random::gameplay_rnd(0, 1) as i8;
         }
         monster.goal = MonsterGoal::Move;
 
@@ -4739,7 +4698,7 @@ pub fn ai_hork_demon(monster: &mut Monster) {
         } else {
             let mut turn_dir = monster.goal_var2;
             if !round_walk(monster, md, &mut turn_dir) {
-                ai_delay(monster, rng.random_range(10..20));
+                ai_delay(monster, crate::engine::random::gameplay_rnd(10, (20) - 1));
             }
             monster.goal_var2 = turn_dir;
         }
@@ -4748,7 +4707,7 @@ pub fn ai_hork_demon(monster: &mut Monster) {
 
     // Attack logic
     if monster.goal == MonsterGoal::Normal {
-        if distance >= 3 && v < 2 * monster.intelligence as i32 + 43 {
+        if distance >= 3 && (v as i32) < 2 * monster.intelligence as i32 + 43 {
             // Try spawn attack (simplified - HorkSpawn not in enum, use Guardian)
             let spawn_x = monster.x + monster.facing.dx();
             let spawn_y = monster.y + monster.facing.dy();
@@ -4757,19 +4716,19 @@ pub fn ai_hork_demon(monster: &mut Monster) {
                 start_special_ranged_attack(monster, MonsterMissile::Guardian, 0);
             }
         } else if distance < 2 {
-            if v < 2 * monster.intelligence as i32 + 28 {
+            if (v as i32) < 2 * monster.intelligence as i32 + 28 {
                 monster.facing = md;
                 start_attack(monster);
             }
         } else {
-            v = rng.random_range(0..100);
-            if v < 2 * monster.intelligence as i32 + 33 ||
+            v = crate::engine::random::gameplay_rnd(0, 99);
+            if (v as i32) < 2 * monster.intelligence as i32 + 33 ||
                (is_monster_mode_move(monster.var1 as u8) &&
                 monster.var2 == 0 &&
-                v < 2 * monster.intelligence as i32 + 68) {
+                (v as i32) < 2 * monster.intelligence as i32 + 68) {
                 random_walk(monster, md);
             } else {
-                ai_delay(monster, rng.random_range(10..20));
+                ai_delay(monster, crate::engine::random::gameplay_rnd(10, (20) - 1));
             }
         }
     }
