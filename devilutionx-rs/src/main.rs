@@ -28,6 +28,7 @@ use game::player_exact::Player;
 use game::game_state::GameState;
 use game::game_loop::{run_game_loop, InterfaceMode};
 use ui::diabloui::mainmenu::{MainMenu, MainMenuSelection};
+use ui::diabloui::settings::SettingsMenu;
 use ui::diabloui::UiContext;
 use std::env;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -429,14 +430,11 @@ fn show_support_dialog() {
         .map_err(|e| println!("[UI] Failed to show support dialog: {}", e));
 }
 
-fn show_settings_dialog() {
-    let cfg_path = options_file_path();
-    let message = format!(
-        "设置管理：\n- 目前请直接编辑配置文件\n- 路径: {}\n- 分辨率/音量/语言等均可在此调整",
-        cfg_path.display()
-    );
-    let _ = show_simple_message_box(MessageBoxFlag::INFORMATION, "Settings", &message, None)
-        .map_err(|e| println!("[UI] Failed to show settings dialog: {}", e));
+fn show_settings_dialog(ctx: &mut DiabloContext, event_pump: &mut sdl2::EventPump) {
+    // C++ `UiSettingsMenu` (settingsmenu.cpp): categories -> settings -> values.
+    if let Err(e) = ui_settings_dialog(ctx, event_pump) {
+        println!("[UI] Settings dialog error: {}", e);
+    }
 }
 
 fn show_credits_dialog() {
@@ -1551,7 +1549,7 @@ fn mainmenu_loop(ctx: &mut DiabloContext, event_pump: &mut sdl2::EventPump, flag
                 show_support_dialog();
             },
             MainMenuSelection::Settings => {
-                show_settings_dialog();
+                show_settings_dialog(ctx, event_pump);
             },
             MainMenuSelection::ShowCredits => {
                 show_credits_dialog();
@@ -1599,6 +1597,137 @@ fn hit_test_menu_item(mouse_x: i32, mouse_y: i32, menu_item_count: usize) -> Opt
 }
 
 /// UiMainMenuDialog - blocking menu dialog (C++: DiabloUI/mainmenu.cpp line 108)
+fn render_settings_menu(
+    canvas: &mut sdl2::render::Canvas<sdl2::video::Window>,
+    font: &mut PixelFont,
+    menu: &SettingsMenu,
+    assets: &UiAssetsSnapshot,
+    fade: u8,
+) -> Result<(), String> {
+    let creator = canvas.texture_creator();
+    let (ui_x, ui_y) = ui_origin();
+
+    canvas.set_draw_color(Color::RGB(0, 0, 0));
+    canvas.clear();
+    if let Some(bg) = &assets.mainmenu_bg {
+        render_ui_image(canvas, &creator, bg, ui_x, ui_y, fade)?;
+    } else {
+        canvas.set_draw_color(Color::RGB(10, 10, 20));
+        canvas.clear();
+    }
+
+    // Title (category name when inside a category).
+    let title = menu.title();
+    let title_x = ui_x + (640 - font.text_width(&title)) / 2;
+    font.render_text(canvas, &title, title_x, ui_y + 60, mod_color(Color::RGB(255, 215, 0), fade));
+
+    // Rows: categories or "entry: value".
+    let list_x = ui_x + 64;
+    let list_y = ui_y + 130;
+    let item_w: i32 = 510;
+    let item_h: i32 = 43;
+    let text_v_offset = (item_h - font.line_height()) / 2;
+    let count = menu.item_count();
+    for i in 0..count {
+        let item_y = list_y + i as i32 * item_h;
+        let selected = i == menu.selected_index();
+        if selected {
+            canvas.set_draw_color(mod_color(Color::RGB(40, 32, 16), fade));
+            let _ = canvas.fill_rect(Rect::new(list_x, item_y, item_w as u32, item_h as u32));
+        }
+        let color = if selected {
+            mod_color(Color::RGB(255, 215, 0), fade)
+        } else {
+            mod_color(Color::RGB(170, 170, 170), fade)
+        };
+        let label = menu.row_label(i);
+        font.render_text(canvas, &label, list_x + 12, item_y + text_v_offset, color);
+    }
+    Ok(())
+}
+
+/// Hit-test the settings rows (same list geometry as render_settings_menu).
+fn hit_test_settings_item(mouse_x: i32, mouse_y: i32, item_count: usize) -> Option<usize> {
+    let (ui_x, ui_y) = ui_origin();
+    let list_x = ui_x + 64;
+    let list_y = ui_y + 130;
+    let item_w: i32 = 510;
+    let item_h: i32 = 43;
+    if mouse_x < list_x || mouse_x >= list_x + item_w {
+        return None;
+    }
+    for i in 0..item_count {
+        let item_y = list_y + i as i32 * item_h;
+        if mouse_y >= item_y && mouse_y < item_y + item_h {
+            return Some(i);
+        }
+    }
+    None
+}
+
+/// Settings screen (C++ `UiSettingsMenu`, settingsmenu.cpp): navigate the
+/// category list, Enter drills into a category, Enter cycles the selected
+/// entry's value, Esc goes back one level / exits at the top.
+fn ui_settings_dialog(ctx: &mut DiabloContext, event_pump: &mut sdl2::EventPump) -> Result<(), String> {
+    let mut menu = SettingsMenu::new();
+    let assets = snapshot_ui_assets();
+    let start_time = Instant::now();
+    let mut fade_ctx = UiContext::new();
+    fade_ctx.start_fade_in(0);
+
+    loop {
+        for event in event_pump.poll_iter() {
+            match event {
+                Event::Quit { .. } => return Ok(()),
+                Event::KeyDown { keycode: Some(key), .. } => match key {
+                    Keycode::Up | Keycode::W => {
+                        menu.move_selection(-1);
+                        engine::audio::dispatch_sfx("ui_click");
+                    }
+                    Keycode::Down | Keycode::S => {
+                        menu.move_selection(1);
+                        engine::audio::dispatch_sfx("ui_click");
+                    }
+                    Keycode::Return | Keycode::Space => {
+                        let _ = menu.activate();
+                        engine::audio::dispatch_sfx("menu_click");
+                    }
+                    Keycode::Escape => {
+                        if menu.escape() {
+                            return Ok(());
+                        }
+                    }
+                    _ => {}
+                },
+                Event::MouseButtonUp {
+                    mouse_btn: sdl2::mouse::MouseButton::Left,
+                    x,
+                    y,
+                    ..
+                } => {
+                    if let Some(idx) = hit_test_settings_item(x, y, menu.item_count()) {
+                        menu.set_selection(idx);
+                        let _ = menu.activate();
+                        engine::audio::dispatch_sfx("menu_click");
+                    }
+                }
+                Event::MouseMotion { x, y, .. } => {
+                    if let Some(idx) = hit_test_settings_item(x, y, menu.item_count()) {
+                        menu.set_selection(idx);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let now_ms = start_time.elapsed().as_millis() as u32;
+        let _ = fade_ctx.update_fade(now_ms);
+        let fade = fade_ctx.fade_value.min(255) as u8;
+        render_settings_menu(ctx.window.canvas_mut(), &mut ctx.font, &menu, &assets, fade)?;
+        std::thread::sleep(std::time::Duration::from_millis(16));
+    }
+}
+
 fn ui_main_menu_dialog(
     name: &str,
     ctx: &mut DiabloContext,

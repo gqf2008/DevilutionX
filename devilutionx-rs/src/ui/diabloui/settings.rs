@@ -176,6 +176,107 @@ pub fn settings_categories() -> Vec<SettingsCategory> {
     ]
 }
 
+/// Two-level settings navigation (C++ `ShownMenuType::Categories` /
+/// `ShownMenuType::Settings`). The deeper ListOption / KeyInput / PadInput
+/// levels are follow-ups.
+pub struct SettingsMenu {
+    categories: Vec<SettingsCategory>,
+    active_category: Option<usize>,
+    selected: usize,
+}
+
+impl SettingsMenu {
+    pub fn new() -> Self {
+        Self {
+            categories: settings_categories(),
+            active_category: None,
+            selected: 0,
+        }
+    }
+
+    /// Number of rows in the current level (categories or the active
+    /// category's entries).
+    pub fn item_count(&self) -> usize {
+        match self.active_category {
+            None => self.categories.len(),
+            Some(i) => self.categories[i].entries.len(),
+        }
+    }
+
+    pub fn selected_index(&self) -> usize {
+        self.selected
+    }
+
+    pub fn set_selection(&mut self, idx: usize) {
+        if idx < self.item_count() {
+            self.selected = idx;
+        }
+    }
+
+    pub fn move_selection(&mut self, delta: i32) {
+        let count = self.item_count();
+        if count == 0 {
+            return;
+        }
+        self.selected = (self.selected as i32 + delta).rem_euclid(count as i32) as usize;
+    }
+
+    pub fn in_categories(&self) -> bool {
+        self.active_category.is_none()
+    }
+
+    /// Screen title (C++ shows the category name in the settings level).
+    pub fn title(&self) -> String {
+        match self.active_category {
+            None => "Settings".to_string(),
+            Some(i) => self.categories[i].name.to_string(),
+        }
+    }
+
+    /// Row label: category name, or "Entry: current value" for an entry.
+    pub fn row_label(&self, idx: usize) -> String {
+        match self.active_category {
+            None => self.categories[idx].name.to_string(),
+            Some(ci) => {
+                let entry = &self.categories[ci].entries[idx];
+                format!("{}: {}", entry.name, entry.value_description())
+            }
+        }
+    }
+
+    /// Enter: drill into the selected category, or cycle the selected entry.
+    /// Returns `true` when an entry value changed (UI re-reads the labels).
+    pub fn activate(&mut self) -> bool {
+        match self.active_category {
+            None => {
+                if self.selected < self.categories.len() {
+                    self.active_category = Some(self.selected);
+                    self.selected = 0;
+                }
+                false
+            }
+            Some(ci) => {
+                if self.selected < self.categories[ci].entries.len() {
+                    self.categories[ci].entries[self.selected].change()
+                } else {
+                    false
+                }
+            }
+        }
+    }
+
+    /// Esc: back to the category list; at the top level, `true` exits the
+    /// settings screen (C++ `GoBackOneMenuLevel` -> `backToMain`).
+    pub fn escape(&mut self) -> bool {
+        if self.active_category.take().is_some() {
+            self.selected = 0;
+            false
+        } else {
+            true
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -263,4 +364,37 @@ mod tests {
         let music = audio.entries.iter().find(|e| e.name == "Music Volume").unwrap();
         assert_eq!(music.value_description(), "41");
     }
+
+
+    #[test]
+    fn test_settings_menu_navigation() {
+        let mut menu = SettingsMenu::new();
+        assert!(menu.in_categories());
+        assert_eq!(menu.item_count(), 5);
+        assert_eq!(menu.title(), "Settings");
+        assert_eq!(menu.row_label(0), "Language");
+
+        // Drill into Gameplay (index 3 in the ported subset order).
+        menu.set_selection(3);
+        menu.activate();
+        assert!(!menu.in_categories());
+        assert_eq!(menu.title(), "Gameplay");
+        assert!(menu.item_count() > 5);
+        assert!(menu.row_label(0).starts_with("Run in Town:"));
+
+        // Cycle the selected boolean entry via activate().
+        {
+            let mut o = opt::options_mut();
+            o.gameplay.run_in_town = false;
+        }
+        menu.set_selection(0);
+        assert!(menu.activate(), "boolean entry change reports a refresh");
+        assert!(opt::options().gameplay.run_in_town);
+
+        // Esc returns to the category list; Esc again exits.
+        assert!(!menu.escape());
+        assert!(menu.in_categories());
+        assert!(menu.escape());
+    }
+
 }
