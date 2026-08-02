@@ -1121,7 +1121,7 @@ impl GameState {
             } else if m.unique_type != UniqueMonsterType::None {
                 if m.monster_type == crate::game::monster::MonsterType::Diablo {
                     Some(8)
-                } else if matches!(m.unique_type, UniqueMonsterType::Hork1 | UniqueMonsterType::Hork2) {
+                } else if matches!(m.unique_type, UniqueMonsterType::HorkDemon) {
                     None // HorkDemon keeps NO_LIGHT (monster.cpp:3350)
                 } else {
                     Some(3)

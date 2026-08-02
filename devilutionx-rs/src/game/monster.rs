@@ -103,34 +103,14 @@ pub enum MonsterMode {
     Talk = 17,
     // Rust-only extensions (C++ has no such modes; kept above the C++
     // range so the shared variants above serialise with C++-exact values).
-    DelayedDeath = 18,
     StoneStand = 19,
     Teleport = 20,
 }
 
-/// Unique monster type (C++ UniqueMonsterType)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-#[repr(i8)]
-pub enum UniqueMonsterType {
-    #[default]
-    None = -1,
-    // Cathedral
-    Garbud = 0,
-    SkeletonKing = 1,
-    Zhar = 2,
-    // Catacombs
-    GnomeLord = 3,
-    LachDanan = 4,
-    // Caves
-    Lachdanan2 = 5,
-    Diablo = 6,
-    // Hellfire
-    NaKrul = 7,
-    Hork1 = 8,
-    Hork2 = 9,
-    Defiler = 10,
-    // ... more unique monsters
-}
+/// Unique monster type - exact C++ `UniqueMonsterType` enum (`monstdat`
+/// is canonical, monstdat.h:58-72: Garbud=0 .. NaKrul=12, None=255). The
+/// earlier divergent engine copy (GnomeLord/LachDanan/Hork1/...) is gone.
+pub use crate::game::monstdat::UniqueMonsterType;
 
 /// Leader relation (C++ LeaderRelation)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -846,9 +826,16 @@ pub fn get_level_m_types(level: u8) -> LevelMonsterTypes {
 ///
 /// **C++ Reference**: `AiDelay()` in monster.cpp
 pub fn ai_delay(monster: &mut Monster, len: i32) {
-    monster.var1 = MonsterMode::Stand as i16;
+    // C++ AiDelay (monster.cpp:755-768): len <= 0 and Lazarus are no-ops;
+    // the monster waits in MonsterMode::Delay with the tick count in var2.
+    if len <= 0 {
+        return;
+    }
+    if monster.ai == MonsterAIID::Lazarus {
+        return;
+    }
     monster.var2 = len as i16;
-    monster.mode = MonsterMode::DelayedDeath; // Using as delay marker
+    monster.mode = MonsterMode::Delay;
 }
 
 /// Get monster direction towards enemy
@@ -2122,7 +2109,6 @@ pub fn apply_rage(monster: &mut Monster) {
 pub fn unique_death_effect(monster: &Monster) -> UniqueDeathEffect {
     match monster.unique_type {
         UniqueMonsterType::SkeletonKing => UniqueDeathEffect::DropCrown,
-        UniqueMonsterType::Diablo => UniqueDeathEffect::EndGame,
         UniqueMonsterType::NaKrul => UniqueDeathEffect::EndGame,
         _ => UniqueDeathEffect::None,
     }
@@ -4968,14 +4954,14 @@ mod tests {
         //  * RangedAttack  — passes the spell-cast roll (`v < 5*(int+10)`).
         //  * FadeOut       — fails the spell-cast roll but passes the teleport-
         //                     away roll (`< 30`); start_fadeout sets mode=FadeOut.
-        //  * DelayedDeath  — `ai_delay` marker; sets var2 = len (> 0).
+        //  * Delay  — `ai_delay` marker (C++ AiDelay); sets var2 = len (> 0).
         //  * Stand         — unchanged (no branch fired / mode left as-is).
         // The previous assertion omitted the FadeOut path, so the test flaked
         // (~12-30% of the time) whenever the teleport-away branch was taken.
         assert!(
             monster.mode == MonsterMode::RangedAttack ||
             monster.mode == MonsterMode::FadeOut ||
-            monster.mode == MonsterMode::DelayedDeath ||
+            monster.mode == MonsterMode::Delay ||
             monster.mode == MonsterMode::Stand ||
             monster.var2 > 0
         );
@@ -4993,14 +4979,14 @@ mod tests {
         ai_mega(&mut monster);
 
         // When distance >= 5, delegates to ai_skeleton, which may walk (Move* modes),
-        // attack (MeleeAttack), delay (DelayedDeath is the delay marker per ai_delay),
+        // attack (MeleeAttack), delay (Delay is the delay marker per ai_delay),
         // or remain Stand.
         assert!(
             monster.mode == MonsterMode::MoveNorthwards ||
             monster.mode == MonsterMode::MoveSouthwards ||
             monster.mode == MonsterMode::MoveSideways ||
             monster.mode == MonsterMode::MeleeAttack ||
-            monster.mode == MonsterMode::DelayedDeath ||
+            monster.mode == MonsterMode::Delay ||
             monster.mode == MonsterMode::Stand
         );
     }
@@ -5037,7 +5023,7 @@ mod tests {
             monster.mode == MonsterMode::MoveNorthwards ||
             monster.mode == MonsterMode::MoveSouthwards ||
             monster.mode == MonsterMode::MoveSideways ||
-            monster.mode == MonsterMode::DelayedDeath ||
+            monster.mode == MonsterMode::Delay ||
             monster.mode == MonsterMode::Stand
         );
     }
