@@ -2190,7 +2190,20 @@ impl GameState {
             setlevel: 0,
             setlvlnum: 0,
             currlevel: if self.is_town { 0 } else { self.current_dungeon_level as u32 },
-            leveltype: if self.is_town { 0 } else { 1 },
+            // C++ leveltype = the current dungeon's type (1=L1 Cathedral ..
+            // 4=L4 Hell, 5/6 = Hellfire Nest/Crypt); 0 in town.
+            leveltype: if self.is_town {
+                0
+            } else {
+                match self.current_dungeon_level {
+                    2 => 2,
+                    3 => 3,
+                    4 => 4,
+                    5 => 5,
+                    6 => 6,
+                    _ => 1,
+                }
+            },
             view_position_x: self.player.position.x,
             view_position_y: self.player.position.y,
             invflag: false,
@@ -2200,11 +2213,22 @@ impl GameState {
             active_missile_count: self.simple_missiles.len() as u32,
             active_object_count: self.objects.len() as i32,
         };
+        // C++ DungeonSeeds[i] + getHellfireLevelType(GetLevelType(i)) per
+        // level: town=0, L1..L4 = 1..4, Nest/Crypt = 5/6.
         let seeds: Vec<(u32, u32)> = (0..17u32)
             .map(|i| {
+                let ltype = match i {
+                    0 => 0,
+                    2 => 2,
+                    3 => 3,
+                    4 => 4,
+                    5 => 5,
+                    6 => 6,
+                    _ => 1,
+                };
                 (
                     self.dungeon_seeds.get(i as usize).copied().unwrap_or(0),
-                    if i == 0 { 0 } else { 1 },
+                    ltype,
                 )
             })
             .collect();

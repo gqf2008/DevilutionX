@@ -960,6 +960,27 @@ fn engine_state_serialises_cpp_game_entry() {
     assert!(entry.len() > 60_000, "entry is long enough for the grids");
 }
 
+/// The SaveGameData header must carry the real C++ leveltype for the
+/// current dungeon level (1=L1 Cathedral .. 4=L4 Hell, 5/6 = Hellfire
+/// Nest/Crypt), not a hardcoded Cathedral.
+#[test]
+fn save_header_leveltype_tracks_dungeon_level() {
+    use devilutionx_rs::game::game_state::GameState;
+    use devilutionx_rs::game::loadsave::CppGameHeader;
+    use devilutionx_rs::game::player_exact::Player;
+
+    for (level, expected) in [(1u8, 1u32), (2, 2), (3, 3), (4, 4), (5, 5), (6, 6)] {
+        let mut gs = GameState::new(Player::new(), false, 42);
+        gs.in_dungeon = true;
+        gs.current_dungeon_level = level;
+        gs.is_town = false;
+        let entry = gs.write_save_game_v3();
+        let header = CppGameHeader::parse(&entry).expect("header parses");
+        assert_eq!(header.leveltype, expected, "L{level} leveltype");
+        assert_eq!(header.currlevel, level as u32, "L{level} currlevel");
+    }
+}
+
 /// A cast town portal must serialise into the SaveGameData portals segment
 /// (C++ SavePortal: 24 bytes each, after the 16 quests).
 #[test]
