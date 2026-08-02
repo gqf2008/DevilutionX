@@ -635,7 +635,6 @@ impl DialoguePlayer for Player {
 // Player Combat System (M68 - Player Combat)
 // =============================================================================
 
-use rand::Rng;
 use super::monster::{Monster, MonsterMode};
 use super::monstdat::MonsterClass;
 use super::item_dat::ItemType;
@@ -810,12 +809,11 @@ impl Player {
     ///
     /// **C++ Reference**: Damage calculation in `PlrHitMonst()`
     pub fn calculate_damage(&self) -> i32 {
-        let mut rng = rand::rng();
         let min = self.combat_stats.min_damage;
         let max = self.combat_stats.max_damage;
 
         let mut dam = if max > min {
-            rng.random_range(min..=max)
+            crate::engine::random::gameplay_rnd(min, max)
         } else {
             min
         };
@@ -841,8 +839,7 @@ impl Player {
             return damage;
         }
 
-        let mut rng = rand::rng();
-        if rng.random_range(0..100) < self.level as i32 {
+        if crate::engine::random::gameplay_rnd(0, 99) < self.level as i32 {
             damage * 2
         } else {
             damage
@@ -1081,8 +1078,7 @@ pub fn player_hit_monster(player: &mut Player, monster: &mut Monster, adjacent_d
         }
     }
 
-    let mut rng = rand::rng();
-    let hit_roll = if is_petrified { 0 } else { rng.random_range(0..100) };
+    let hit_roll = if is_petrified { 0 } else { crate::engine::random::gameplay_rnd(0, 99) };
 
     let hit_chance = player.get_melee_piercing_to_hit()
         - player.calculate_armor_pierce(monster.armor_class as i32, true)
@@ -1114,7 +1110,7 @@ pub fn player_hit_monster(player: &mut Player, monster: &mut Monster, adjacent_d
 
     // Hellfire: Devastation (5% chance for triple damage)
     if player.combat_stats.hf_flags.has_any(ItemSpecialEffectHf::DEVASTATION) {
-        if rng.random_range(0..100) < 5 {
+        if crate::engine::random::gameplay_rnd(0, 99) < 5 {
             damage *= 3;
         }
     }
@@ -1124,7 +1120,7 @@ pub fn player_hit_monster(player: &mut Player, monster: &mut Monster, adjacent_d
 
     // Hellfire: Jester's effect (random damage multiplier)
     if player.combat_stats.hf_flags.has_any(ItemSpecialEffectHf::JESTERS) {
-        let r = rng.random_range(0..201);
+        let r = crate::engine::random::gameplay_rnd(0, 200);
         let mult = if r >= 100 { 100 + (r - 100) * 5 } else { r };
         damage_fixed = damage_fixed * mult / 100;
     }
@@ -1139,7 +1135,7 @@ pub fn player_hit_monster(player: &mut Player, monster: &mut Monster, adjacent_d
 
     // Life steal
     if player.combat_stats.item_flags.has_any(ItemSpecialEffect::RANDOM_STEAL_LIFE) {
-        let steal = rng.random_range(0..(damage_fixed / 8).max(1));
+        let steal = crate::engine::random::gameplay_rnd(0, (damage_fixed / 8).max(1) - 1);
         player.heal(steal >> 6);
     }
 
@@ -1166,10 +1162,9 @@ pub fn player_hit_player(attacker: &mut Player, target: &mut Player) -> bool {
         return false;
     }
 
-    let mut rng = rand::rng();
 
     // Roll to hit (0-99)
-    let hit_roll = rng.random_range(0..100);
+    let hit_roll = crate::engine::random::gameplay_rnd(0, 99);
 
     // Calculate hit chance: attacker's to-hit vs target's armor
     // C++ uses GetMeleePiercingToHit() - attacker.armor_class
@@ -1190,7 +1185,7 @@ pub fn player_hit_player(attacker: &mut Player, target: &mut Player) -> bool {
     if (target.mode == PlayerMode::Stand || target.mode == PlayerMode::Attack)
         && target.can_block()
     {
-        block_roll = rng.random_range(0..100);
+        block_roll = crate::engine::random::gameplay_rnd(0, 99);
     }
 
     // Calculate block chance: target's block - (attacker level * 2)
@@ -1218,7 +1213,7 @@ pub fn player_hit_player(attacker: &mut Player, target: &mut Player) -> bool {
     // Calculate base damage
     let mind = attacker.combat_stats.min_damage;
     let maxd = attacker.combat_stats.max_damage;
-    let mut dam = rng.random_range(mind..=maxd.max(mind));
+    let mut dam = crate::engine::random::gameplay_rnd(mind, maxd.max(mind));
 
     // Apply damage bonuses
     // dam += dam * plr._pIBonusDamMod / 100
@@ -1228,7 +1223,7 @@ pub fn player_hit_player(attacker: &mut Player, target: &mut Player) -> bool {
 
     // Critical strike check (Warrior/Barbarian only)
     if (attacker.class == PlayerClass::Warrior || attacker.class == PlayerClass::Barbarian)
-        && rng.random_range(0..100) < attacker.level as i32
+        && crate::engine::random::gameplay_rnd(0, 99) < attacker.level as i32
     {
         dam *= 2;
     }
@@ -1238,7 +1233,7 @@ pub fn player_hit_player(attacker: &mut Player, target: &mut Player) -> bool {
 
     // Life steal effects (simplified - using existing RANDOM_STEAL_LIFE)
     if attacker.combat_stats.item_flags.has_any(ItemSpecialEffect::RANDOM_STEAL_LIFE) {
-        let steal = rng.random_range(0..(damage_fp / 8).max(1));
+        let steal = crate::engine::random::gameplay_rnd(0, (damage_fp / 8).max(1) - 1);
         attacker.heal(steal >> 6);
     }
 
@@ -1791,8 +1786,7 @@ impl Player {
     /// **C++ Reference**: Healing calculation in missiles.cpp
     pub fn calculate_healing(&self, spell_level: i32) -> i32 {
         // Base healing: random 1-10 per level
-        let mut rng = rand::rng();
-        let base = rng.random_range(1..=10);
+        let base = crate::engine::random::gameplay_rnd(1, 10);
 
         // Add character level bonus
         let level_bonus = self.level as i32;
