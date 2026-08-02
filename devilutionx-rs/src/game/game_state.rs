@@ -368,6 +368,10 @@ pub struct GameState {
     /// audio system. Names map to MPQ files via
     /// [`crate::engine::audio::SfxLibrary`].
     pub pending_sfx: Vec<String>,
+    /// Dynamic light sources (C++ `Lights[]` + `ProcessLightList`).
+    pub light_manager: crate::game::lighting::LightManager,
+    /// Index of the player's light in `light_manager` (C++ `plrLights`).
+    pub player_light_index: i32,
     /// Active floating damage numbers (C++ `qol/floatingnumbers.cpp`).
     pub floating_numbers: crate::game::floatingnumbers::FloatingNumbers,
 
@@ -545,6 +549,8 @@ impl GameState {
             triggers: crate::levels::trigs::TriggerManager::new(),
             monster_sprites: None,
             pending_sfx: Vec::new(),
+            light_manager: crate::game::lighting::LightManager::new(),
+            player_light_index: crate::game::lighting::NO_LIGHT,
             floating_numbers: crate::game::floatingnumbers::FloatingNumbers::new(),
             towners: Self::build_towner_list(),
             player_dead: false,
@@ -869,6 +875,16 @@ impl GameState {
 
         // C++ DrawFloatingNumbers clears expired numbers each frame.
         self.floating_numbers.clear_expired(self.game_tick as u64);
+
+        // Dynamic lights: move the player light with the player, then
+        // process the light list (C++ ProcessLightList).
+        if self.player_light_index != crate::game::lighting::NO_LIGHT {
+            self.light_manager.change_light_position(
+                self.player_light_index,
+                crate::game::types::Point::new(self.player.position.x, self.player.position.y),
+            );
+        }
+        self.light_manager.process_light_list();
 
         // Pause normal game processing while the player is dead. The death
         // overlay is shown by the game loop and the player resurrects on
@@ -3927,4 +3943,43 @@ mod tests {
         assert!(gs.player_tile_distance_to(TOWN_DOWN_STAIRS.0, TOWN_DOWN_STAIRS.1)
             > STAIRS_TRIGGER_RADIUS);
     }
+
+    /// C++ `ProcessLightList` + `ChangeLightXY`: the player light follows the
+    /// player each tick and lights the surrounding tiles in `light_buffer`.
+    #[test]
+    fn test_update_moves_player_light() {
+        use rand::SeedableRng;
+        let mut gs = GameState::new(Player::new(), false, 42);
+        gs.player.position = crate::game::types::Point::new(40, 40);
+        gs.light_manager.init();
+        gs.light_manager.make_light_table(crate::game::lighting::DungeonLevelType::Town);
+        for row in gs.light_manager.light_buffer.iter_mut() {
+            row.fill(crate::game::lighting::LIGHTS_MAX);
+        }
+        // Place the light away from the player; update() should move it with
+        // the player and process the list each tick.
+        gs.player_light_index = gs.light_manager.add_light(
+            crate::game::types::Point::new(56, 56),
+            4,
+        );
+        assert!(gs.player_light_index != crate::game::lighting::NO_LIGHT);
+        let mut rng = rand::rngs::StdRng::seed_from_u64(0);
+        gs.update(&mut rng);
+        // The light follows the player wherever the tick moved them.
+        let lp = gs.light_manager.lights[gs.player_light_index as usize].position.tile;
+        assert_eq!(lp, gs.player.position, "player light follows the player");
+        assert_eq!(
+            gs.light_manager.light_buffer[lp.y as usize][lp.x as usize],
+            0,
+            "light centre tile fully lit"
+        );
+        if lp.y > 1 {
+            assert!(
+                gs.light_manager.light_buffer[(lp.y - 1) as usize][lp.x as usize]
+                    < crate::game::lighting::LIGHTS_MAX,
+                "neighbouring tile lit by falloff"
+            );
+        }
+    }
+
 }

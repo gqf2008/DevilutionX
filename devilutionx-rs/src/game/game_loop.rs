@@ -461,7 +461,6 @@ fn game_logic(game_state: &mut GameState) -> Result<()> {
         // All handled by game_state.update()
 
         // Lighting and vision
-        process_light_list();
         process_vision_list();
     }
 
@@ -838,6 +837,32 @@ pub fn descend_to_level(game_state: &mut GameState, level: u8) -> Result<(), Str
     game_state.camera.sub_y = 0;
     game_state.player.position.x = center_x;
     game_state.player.position.y = center_y;
+
+    // C++ InitLevels: InitLighting() + MakeLightTable(leveltype) +
+    // memcpy(dLight, dPreLight) + AddLight(player, radius). The level type
+    // maps 1:1 from the level number (1=L1 Cathedral .. 4=L4 Hell, 5/6 =
+    // Hellfire Nest/Crypt).
+    let level_type = match level {
+        2 => crate::game::lighting::DungeonLevelType::Catacombs,
+        3 => crate::game::lighting::DungeonLevelType::Caves,
+        4 => crate::game::lighting::DungeonLevelType::Hell,
+        5 => crate::game::lighting::DungeonLevelType::Nest,
+        6 => crate::game::lighting::DungeonLevelType::Crypt,
+        _ => crate::game::lighting::DungeonLevelType::Cathedral,
+    };
+    game_state.light_manager.init();
+    game_state.light_manager.make_light_table(level_type);
+    if let Some(layout) = &game_state.dungeon_layout {
+        for y in 0..112usize {
+            for x in 0..112usize {
+                game_state.light_manager.light_buffer[y][x] = layout.pre_light[y * 112 + x];
+            }
+        }
+    }
+    game_state.player_light_index = game_state.light_manager.add_light(
+        crate::game::types::Point::new(center_x, center_y),
+        9,
+    );
 
     println!("[Descend] Entered L{} at ({}, {})", level, center_x, center_y);
 
@@ -3736,10 +3761,6 @@ fn process_items() -> Result<()> {
 fn process_towners() -> Result<()> {
     // C++: ProcessTowners() - updates NPCs in town
     Ok(())
-}
-
-fn process_light_list() {
-    // C++: ProcessLightList() - updates lighting
 }
 
 fn process_vision_list() {
