@@ -2499,6 +2499,22 @@ pub fn is_tile_safe(_monster: &Monster, x: i32, y: i32) -> bool {
     true
 }
 
+/// C++ global `dPiece`/`dMonster` stand-ins for AI movement checks.
+/// The game loop publishes the current dungeon's walkable floor set and
+/// occupied monster tiles each tick (`ProcessMonsters`), so `DirOK` /
+/// `IsTileAvailable` can reject walls and other monsters like C++ does.
+thread_local! {
+    static AI_WALKABLE: std::cell::RefCell<Vec<(i32, i32)>> = const { std::cell::RefCell::new(Vec::new()) };
+    static AI_OCCUPIED: std::cell::RefCell<Vec<(i32, i32)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Publish the current dungeon's walkable floor set and occupied monster
+/// tiles for AI collision checks (called by the game loop each tick).
+pub fn set_ai_tiles(walkable: &[(i32, i32)], occupied: &[(i32, i32)]) {
+    AI_WALKABLE.with(|c| *c.borrow_mut() = walkable.to_vec());
+    AI_OCCUPIED.with(|c| *c.borrow_mut() = occupied.to_vec());
+}
+
 /// Check if tile is available for monster movement
 ///
 /// **C++ Reference**: `IsTileAvailable()` in `Source/monster.cpp:1725-1743`
@@ -2513,13 +2529,18 @@ pub fn is_tile_available(x: i32, y: i32) -> bool {
         return false;
     }
 
-    // In full implementation, would check:
-    // - nSolidTable (solid terrain)
-    // - dObject (objects blocking tile)
-    // - dPlayer (players blocking tile)
-    // - dMonster (other monsters)
-
-    true
+    // Real collision from the published dungeon floor + occupied tiles
+    // (C++ nSolidTable via dPiece and dMonster). Unit tests that never
+    // publish a layout fall back to the old bounds-only behaviour.
+    let pos = (x, y);
+    let walkable = AI_WALKABLE.with(|c| c.borrow().clone());
+    if walkable.is_empty() {
+        return true;
+    }
+    if !walkable.contains(&pos) {
+        return false;
+    }
+    !AI_OCCUPIED.with(|c| c.borrow().contains(&pos))
 }
 
 /// Check if direction is okay for walking

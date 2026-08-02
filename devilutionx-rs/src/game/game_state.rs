@@ -394,6 +394,9 @@ pub struct GameState {
     /// approximates it by retaining dLight instead of blacking it out).
     /// Reset on every descend.
     pub explored: Vec<bool>,
+    /// Tiles the player's vision rays reached this tick (C++ `DoVision`
+    /// sets `activeForTicks` on monsters standing in visible tiles).
+    pub last_visible_tiles: Vec<(i32, i32)>,
     /// Per-monster-type kill counts (C++ MonsterKillCounts[138]); the Rust
     /// monster set is a 20-type simplification, so counts land in the first
     /// slots.
@@ -593,6 +596,7 @@ impl GameState {
             player_light_index: crate::game::lighting::NO_LIGHT,
             pending_spell: None,
             explored: vec![false; 112 * 112],
+            last_visible_tiles: Vec::new(),
             kill_counts: [0; 138],
             dcorpse: vec![0; 112 * 112],
             unique_flags: [false; 128],
@@ -1053,9 +1057,10 @@ impl GameState {
                         crate::game::lighting::tile_allows_light(piece, sol)
                     },
                 );
-                for tile in visible {
+                for tile in &visible {
                     self.explored[(tile.y as usize) * 112 + tile.x as usize] = true;
                 }
+                self.last_visible_tiles = visible.iter().map(|p| (p.x, p.y)).collect();
             }
             self.logic_step = GameLogicStep::ProcessMonsters;
             self.process_monsters(rng);
@@ -1794,86 +1799,86 @@ impl GameState {
         }
     }
 
-    /// Simple monster AI movement (M-monsters): idle/wander in place, or chase
-    /// the player when within the monster's `aggro_range` (default 8 tiles).
+    /// Monster AI + movement (C++ `ProcessMonsters` monster.cpp:4257-4320).
     ///
-    /// This is a deliberately minimal AI for the dungeon-population task:
-    ///   * `Monster::update_ai` flips the monster between `Idle` (out of range)
-    ///     and `Chasing`/`Attacking` (in range), updating its target tile.
-    ///   * When `Chasing`/`Wandering`, `Monster::try_move` steps one tile toward
-    ///     the target using a greedy 8-direction nudge, gated by a walkability
-    ///     check (must be a dungeon floor tile, and must not be the player's
-    ///     tile).
-    ///
-    /// No pathfinding/A* is used here (the framework supports it via
-    /// `try_move_pathfind`, but a greedy step is sufficient to demonstrate
-    /// "monsters move toward the player"). Attack/damage is handled separately
-    /// in `check_monster_combat`; this method only moves the monster.
-    ///
-    /// Monsters are allowed to overlap each other (monster-monster collision is
-    /// a known remaining risk — see task notes).
-    fn update_monster_movement(&mut self, monster_id: usize, rng: &mut impl Rng) {
-        // Snapshot the player position (owned, so the closure can capture it
-        // without borrowing self).
+    /// Asleep monsters (`activeForTicks == 0`) stand still until the player's
+    /// vision rays reach their tile (C++ `DoVision` wakes them). Awake monsters
+    /// run the per-AI dispatch (`process_ai`) when standing with a normal goal;
+    /// the AI chooses a `Move*` mode (via `WalkInDirection`), which this method
+    /// translates into a real one-tile step gated by the dungeon floor and
+    /// monster occupancy (C++ `MonsterWalk`).
+    fn update_monster_movement(&mut self, monster_id: usize, _rng: &mut impl Rng) {
         let player_pos = self.player.position;
 
-        // Build the walkable floor set once per monster from the dungeon layout.
-        // (A per-call build is cheap: floor_tiles is a few thousand entries and
-        // this runs at the 2 Hz logic tick.)
-        let walkable: std::collections::HashSet<(i32, i32)> = match &self.dungeon_layout {
-            Some(l) => l.floor_tiles.iter().copied().collect(),
-            None => return, // no dungeon → no movement
+        // Snapshot the walkable floor set and occupied monster tiles (C++
+        // global dPiece/dMonster stand-ins for AI collision checks).
+        let (walkable, occupied) = {
+            let Some(layout) = &self.dungeon_layout else {
+                return; // no dungeon → no movement
+            };
+            let walkable: Vec<(i32, i32)> = layout.floor_tiles.clone();
+            let occupied: Vec<(i32, i32)> = self
+                .monster_manager
+                .iter()
+                .filter(|(idx, m)| *idx != monster_id && m.is_alive())
+                .map(|(_, m)| (m.x, m.y))
+                .collect();
+            (walkable, occupied)
         };
+        crate::game::monster::set_ai_tiles(&walkable, &occupied);
+        let walkable_set: std::collections::HashSet<(i32, i32)> =
+            walkable.iter().copied().collect();
 
         if let Some(monster) = self.monster_manager.get_monster_mut(monster_id) {
             if !monster.is_alive() {
                 return;
             }
 
-            // Distance-based line-of-sight proxy: in range and (trivially) visible.
-            let dist = monster.distance_to(player_pos.x, player_pos.y);
-            let can_see = dist <= monster.aggro_range;
-
-            // Update AI state (Idle ↔ Chasing ↔ Attacking) based on range.
-            monster.update_ai(player_pos.x, player_pos.y, can_see);
-
-            // Idle monsters get a small random wander every few ticks so the
-            // dungeon feels alive even before the player aggros anything.
-            if monster.ai_state == crate::game::monster::MonsterAIState::Idle {
-                // ~10% chance per logic tick to nudge one tile, only if the
-                // move timer is ready. We pick a random adjacent floor tile.
-                if monster.move_timer == 0 {
-                    // Rolls come from the level-seeded gameplay RNG so monster
-                    // wandering is deterministic per level (C++ advances the
-                    // DungeonSeeds[currlevel]-seeded generator for AI rolls).
-                    if crate::engine::random::gameplay_rnd(0, 9) == 0 {
-                        let dirs: [(i32, i32); 8] = [
-                            (1, 0), (-1, 0), (0, 1), (0, -1),
-                            (1, 1), (1, -1), (-1, 1), (-1, -1),
-                        ];
-                        let (dx, dy) = dirs[crate::engine::random::gameplay_rnd(0, dirs.len() as i32 - 1) as usize];
-                        let nx = monster.x + dx;
-                        let ny = monster.y + dy;
-                        if walkable.contains(&(nx, ny)) && (nx != player_pos.x || ny != player_pos.y) {
-                            // Don't wander more than ~4 tiles from the spawn
-                            // (home) tile, so idle monsters stay near their spot.
-                            if (nx - monster.home_x).abs() + (ny - monster.home_y).abs() <= 4 {
-                                monster.x = nx;
-                                monster.y = ny;
-                                monster.move_timer = monster.move_delay;
-                            }
-                        }
-                    }
+            // Wake when the player's vision reaches the monster's tile (C++
+            // DoVision), or when the player is inside its aggro range.
+            if monster.active_for_ticks == 0 {
+                let seen = self.last_visible_tiles.contains(&(monster.x, monster.y));
+                let close = monster.distance_to(player_pos.x, player_pos.y) <= monster.aggro_range;
+                if seen || close {
+                    monster.active_for_ticks = u8::MAX;
+                    monster.enemy_position = player_pos;
+                    monster.target_x = player_pos.x;
+                    monster.target_y = player_pos.y;
                 }
-                return;
+            }
+            if monster.active_for_ticks == 0 {
+                return; // asleep: C++ AI functions no-op
             }
 
-            // Chasing/Attacking monsters step toward the player. The walkability
-            // closure allows any dungeon floor tile that isn't the player's tile
-            // (so monsters stop adjacent instead of walking onto the player).
-            monster.try_move(|x, y| {
-                walkable.contains(&(x, y)) && (x != player_pos.x || y != player_pos.y)
-            });
+            // C++ ProcessMonsters: run the AI dispatch when standing with a
+            // normal goal; the AI sets mode/goal and may start a walk.
+            if monster.mode == crate::game::monster::MonsterMode::Stand
+                && monster.goal == crate::game::monster::MonsterGoal::Normal
+            {
+                crate::game::monster::process_ai(monster);
+            }
+
+            // Translate the AI's chosen Move* mode into a real step (C++
+            // MonsterWalk). The direction comes from the monster's facing
+            // (set by the AI / WalkInDirection).
+            if matches!(
+                monster.mode,
+                crate::game::monster::MonsterMode::MoveNorthwards
+                    | crate::game::monster::MonsterMode::MoveSouthwards
+                    | crate::game::monster::MonsterMode::MoveSideways
+            ) {
+                let dir = monster.facing;
+                let nx = monster.x + crate::game::monster::direction_dx(dir);
+                let ny = monster.y + crate::game::monster::direction_dy(dir);
+                let ok = walkable_set.contains(&(nx, ny))
+                    && (nx != player_pos.x || ny != player_pos.y)
+                    && !occupied.contains(&(nx, ny));
+                monster.mode = crate::game::monster::MonsterMode::Stand;
+                if ok {
+                    monster.x = nx;
+                    monster.y = ny;
+                }
+            }
         }
     }
 
@@ -3517,10 +3522,11 @@ mod tests {
 
     #[test]
     fn test_monster_chases_player_when_in_range() {
-        use crate::game::monster::{MonsterAIState, MonsterType};
+        use crate::game::monster::MonsterType;
         // Monster at (10,10), player at (15,10) on the same corridor: distance
-        // 5, within the default aggro range (8). The monster should switch to
-        // Chasing and step toward the player (never away).
+        // 5, within the default aggro range (8). The monster should wake
+        // (C++ DoVision / proximity) and the zombie AI should step toward the
+        // player (never away).
         let mut gs = dungeon_gs_with_corridor(MonsterType::Zombie, 10, 10);
         gs.player.position = Point::new(15, 10);
 
@@ -3528,10 +3534,10 @@ mod tests {
         gs.update_monster_movement(0, &mut rng);
 
         let m = gs.get_monster(0).expect("monster present");
-        assert!(
-            m.ai_state == MonsterAIState::Chasing || m.ai_state == MonsterAIState::Attacking,
-            "monster in range should be chasing/attacking, got {:?}",
-            m.ai_state
+        assert_eq!(
+            m.active_for_ticks,
+            u8::MAX,
+            "monster in range should be woken"
         );
         // The monster should not have moved away from the player.
         assert!(m.x >= 10, "monster should not move away from player, x={}", m.x);
@@ -3539,8 +3545,10 @@ mod tests {
 
     #[test]
     fn test_monster_idles_when_out_of_range() {
-        use crate::game::monster::{MonsterAIState, MonsterType};
-        // Monster at (10,10), player at (100,100): far out of aggro range.
+        use crate::game::monster::MonsterType;
+        // Monster at (10,10), player at (100,100): far out of aggro range and
+        // not seen, so it stays asleep (C++ activeForTicks == 0) and does not
+        // move at all.
         let mut gs = dungeon_gs_with_corridor(MonsterType::Zombie, 10, 10);
         gs.player.position = Point::new(100, 100);
 
@@ -3548,15 +3556,8 @@ mod tests {
         gs.update_monster_movement(0, &mut rng);
 
         let m = gs.get_monster(0).expect("monster present");
-        assert_eq!(
-            m.ai_state,
-            MonsterAIState::Idle,
-            "monster out of range should stay idle"
-        );
-        // Idle monsters may wander up to 4 tiles from home (10,10), but should
-        // never wander far away.
-        let wander = (m.x - 10).abs() + (m.y - 10).abs();
-        assert!(wander <= 4, "idle monster should stay near home, wandered {}", wander);
+        assert_eq!(m.active_for_ticks, 0, "monster out of range stays asleep");
+        assert_eq!((m.x, m.y), (10, 10), "asleep monster never moves");
     }
 
     #[test]
