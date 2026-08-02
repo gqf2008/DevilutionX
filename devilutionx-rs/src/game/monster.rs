@@ -311,8 +311,13 @@ impl Monster {
         // max(RandomIntBetween(hpMin, hpMax) << 6 / 2, 64). The no-rng path
         // uses the upper bound deterministically; `new_with_rng` rolls.
         let max_hp = std::cmp::max((base.hp as i32) << 5, 64);
-        let level_scale = 1.0 + (level_modifier as f32 * 0.1);
         let is_boss = monster_type.is_boss();
+        // C++ InitMonster stores the data row's values directly: level =
+        // MonstersData[type].level (normal difficulty), minDamage/maxDamage/
+        // armorClass/exp come from the row. The earlier per-level scaling was
+        // a Rust-only approximation that corrupted the serialised
+        // experience/level fields in SaveMonster.
+        let data = crate::game::monstdat::get_monster_data(monster_type);
 
         Self {
             id,
@@ -320,12 +325,12 @@ impl Monster {
             name: monster_type.name().to_string(),
             hp: max_hp,
             max_hp,
-            damage: ((base.min_damage + base.max_damage) as f32 / 2.0 * level_scale) as i32,
-            armor: (base.armor as f32 * level_scale) as i32,
+            damage: ((base.min_damage + base.max_damage) as f32 / 2.0) as i32,
+            armor: base.armor,
             to_hit: base.to_hit,
             evasion: 10 + level_modifier as i32,
-            experience: (base.experience as f32 * level_scale) as u32,
-            level: level_modifier.max(1),
+            experience: base.experience,
+            level: data.level as u8,
             x,
             y,
             facing: Direction::South,
@@ -4753,6 +4758,23 @@ mod tests {
         // Low-hp monster (Golem 1-1): 1 << 5 = 32 -> clamped to 64 (C++ floor).
         let g = Monster::new(2, MonsterType::Golem, 10, 10, 1);
         assert_eq!(g.max_hp, 64, "Golem hp 1 << 5 clamped to min 64");
+    }
+
+    /// C++ InitMonster stores the MonstersData row directly: level =
+    /// data().level and exp = data().exp (normal difficulty), with no
+    /// per-level scaling; the old level_modifier scaling corrupted the
+    /// serialised SaveMonster experience/level.
+    #[test]
+    fn test_monster_level_and_exp_from_data_row() {
+        let z = Monster::new(1, MonsterType::Zombie, 10, 10, 4);
+        assert_eq!(z.level, 1, "Zombie data.level = 1 (level_modifier ignored)");
+        assert_eq!(z.experience, 54, "Zombie exp 54, unscaled");
+        let b = Monster::new(2, MonsterType::Butcher, 10, 10, 4);
+        assert_eq!(b.level, 1, "Butcher data.level = 1");
+        assert_eq!(b.experience, 710, "Butcher exp 710, unscaled");
+        let g = Monster::new(3, MonsterType::Golem, 10, 10, 4);
+        assert_eq!(g.level, 12, "Golem data.level = 12");
+        assert_eq!(g.experience, 0, "Golem exp 0");
     }
 
     /// C++ InitMonster (monster.cpp:200-238) consumes the gameplay RNG in a
