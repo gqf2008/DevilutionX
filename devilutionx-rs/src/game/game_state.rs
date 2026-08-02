@@ -1804,6 +1804,43 @@ impl GameState {
         self.set_door_micros(idx, open);
     }
 
+    /// Process a received network command (C++ `run_cmd`, msg.cpp:3390+).
+    ///
+    /// `CMD_OPENDOOR` / `CMD_CLOSEDOOR` carry a `TCmdLoc` ([cmd][x][y]); the
+    /// door at that tile is operated with `SyncOpObject` semantics. Commands
+    /// are applied as remote (`is_local_player=false`): the local player's own
+    /// commands were already applied by `OperateDoor(sendmsg=true)` and are
+    /// skipped — mirroring C++'s `&player == MyPlayer` check in `SyncOpObject`.
+    pub fn handle_command(&mut self, cmd: crate::game::msg::CmdId, data: &[u8]) -> bool {
+        use crate::game::msg::{CmdId, TCmdLoc};
+        use crate::game::objects::{sync_op_object, SyncCmd};
+
+        match cmd {
+            CmdId::OpenDoor | CmdId::CloseDoor => {
+                if data.len() < std::mem::size_of::<TCmdLoc>() {
+                    return false;
+                }
+                let x = data[1] as i32;
+                let y = data[2] as i32;
+                let Some(idx) = self
+                    .objects
+                    .iter()
+                    .position(|o| o.position.x == x && o.position.y == y && o.is_door())
+                else {
+                    return false;
+                };
+                let sync_cmd = if cmd == CmdId::OpenDoor {
+                    SyncCmd::OpenDoor
+                } else {
+                    SyncCmd::CloseDoor
+                };
+                let player_pos = self.player.position;
+                sync_op_object(&mut self.objects[idx], sync_cmd, false, player_pos)
+            }
+            _ => false,
+        }
+    }
+
     /// Process objects (public for GameLoop)
     ///
     /// **C++ Reference**: `Source/objects.cpp` - `ProcessObjects()`
@@ -2611,6 +2648,50 @@ mod tests {
             12,
             "blocked door keeps the open arch micro"
         );
+    }
+
+    /// C++ `run_cmd` (msg.cpp): CMD_OPENDOOR / CMD_CLOSEDOOR carry a TCmdLoc
+    /// and are applied through SyncOpObject (remote semantics). Byte feed from
+    /// `MsgHandler::send_open_door` / `send_close_door`.
+    #[test]
+    fn test_handle_door_commands_from_network() {
+        use crate::game::msg::{CmdId, MsgHandler};
+        use crate::game::objdat::ObjectId;
+        use crate::game::objects::{Object, DOOR_CLOSED, DOOR_OPEN};
+        let mut gs = GameState::new(Player::new(), false, 42);
+        let mut layout = DungeonLayout::default();
+        for v in layout.d_piece.iter_mut() {
+            *v = 99;
+        }
+        layout.d_piece[10 * layout.width + 20] = 540;
+        gs.dungeon_layout = Some(layout);
+        let mut door = Object::new(ObjectId::L2LDoor, crate::game::types::Point::new(20, 10));
+        // Placed doors are interactive (C++ AddDoor sets the selection region).
+        door.selection_region = crate::game::objdat::SelectionRegion::Bottom;
+        gs.objects.push(door);
+        gs.init_doors_closed();
+        assert_eq!(gs.objects[0].door_state, DOOR_CLOSED);
+
+        // Remote open-door command (msg layer byte format).
+        let mut tx = MsgHandler::new(0, false);
+        assert!(tx.send_open_door(20, 10));
+        let bytes = tx.get_send_data().unwrap();
+        assert_eq!(&bytes[..3], &[CmdId::OpenDoor.to_u8(), 20, 10]);
+        assert!(gs.handle_command(CmdId::OpenDoor, &bytes));
+        assert_eq!(gs.objects[0].door_state, DOOR_OPEN, "remote open command opens the door");
+
+        // Remote close-door command.
+        let mut tx2 = MsgHandler::new(0, false);
+        assert!(tx2.send_close_door(20, 10));
+        let bytes2 = tx2.get_send_data().unwrap();
+        assert!(gs.handle_command(CmdId::CloseDoor, &bytes2));
+        assert_eq!(gs.objects[0].door_state, DOOR_CLOSED, "remote close command closes the door");
+
+        // No door at the tile / malformed data -> no-op.
+        assert!(!gs.handle_command(CmdId::OpenDoor, &[CmdId::OpenDoor.to_u8(), 5, 5]));
+        assert!(!gs.handle_command(CmdId::OpenDoor, &[CmdId::OpenDoor.to_u8()]));
+        // Unsupported command -> no-op.
+        assert!(!gs.handle_command(CmdId::Stand, &[CmdId::Stand.to_u8()]));
     }
 
     /// C++ `RndItemForMonsterLevel` (items.cpp:3240-3251) drop rolls: 60% no

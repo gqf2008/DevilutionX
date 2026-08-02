@@ -397,6 +397,8 @@ impl Object {
     /// Set door state (uses ovar4 matching C++ _oVar4)
     pub fn set_door_state(&mut self, state: DoorState) {
         self.ovar4 = state as i32;
+        // Keep the legacy `door_state` mirror in sync (C++ `_oVar4`).
+        self.door_state = state as i32;
     }
 
     /// Get book message index

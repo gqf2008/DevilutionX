@@ -59,6 +59,7 @@ pub fn monster_check_doors(monster: &Monster, objects: &mut [Object]) -> usize {
             if door.door_state == DOOR_CLOSED && is_door_object(door.otype) {
                 // Open the door (C++ calls OperateDoor with sound effects).
                 door.door_state = DOOR_OPEN;
+                door.ovar4 = DOOR_OPEN;
                 door.solid = false;
                 doors_opened += 1;
             }
