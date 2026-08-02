@@ -60,6 +60,7 @@ pub mod missiles; // Missile/Projectile system (Day 41)
 pub mod items_processing; // Items Processing system (Day 42-43)
 pub mod player_movement; // Player Movement system (Day 44-45)
 pub mod towner; // NPC/Towner system (M12 Day 89-91)
+pub mod towner_sprites; // Towner CL2 sprite loading
 pub mod store; // Store/Shop system (M13 Day 92+)
 pub mod dialogue; // Dialogue system (M14 Day 96+)
 pub mod game_loop; // Complete C++ aligned game loop (M80)

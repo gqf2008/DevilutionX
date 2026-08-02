@@ -480,6 +480,9 @@ pub struct TownerDataEntry {
     pub anim_width: u16,
     pub anim_frames: u8,
     pub anim_delay: i16,
+    /// CL2 sprite path from towners.tsv `animPath` (no extension; empty =
+    /// no sprite).
+    pub anim_path: &'static str,
     pub gossip_texts: &'static [SpeechId],
 }
 
@@ -497,6 +500,7 @@ const TOWNER_DATA: [TownerDataEntry; TownerType::COUNT] = [
         anim_width: 96,
         anim_frames: 16,
         anim_delay: 3,
+        anim_path: "towners\\smith\\smithn",
         gossip_texts: &[SpeechId::Gossip1, SpeechId::Gossip2],
     },
     // Healer (Pepin)
@@ -507,6 +511,7 @@ const TOWNER_DATA: [TownerDataEntry; TownerType::COUNT] = [
         anim_width: 96,
         anim_frames: 20,
         anim_delay: 3,
+        anim_path: "towners\\healer\\healer",
         gossip_texts: &[SpeechId::Gossip1, SpeechId::Gossip2],
     },
     // DeadGuy (Wounded Townsman)
@@ -517,6 +522,7 @@ const TOWNER_DATA: [TownerDataEntry; TownerType::COUNT] = [
         anim_width: 96,
         anim_frames: 8,
         anim_delay: 6,
+        anim_path: "towners\\butch\\deadguy",
         gossip_texts: &[SpeechId::Butch1],
     },
     // Tavern (Ogden)
@@ -527,6 +533,7 @@ const TOWNER_DATA: [TownerDataEntry; TownerType::COUNT] = [
         anim_width: 96,
         anim_frames: 16,
         anim_delay: 3,
+        anim_path: "towners\\twnf\\twnfn",
         gossip_texts: &[SpeechId::Gossip1, SpeechId::Gossip2],
     },
     // Story (Deckard Cain)
@@ -537,6 +544,7 @@ const TOWNER_DATA: [TownerDataEntry; TownerType::COUNT] = [
         anim_width: 96,
         anim_frames: 18,
         anim_delay: 3,
+        anim_path: "towners\\strytell\\strytell",
         gossip_texts: &[SpeechId::King1, SpeechId::King2],
     },
     // Drunk (Farnham)
@@ -547,6 +555,7 @@ const TOWNER_DATA: [TownerDataEntry; TownerType::COUNT] = [
         anim_width: 96,
         anim_frames: 16,
         anim_delay: 3,
+        anim_path: "towners\\drunk\\twndrunk",
         gossip_texts: &[SpeechId::Gossip1, SpeechId::Gossip2],
     },
     // Witch (Adria)
@@ -557,6 +566,7 @@ const TOWNER_DATA: [TownerDataEntry; TownerType::COUNT] = [
         anim_width: 96,
         anim_frames: 18,
         anim_delay: 6,
+        anim_path: "towners\\townwmn1\\witch",
         gossip_texts: &[SpeechId::Gossip1, SpeechId::Gossip2],
     },
     // Barmaid (Gillian)
@@ -567,6 +577,7 @@ const TOWNER_DATA: [TownerDataEntry; TownerType::COUNT] = [
         anim_width: 96,
         anim_frames: 18,
         anim_delay: 3,
+        anim_path: "towners\\townwmn1\\wmnn",
         gossip_texts: &[SpeechId::Gossip1, SpeechId::Gossip2],
     },
     // PegBoy (Wirt)
@@ -577,6 +588,7 @@ const TOWNER_DATA: [TownerDataEntry; TownerType::COUNT] = [
         anim_width: 96,
         anim_frames: 16,
         anim_delay: 5,
+        anim_path: "towners\\townboy\\pegkid1",
         gossip_texts: &[SpeechId::Gossip1],
     },
     // Cow
@@ -587,6 +599,7 @@ const TOWNER_DATA: [TownerDataEntry; TownerType::COUNT] = [
         anim_width: 128,
         anim_frames: 12,
         anim_delay: 3,
+        anim_path: "",
         gossip_texts: &[SpeechId::None],
     },
     // Farmer (Lester)
@@ -597,6 +610,7 @@ const TOWNER_DATA: [TownerDataEntry; TownerType::COUNT] = [
         anim_width: 96,
         anim_frames: 15,
         anim_delay: 3,
+        anim_path: "",
         gossip_texts: &[SpeechId::Gossip1],
     },
     // Girl (Celia)
@@ -607,6 +621,7 @@ const TOWNER_DATA: [TownerDataEntry; TownerType::COUNT] = [
         anim_width: 96,
         anim_frames: 20,
         anim_delay: 6,
+        anim_path: "",
         gossip_texts: &[SpeechId::Gossip1],
     },
     // CowFarmer
@@ -617,9 +632,22 @@ const TOWNER_DATA: [TownerDataEntry; TownerType::COUNT] = [
         anim_width: 96,
         anim_frames: 15,
         anim_delay: 3,
+        anim_path: "",
         gossip_texts: &[SpeechId::None],
     },
 ];
+
+/// CL2 sprite path for a towner type (towners.tsv `animPath`, no extension;
+/// empty = no sprite in the classic set). **C++ Reference**: townerdat.hpp
+/// `TownersDataEntries` + towners.cpp `LoadTownerAnimations`.
+pub fn towner_anim_path(towner_type: TownerType) -> &'static str {
+    TOWNER_DATA[towner_type as usize].anim_path
+}
+
+/// Sprite width for a towner type (towners.tsv `animWidth`).
+pub fn towner_anim_width(towner_type: TownerType) -> u16 {
+    TOWNER_DATA[towner_type as usize].anim_width
+}
 
 // ============================================================================
 // TownerFactory (initialization)

@@ -407,6 +407,10 @@ pub struct GameState {
     /// dialogue state machines (e.g. the Mushroom quest TalkToWitch).
     pub quests: crate::game::quest_new::QuestManager,
 
+    /// Loaded towner CL2 sprites (C++ LoadTownerAnimations); empty set
+    /// keeps the coloured-marker fallback.
+    pub towner_sprites: crate::game::towner_sprites::TownerSpriteSet,
+
     /// Whether the shop panel is currently open. Toggled on by clicking near a
     /// shop-capable NPC (Griswold/Pepin/Adria/Wirt) and toggled off by clicking
     /// CLOSE or pressing ESC. While true, [`game_loop`] draws the shop overlay
@@ -568,6 +572,7 @@ impl GameState {
                 q.init_quests(false, seed as u32);
                 q
             },
+            towner_sprites: crate::game::towner_sprites::TownerSpriteSet::new(),
             towners: Self::build_towner_list(),
             player_dead: false,
             shop_open: false,

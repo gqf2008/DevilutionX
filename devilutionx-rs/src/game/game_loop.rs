@@ -1142,6 +1142,39 @@ fn load_monster_sprite_set(types: &[crate::game::monster::MonsterType]) -> Optio
     ))
 }
 
+/// Load the towner CL2 sprites for the current towners list from the MPQ.
+/// Non-fatal: missing assets keep the coloured-marker fallback.
+fn load_towner_sprites(game_state: &mut GameState) {
+    use crate::game::towner::TownerType;
+    use std::path::PathBuf;
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join("spawn.mpq"));
+            candidates.push(dir.join("diabdat.mpq"));
+            candidates.push(dir.join("DIABDAT.MPQ"));
+        }
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        candidates.push(cwd.join("spawn.mpq"));
+        candidates.push(cwd.join("diabdat.mpq"));
+        candidates.push(cwd.join("DIABDAT.MPQ"));
+    }
+    let Some(mpq_path) = candidates.into_iter().find(|p| p.exists()) else {
+        return;
+    };
+    let Ok(mut archive) = crate::engine::mpq::MpqArchive::open(&mpq_path) else {
+        return;
+    };
+    let types: Vec<TownerType> = game_state
+        .towners
+        .iter()
+        .filter_map(|&(_, _, _, kind)| TownerType::from_u8(kind))
+        .collect();
+    game_state.towner_sprites =
+        crate::game::towner_sprites::TownerSpriteSet::load(&mut archive, &types);
+}
+
 /// Return from the dungeon to Tristram town. Restores the town camera spawn
 /// and clears the dungeon layout so a fresh one is generated next descent.
 pub fn return_to_town(game_state: &mut GameState) {
@@ -1164,6 +1197,9 @@ pub fn return_to_town(game_state: &mut GameState) {
     clear_monster_sprite_cache();
     // Restore the town spawn (C++ ENTRY_MAIN ViewPosition {75, 68}).
     game_state.init_town_camera();
+    // Load the towner CL2 sprites (C++ LoadTownerAnimations); missing assets
+    // keep the coloured-marker fallback.
+    load_towner_sprites(game_state);
 }
 
 /// Apply continuous movement from held movement keys to the player and camera.
@@ -1673,8 +1709,27 @@ fn draw_and_blit(
                 }
             }
         }
-        monster_entities.sort_by_key(|(x, y, _)| x + y);
     }
+    // Town NPCs: draw the loaded CL2 sprites into the palette backbuffer too
+    // (C++ DrawView draws towners on the same surface). The coloured-marker
+    // canvas overlay below stays as the fallback for NPCs without a sprite.
+    if !game_state.in_dungeon {
+        use crate::game::towner::TownerType;
+        let sprites = &game_state.towner_sprites;
+        if !sprites.is_empty() {
+            for &(tx, ty, _name, kind) in &game_state.towners {
+                let Some(tt) = TownerType::from_u8(kind) else {
+                    continue;
+                };
+                if let Some(sprite) = sprites.get(&tt) {
+                    if let Some(frame) = sprite.frame.as_ref() {
+                        monster_entities.push((tx, ty, frame));
+                    }
+                }
+            }
+        }
+    }
+    monster_entities.sort_by_key(|(x, y, _)| x + y);
     let monster_entities_closure = |surface: &mut crate::engine::surface::Surface,
                                     lighting: &crate::engine::scrollrt::Lighting| {
         for (wx, wy, frame) in &monster_entities {
