@@ -481,6 +481,9 @@ pub struct PlayerSprite {
     pub height: u16,
     /// Top-to-bottom RGBA bytes (`width * height * 4`).
     pub rgba: Vec<u8>,
+    /// Raw palette-indexed CLX frame (direction 0 / frame 0) for drawing
+    /// into the 8-bit palette backbuffer (C++ RenderCl2Sprite).
+    pub frame: Option<crate::engine::clx_sprite::ClxSprite>,
 }
 
 /// A decoded monster sprite ready for texture upload. Same shape as

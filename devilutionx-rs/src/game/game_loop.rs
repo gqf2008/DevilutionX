@@ -1580,6 +1580,21 @@ fn draw_and_blit(
                 Some(lighting.table_for(*wx, *wy)),
             );
         }
+        // Player sprite (C++ draws the player in DrawView). Drawn last so the
+        // camera-centred player overlaps the monsters in front of it.
+        if let Some(player_sprite) = game_state.player_sprite.as_ref() {
+            if let Some(frame) = player_sprite.frame.as_ref() {
+                let pp = game_state.player.position;
+                let (sx, sy) = tile_to_screen(pp.x, pp.y, cam_tile_x, cam_tile_y);
+                let pos = crate::engine::types::Point::new(sx - frame.width() as i32 / 2, sy);
+                crate::engine::clx_render::clx_draw(
+                    surface,
+                    pos,
+                    frame,
+                    Some(lighting.table_for(pp.x, pp.y)),
+                );
+            }
+        }
     };
 
     if game_state.in_dungeon {
@@ -1655,7 +1670,7 @@ fn draw_and_blit(
     // marker if no sprite was loaded. The sprite texture is rebuilt every
     // frame (Plan A): safe, no dangling handles.
     let (player_sx, player_sy) = tile_to_screen(cam_tile_x, cam_tile_y, cam_tile_x, cam_tile_y);
-    draw_player_sprite(window, game_state, player_sx, player_sy);
+    draw_player_sprite(window, game_state, drew_pipeline, player_sx, player_sy);
 
     // Stair markers: draw a pulsing arrow/diamond over the relevant stair tile
     // so the player can see where to walk to change levels. Town shows the
@@ -3528,10 +3543,17 @@ pub fn clear_tile_texture_cache() {}
 fn draw_player_sprite(
     window: &mut GameWindow,
     game_state: &GameState,
+    palette_drawn: bool,
     centre_x: i32,
     centre_y: i32,
 ) {
+    // When the player sprite carries a CLX frame it is drawn into the palette
+    // backbuffer by the world pipeline; the canvas pass only handles the
+    // marker fallback for asset-less runs / checkerboard fallbacks.
     if let Some(sprite) = &game_state.player_sprite {
+        if palette_drawn && sprite.frame.is_some() {
+            return;
+        }
         // Rebuild the texture from the cached RGBA each frame (Plan A). The
         // creator holds an Rc into the renderer and does not keep borrowing the
         // canvas, so `creator` + `tex` + `canvas.copy(&tex, ...)` is sound.

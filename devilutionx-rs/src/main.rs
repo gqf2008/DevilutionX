@@ -2561,10 +2561,25 @@ fn load_player_sprite(mpq: &mut MpqAssetManager) -> Option<game::game_state::Pla
     };
 
     let rgba = frame.decode_rgba(&palette);
+
+    // Rebuild the frame as the Arc-backed `clx_sprite::ClxSprite` consumed by
+    // `clx_draw` (header: [header_size][width][height] + RLE data).
+    let mut clx_buf = Vec::with_capacity(6 + frame.pixel_data.len());
+    clx_buf.extend_from_slice(&6u16.to_le_bytes());
+    clx_buf.extend_from_slice(&frame.width.to_le_bytes());
+    clx_buf.extend_from_slice(&frame.height.to_le_bytes());
+    clx_buf.extend_from_slice(&frame.pixel_data);
+    let clx_frame = engine::clx_sprite::ClxSprite::new(
+        std::sync::Arc::new(clx_buf),
+        0,
+        (6 + frame.pixel_data.len()) as u32,
+    );
+
     let sprite = game::game_state::PlayerSprite {
         width: frame.width,
         height: frame.height,
         rgba,
+        frame: Some(clx_frame),
     };
     println!(
         "[PlayerSprite] loaded {} ({} dirs, dir0 {}x{}, {} opaque px)",
