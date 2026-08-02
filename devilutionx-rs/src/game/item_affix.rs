@@ -2723,91 +2723,101 @@ struct WeightedItemIndex {
 }
 
 /// Get random item index from droppable items with optional weight consideration
-/// Exact port of GetItemIndexForDroppableItem() from items.cpp lines 1353-1377
-///
-/// TODO: Requires AllItemsList data (190+ items with drop rates, level requirements, etc.)
+/// C++ `IsItemAvailable` (items.cpp:2375-2403): filters out quest-locked and
+/// Hellfire-exclusive items for the current game mode.
+pub fn is_item_available(index: usize, hellfire: bool, spawn: bool, test_bard: bool) -> bool {
+    use super::item_dat::ItemId;
+    if index >= crate::game::item_dat::ITEMS_DATA.len() {
+        return false;
+    }
+    if spawn {
+        // Medium and heavy armors.
+        if (62..=70).contains(&index) {
+            return false;
+        }
+        // Unavailable scrolls in the shareware build.
+        if matches!(index, 105 | 107 | 108 | 110 | 111 | 113) {
+            return false;
+        }
+    }
+    if hellfire {
+        return true;
+    }
+    let i = index as i64;
+    (i != ItemId::MapOfDoom as i64
+        && i != ItemId::LightningForge as i64
+        && (i < ItemId::Oil as i64 || i > ItemId::GreySuit as i64)
+        && (i < 83 || i > 86)
+        && i != 92
+        && (i < 161 || i > 165)
+        && i != ItemId::Sorcerer as i64)
+        || (test_bard && (i == ItemId::BardSword as i64 || i == ItemId::BardDagger as i64))
+}
+
+/// Exact port of GetItemIndexForDroppableItem() from items.cpp lines 1353-1377.
+/// Builds a cumulative-weight list over the authoritative `ITEMS_DATA` table
+/// (skip unavailable / dropRate 0 / Resurrect+HealOther scrolls in single
+/// player / filtered items) and picks one with `RandomIntLessThan(cumulative)`.
 pub fn get_item_index_for_droppable<F>(
     consider_drop_rate: bool,
     is_item_okay: F,
+    rng: &mut impl Rng,
+    hellfire: bool,
+    spawn: bool,
+    test_bard: bool,
+    multiplayer: bool,
 ) -> Option<usize>
 where
     F: Fn(&super::item_dat::ItemData) -> bool,
 {
-    // TODO: Replace with actual AllItemsList when available
-    // For now return None to indicate "not yet implemented"
-
-    /*
-    Pseudo-code for when AllItemsList is available:
-
-    let mut weighted_items: Vec<WeightedItemIndex> = Vec::new();
-    let mut cumulative_weight = 0u32;
-
-    for (i, item_data) in ALL_ITEMS_LIST.iter().enumerate() {
-        // Skip unavailable items
-        if !is_item_available(i) {
+    let mut ril: Vec<(usize, u32)> = Vec::new();
+    let mut cumulative = 0u32;
+    for (i, item) in super::item_dat::ITEMS_DATA.iter().enumerate() {
+        if !is_item_available(i, hellfire, spawn, test_bard) {
             continue;
         }
-
-        // Skip items with 0 drop rate
-        if item_data.drop_rate == 0 {
+        if item.drop_rate == 0 {
             continue;
         }
-
-        // Skip Resurrect/HealOther scrolls in single player
-        if !is_multiplayer && matches!(item_data.spell, SpellId::Resurrect | SpellId::HealOther) {
+        if !multiplayer
+            && matches!(
+                item.spell,
+                crate::game::spelldat::SpellID::Resurrect | crate::game::spelldat::SpellID::HealOther,
+            )
+        {
             continue;
         }
-
-        // Apply user filter
-        if !is_item_okay(item_data) {
+        if !is_item_okay(item) {
             continue;
         }
-
-        // Add weight (drop_rate if considering, otherwise 1)
-        let weight = if consider_drop_rate { item_data.drop_rate } else { 1 };
-        cumulative_weight += weight;
-
-        weighted_items.push(WeightedItemIndex {
-            index: i,
-            cumulative_weight,
-        });
+        cumulative += if consider_drop_rate { item.drop_rate as u32 } else { 1 };
+        ril.push((i, cumulative));
     }
-
-    if weighted_items.is_empty() {
+    if ril.is_empty() {
         return None;
     }
-
-    // Select random item based on cumulative weights
-    let target_weight = random_int_less_than(cumulative_weight as i32) as u32;
-
-    // Binary search for first item with cumulative_weight > target_weight
-    let result = weighted_items.binary_search_by(|item| {
-        if target_weight < item.cumulative_weight {
-            std::cmp::Ordering::Greater
-        } else {
-            std::cmp::Ordering::Less
-        }
-    });
-
-    match result {
-        Ok(idx) | Err(idx) => {
-            if idx < weighted_items.len() {
-                Some(weighted_items[idx].index)
-            } else {
-                Some(weighted_items.last().unwrap().index)
-            }
+    let target = rng.random_range(0..cumulative);
+    for &(i, cw) in ril.iter() {
+        if target < cw {
+            return Some(i);
         }
     }
-    */
-
-    None  // Placeholder until AllItemsList is available
+    ril.last().map(|&(i, _)| i)
 }
 
 /// Select random equipment item (no gold, no misc)
 /// Exact port of RndUItem() from items.cpp lines 1379-1391
 ///
 /// TODO: Requires AllItemsList + current level tracking
-pub fn rnd_u_item(monster_level: Option<i32>, current_level: i32) -> Option<usize> {
+pub fn rnd_u_item(
+    monster_level: Option<i32>,
+    current_level: i32,
+    rng: &mut impl Rng,
+    hellfire: bool,
+    spawn: bool,
+    test_bard: bool,
+    multiplayer: bool,
+) -> Option<usize> {
     let item_max_level = monster_level.unwrap_or(current_level * 2);
 
     get_item_index_for_droppable(false, |item_data| {
@@ -2828,17 +2838,22 @@ pub fn rnd_u_item(monster_level: Option<i32>, current_level: i32) -> Option<usiz
         }
 
         true
-    })
+    }, rng, hellfire, spawn, test_bard, multiplayer)
 }
 
 /// Select random item (75% gold, 25% any item)
 /// Exact port of RndAllItems() from items.cpp lines 1392-1403.
-pub fn rnd_all_items(current_level: i32) -> Option<usize> {
-    use super::super::engine::random::generate_rnd;
-
+pub fn rnd_all_items(
+    current_level: i32,
+    rng: &mut impl Rng,
+    hellfire: bool,
+    spawn: bool,
+    test_bard: bool,
+    multiplayer: bool,
+) -> Option<usize> {
     // C++ RndAllItems: `if (GenerateRnd(100) > 25) return IDI_GOLD;`
     // (IDI_GOLD = 0 in itemdat.h `_item_indexes`, matching ItemId::Gold).
-    if generate_rnd(100) > 25 {
+    if rng.random_range(0..100) > 25 {
         return Some(super::item_dat::ItemId::Gold as usize);
     }
 
@@ -2847,7 +2862,7 @@ pub fn rnd_all_items(current_level: i32) -> Option<usize> {
     get_item_index_for_droppable(false, |item_data| {
         // Only level requirement check
         item_max_level >= item_data.min_mlvl as i32
-    })
+    }, rng, hellfire, spawn, test_bard, multiplayer)
 }
 
 /// Select random item of specific type
@@ -2858,6 +2873,11 @@ pub fn rnd_type_items(
     item_type: super::item_dat::ItemType,
     misc_id: Option<super::item_dat::ItemMiscId>,
     level: i32,
+    rng: &mut impl Rng,
+    hellfire: bool,
+    spawn: bool,
+    test_bard: bool,
+    multiplayer: bool,
 ) -> Option<usize> {
     let item_max_level = level * 2;
 
@@ -2880,7 +2900,7 @@ pub fn rnd_type_items(
         }
 
         true
-    })
+    }, rng, hellfire, spawn, test_bard, multiplayer)
 }
 
 // ============================================================================
@@ -3198,19 +3218,50 @@ mod tests {
     /// (previously a placeholder returned `None`).
     #[test]
     fn test_rnd_all_items_gold_roll_returns_index_zero() {
-        use crate::engine::random::set_rnd_seed;
-        // Find a seed whose first GenerateRnd(100) > 25 (gold branch).
+        use rand::SeedableRng;
+        // Single player, non-Hellfire: find a seed whose first roll > 25.
         let mut gold_seed = None;
-        for seed in 1..=500u32 {
-            set_rnd_seed(seed);
-            if rnd_all_items(1) == Some(0) {
+        for seed in 1..=500u64 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            if rnd_all_items(1, &mut rng, false, false, false, false) == Some(0) {
                 gold_seed = Some(seed);
                 break;
             }
         }
         let seed = gold_seed.expect("some seed must roll the 75% gold branch");
-        set_rnd_seed(seed);
-        assert_eq!(rnd_all_items(1), Some(0), "gold roll maps to IDI_GOLD=0");
+        let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+        assert_eq!(rnd_all_items(1, &mut rng, false, false, false, false), Some(0), "gold roll maps to IDI_GOLD=0");
+    }
+
+    /// C++ `GetItemIndexForDroppableItem` (items.cpp:1353-1377): the weighted
+    /// pick now runs over the aligned `ITEMS_DATA` (dropRate > 0, level filter).
+    #[test]
+    fn test_get_item_index_for_droppable_picks_from_items_data() {
+        use rand::SeedableRng;
+        // Level 1: only items with min_mlvl <= 1 are candidates (e.g. heal potion
+        // row 77). Excludes gold (dropRate column is 1 for gold? verify by pick).
+        let mut rng = rand::rngs::StdRng::seed_from_u64(7);
+        let mut picked = 0usize;
+        for _ in 0..200 {
+            let idx = get_item_index_for_droppable(false, |item| item.min_mlvl <= 1, &mut rng, false, false, false, false)
+                .expect("level-1 droppable item exists");
+            assert!(idx < crate::game::item_dat::ITEMS_DATA.len());
+            assert!(crate::game::item_dat::ITEMS_DATA[idx].min_mlvl <= 1);
+            picked += 1;
+        }
+        assert_eq!(picked, 200);
+        // Gold (row 0) is a droppable candidate too (dropRate 1, min_mlvl 1).
+        let mut rng2 = rand::rngs::StdRng::seed_from_u64(1);
+        let mut saw_gold = false;
+        for _ in 0..100 {
+            if let Some(idx) = get_item_index_for_droppable(false, |item| item.min_mlvl <= 1, &mut rng2, false, false, false, false) {
+                if idx == 0 {
+                    saw_gold = true;
+                    break;
+                }
+            }
+        }
+        assert!(saw_gold, "gold should be a droppable candidate");
     }
 
     #[test]
