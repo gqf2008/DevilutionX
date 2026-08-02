@@ -3645,7 +3645,7 @@ fn get_direction_towards(from_x: i32, from_y: i32, to_x: i32, to_y: i32) -> Dire
 }
 
 /// Get delta X for direction
-fn direction_dx(dir: Direction) -> i32 {
+pub(crate) fn direction_dx(dir: Direction) -> i32 {
     match dir {
         Direction::North | Direction::South => 0,
         Direction::East | Direction::NorthEast | Direction::SouthEast => 1,
@@ -3654,7 +3654,7 @@ fn direction_dx(dir: Direction) -> i32 {
 }
 
 /// Get delta Y for direction
-fn direction_dy(dir: Direction) -> i32 {
+pub(crate) fn direction_dy(dir: Direction) -> i32 {
     match dir {
         Direction::East | Direction::West => 0,
         Direction::South | Direction::SouthEast | Direction::SouthWest => 1,

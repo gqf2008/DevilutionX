@@ -994,10 +994,6 @@ fn find_level_up_stairs(
     None
 }
 
-/// Number of monsters to scatter across an L1 Cathedral level. Kept small so
-/// the dungeon feels populated without crowding the shareware-sized rooms.
-const DUNGEON_MONSTER_COUNT: usize = 8;
-
 /// Place a small pack of monsters on the dungeon floor, away from the player
 /// spawn, and pre-load their stand sprites for rendering.
 ///
@@ -1010,32 +1006,152 @@ const DUNGEON_MONSTER_COUNT: usize = 8;
 ///
 /// Non-fatal: if the layout has no floor tiles or the MPQ can't be opened, we
 /// simply place fewer/no monsters and the renderer falls back to coloured blocks.
+/// C++ `CanPlaceMonster` (monster.cpp:278-287): a tile inside the active
+/// dungeon region that is not solid, not already occupied by a monster, not
+/// the player tile, and not visible yet. The engine uses the layout's
+/// walkable-floor set as the "not solid" proxy.
+fn can_place_monster(
+    x: i32,
+    y: i32,
+    layout: &crate::game::game_state::DungeonLayout,
+    occupied: &[(i32, i32)],
+    spawn: (i32, i32),
+) -> bool {
+    if x < 0 || y < 0 || x >= layout.width as i32 || y >= layout.height as i32 {
+        return false;
+    }
+    if (x, y) == spawn {
+        return false;
+    }
+    if occupied.contains(&(x, y)) {
+        return false;
+    }
+    layout.floor_tiles.contains(&(x, y))
+}
+
+/// C++ `PlaceGroup` (monster.cpp:308-359) + `PlaceMonster` (290-306): place a
+/// group of `num` monsters of the given level-type slot near a random valid
+/// anchor, keeping the group inside the same dungeon region (`dTransVal`),
+/// with the vanilla gameplay-RNG draw order. The vanilla upstream bug where
+/// the `yp` nudge reuses `deltaX` is replicated for byte compatibility.
+#[allow(clippy::too_many_arguments)]
+fn place_group_cpp(
+    monsters: &mut Vec<crate::game::monster::Monster>,
+    type_index: usize,
+    mut num: usize,
+    level_types: &crate::game::monster::LevelMonsterTypes,
+    layout: &crate::game::game_state::DungeonLayout,
+    totalmonsters: usize,
+    level: u8,
+    spawn: (i32, i32),
+) -> usize {
+    use crate::game::monster::{Monster, MonsterAIState, MonsterMode};
+    use crate::game::types::{Direction, Point};
+    let monster_type = level_types
+        .get(type_index)
+        .expect("scatter slot exists")
+        .monster_type;
+    let base = monsters.len();
+    let mut placed = 0usize;
+    for _try1 in 0..10usize {
+        monsters.truncate(base);
+        placed = 0;
+        // Anchor: do { xp = GenerateRnd(80)+16; yp = GenerateRnd(80)+16 }
+        // while (!CanPlaceMonster(...)). Bounded so synthetic layouts with
+        // no floor inside 16..96 terminate instead of spinning forever.
+        let (mut xp, mut yp) = match (0..500usize).find_map(|_| {
+            let xp = crate::engine::random::gameplay_rnd(16, 95);
+            let yp = crate::engine::random::gameplay_rnd(16, 95);
+            let occupied: Vec<(i32, i32)> = monsters[base..].iter().map(|m| (m.x, m.y)).collect();
+            if can_place_monster(xp, yp, layout, &occupied, spawn) {
+                Some((xp, yp))
+            } else {
+                None
+            }
+        }) {
+            Some(pos) => pos,
+            None => return placed, // no valid tile in the region
+        };
+        let (x1, y1) = (xp, yp);
+        if num + monsters.len() > totalmonsters {
+            num = totalmonsters - monsters.len();
+        }
+        if num == 0 {
+            break;
+        }
+        let mut j = 0usize;
+        let mut try2 = 0usize;
+        while j < num && try2 < 100 {
+            // Vanilla PlaceGroup nudges xp with one GenerateRnd(8) direction and
+            // yp with a *second* GenerateRnd(8) direction's deltaX (upstream
+            // bug kept for byte compatibility: monster.cpp:326-327).
+            let d1 = Direction::ALL[crate::engine::random::gameplay_rnd(0, 7) as usize];
+            let d2 = Direction::ALL[crate::engine::random::gameplay_rnd(0, 7) as usize];
+            xp += crate::game::monster::direction_dx(d1);
+            yp += crate::game::monster::direction_dx(d2);
+            let region_ok = {
+                let w = layout.width as i32;
+                let a = layout
+                    .trans_val
+                    .get(yp as usize * w as usize + xp as usize)
+                    .copied();
+                let b = layout
+                    .trans_val
+                    .get(y1 as usize * w as usize + x1 as usize)
+                    .copied();
+                a.is_some() && a == b
+            };
+            let occupied: Vec<(i32, i32)> = monsters[base..].iter().map(|m| (m.x, m.y)).collect();
+            if !can_place_monster(xp, yp, layout, &occupied, spawn) || !region_ok {
+                try2 += 1;
+                continue;
+            }
+            // PlaceMonster: direction = GenerateRnd(8), then C++ InitMonster
+            // (the anim/HP/seed draws inside `new_with_rng`).
+            let rd = Direction::ALL[crate::engine::random::gameplay_rnd(0, 7) as usize];
+            let mut m = Monster::new_with_rng(
+                (monsters.len() + 1) as u32,
+                monster_type,
+                xp,
+                yp,
+                level,
+                &mut rand::rngs::StdRng::seed_from_u64(0),
+            );
+            m.facing = rd;
+            m.level_type = type_index as u8;
+            m.enemy_position = Point::new(spawn.0, spawn.1);
+            m.ai_state = MonsterAIState::Idle;
+            m.mode = MonsterMode::Stand;
+            monsters.push(m);
+            placed += 1;
+            j += 1;
+        }
+        if placed >= num {
+            break;
+        }
+    }
+    placed
+}
+
+/// C++ `PlaceMonsters` (monster.cpp:3701-3756) single-player: place
+/// `na / 30` monsters (`na` = non-solid tiles in the 16..96 dungeon region)
+/// from the scatter roster, one group at a time.
 fn place_dungeon_monsters(game_state: &mut GameState, spawn_x: i32, spawn_y: i32) {
     // Start each descent with a clean monster roster.
     game_state.monster_manager.clear();
     game_state.monster_sprites = None;
 
-    // Candidate spawn tiles: floor tiles far enough from the player spawn.
-    let floor_tiles: Vec<(i32, i32)> = match &game_state.dungeon_layout {
-        Some(l) => l
-            .floor_tiles
-            .iter()
-            .copied()
-            .filter(|(x, y)| (x - spawn_x).abs() + (y - spawn_y).abs() >= 8)
-            .collect(),
-        None => Vec::new(),
+    let layout = match &game_state.dungeon_layout {
+        Some(l) => l,
+        None => {
+            println!("[Monsters] no dungeon layout; placing no monsters");
+            return;
+        }
     };
 
-    if floor_tiles.is_empty() {
-        println!("[Monsters] no floor tiles available; placing no monsters");
-        return;
-    }
-
-    // Build the C++ per-level monster-type table (`GetLevelMTypes`) and
-    // place from its scatter roster (C++ `PlaceMonsters` picks
-    // `scattertypes[GenerateRnd(numscattypes)]`); `Monster::level_type`
-    // carries the table slot into `SaveMonster`.
-    use crate::game::monster::{MonsterType, PLACE_SCATTER, get_level_m_types};
+    // Build the C++ per-level monster-type table (GetLevelMTypes) and place
+    // from its scatter roster using the C++ PlaceMonsters/PlaceGroup algorithm.
+    use crate::game::monster::{MAX_MONSTERS, MonsterType, PLACE_SCATTER, get_level_m_types};
     let mut level_types = get_level_m_types(game_state.current_dungeon_level);
     let mut scatter = level_types.scatter_indices();
     if scatter.is_empty() {
@@ -1043,71 +1159,74 @@ fn place_dungeon_monsters(game_state: &mut GameState, spawn_x: i32, spawn_y: i32
         scatter = level_types.scatter_indices();
     }
 
-    // Deterministic per-level spawns: C++ places monsters through the gameplay
-    // RNG seeded by `SetRndSeedForDungeonLevel` (DungeonSeeds[currlevel]).
-    let mut rng = rand::rngs::StdRng::seed_from_u64(game_state.dungeon_seeds[game_state.current_dungeon_level as usize] as u64);
-    let mut placed = 0usize;
-    let mut used_types: Vec<MonsterType> = Vec::new();
-    let mut occupied: Vec<(i32, i32)> = Vec::new();
+    // C++: na = non-solid tiles in the 16..96 region; numplacemonsters = na/30
+    // (single player), capped so ActiveMonsterCount stays <= MaxMonsters-10.
+    let na = layout
+        .floor_tiles
+        .iter()
+        .filter(|(x, y)| (16..96).contains(x) && (16..96).contains(y))
+        .count();
+    if na == 0 {
+        println!("[Monsters] no floor tiles in the 16..96 region; placing no monsters");
+        return;
+    }
+    let numplacemonsters = (na / 30).clamp(1, MAX_MONSTERS - 10);
 
-    for _ in 0..DUNGEON_MONSTER_COUNT {
-        // Pick a random floor tile not already occupied by another monster.
-        let mut attempts = 0;
-        let (tx, ty) = loop {
-            let idx = crate::engine::random::gameplay_rnd(0, floor_tiles.len() as i32 - 1) as usize;
-            let p = floor_tiles[idx];
-            if !occupied.contains(&p) {
-                break p;
-            }
-            attempts += 1;
-            if attempts > 16 {
-                break p;
-            }
+    let mut monsters: Vec<crate::game::monster::Monster> = Vec::new();
+    let mut used_types: std::collections::BTreeSet<&'static str> = Default::default();
+    while monsters.len() < numplacemonsters {
+        let type_index =
+            scatter[crate::engine::random::gameplay_rnd(0, scatter.len() as i32 - 1) as usize];
+        let used = monsters.len();
+        // C++ group size: L1 (or FlipCoin) -> 1; otherwise GenerateRnd(2)+2.
+        let group = if game_state.current_dungeon_level == 1
+            || crate::engine::random::gameplay_rnd(0, 1) == 0
+        {
+            1
+        } else {
+            crate::engine::random::gameplay_rnd(2, 3)
         };
-        occupied.push((tx, ty));
-
-        let type_index = scatter[crate::engine::random::gameplay_rnd(0, scatter.len() as i32 - 1) as usize];
-        let monster_type = level_types.get(type_index).expect("scatter slot exists").monster_type;
-        // Build the monster on its spawn tile. `Monster::new` seeds enemy/target
-        // with the monster's own tile (a safe no-op until `update_ai` repoints
-        // them at the player) and home_x/home_y with the spawn tile (used to
-        // bound idle wandering).
-        let mut m = crate::game::monster::Monster::new_with_rng(
-            placed as u32 + 1,
-            monster_type,
-            tx,
-            ty,
-            1, // level modifier
-            &mut rng,
+        let placed = place_group_cpp(
+            &mut monsters,
+            type_index,
+            group as usize,
+            &level_types,
+            layout,
+            numplacemonsters,
+            game_state.current_dungeon_level,
+            (spawn_x, spawn_y),
         );
-        // Seed the enemy position with the player spawn so the first AI tick can
-        // compute distance to the player.
-        m.enemy_position = crate::game::types::Point::new(spawn_x, spawn_y);
-        // Start idle (stand) — the AI step flips to Chasing when the player is
-        // within aggro_range (8 tiles).
-        m.ai_state = crate::game::monster::MonsterAIState::Idle;
-        m.mode = crate::game::monster::MonsterMode::Stand;
-        // C++ SaveMonster levelType = the slot in the level type table.
-        m.level_type = type_index as u8;
-
-        game_state.monster_manager.add_monster(m);
-        used_types.push(monster_type);
-        placed += 1;
+        for m in &monsters[used..used + placed] {
+            used_types.insert(m.monster_type.name());
+        }
+        if placed == 0 {
+            // No valid tile found anywhere in the region; avoid an infinite loop.
+            break;
+        }
     }
 
     println!(
-        "[Monsters] placed {} monsters on floor tiles (types: {:?})",
-        placed,
+        "[Monsters] placed {} monsters (C++ PlaceMonsters, types: {:?})",
+        monsters.len(),
         used_types
-            .iter()
-            .map(|t| t.name())
-            .collect::<std::collections::BTreeSet<_>>()
     );
 
-    // Pre-load stand sprites for the placed types. Opens the local MPQ directly
-    // (spawn.mpq / diabdat.mpq) since the game loop doesn't own the asset
-    // manager. Non-fatal: if it fails, the renderer uses coloured blocks.
-    if let Some(sheet) = load_monster_sprite_set(&used_types) {
+    // Commit the placed monsters, then pre-load stand sprites for the types.
+    for m in monsters {
+        game_state.monster_manager.add_monster(m);
+    }
+    let mut types: Vec<crate::game::monster::MonsterType> = Vec::new();
+    for t in used_types {
+        if let Some(m) = game_state
+            .monster_manager
+            .iter()
+            .map(|(_, m)| m.monster_type)
+            .find(|mt| mt.name() == t)
+        {
+            types.push(m);
+        }
+    }
+    if let Some(sheet) = load_monster_sprite_set(&types) {
         game_state.monster_sprites = Some(sheet);
     } else {
         println!("[Monsters] monster sprites unavailable; renderer will use coloured blocks");
@@ -4019,6 +4138,68 @@ impl LevelType {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// C++ PlaceGroup on a fully-open floor: with every tile in the 16..96
+    /// region walkable and one region value, a group of 3 places 3 monsters
+    /// on distinct tiles of the same region, and the first anchor draw
+    /// matches an independent DiabloGenerator replay.
+    #[test]
+    fn test_place_group_cpp_open_floor() {
+        use crate::engine::random::DiabloGenerator;
+        use crate::game::game_state::DungeonLayout;
+        use crate::game::monster::{LevelMonsterTypes, MonsterType, PLACE_SCATTER};
+
+        // 112x112 layout: every tile is a walkable floor tile in one region.
+        let mut layout = DungeonLayout::default();
+        for y in 0..112i32 {
+            for x in 0..112i32 {
+                layout.floor_tiles.push((x, y));
+            }
+        }
+        layout.trans_val = vec![1i8; 112 * 112];
+        layout.width = 112;
+        layout.height = 112;
+
+        let mut table = LevelMonsterTypes::new();
+        let type_index = table.add(MonsterType::ZombieN, PLACE_SCATTER);
+
+        crate::engine::random::seed_gameplay_rng(0xCAFE);
+        let mut monsters = Vec::new();
+        let placed = place_group_cpp(
+            &mut monsters,
+            type_index,
+            3,
+            &table,
+            &layout,
+            10,
+            1,
+            // Spawn sits outside the 16..96 draw range so the first anchor
+            // draw always succeeds.
+            (0, 0),
+        );
+        assert_eq!(placed, 3, "open floor places the whole group");
+        assert_eq!(monsters.len(), 3);
+        let mut seen = std::collections::HashSet::new();
+        for m in &monsters {
+            assert!(m.x >= 16 && m.x < 96 && m.y >= 16 && m.y < 96, "anchor in 16..96");
+            assert!(seen.insert((m.x, m.y)), "distinct positions");
+            assert_eq!(m.level_type, type_index as u8);
+        }
+
+        // Replay the vanilla draw order on an independent generator: the
+        // first placed monster sits at the anchor (GenerateRnd(80)+16 x2)
+        // nudged by the two GenerateRnd(8) directions (xp += dx(d1),
+        // yp += dx(d2) — the vanilla yp-deltaX bug).
+        crate::engine::random::seed_gameplay_rng(0xCAFE);
+        let mut gen = DiabloGenerator::new(0xCAFE);
+        let ax = gen.generate_rnd(80) + 16;
+        let ay = gen.generate_rnd(80) + 16;
+        let d1 = crate::game::types::Direction::ALL[gen.generate_rnd(8) as usize];
+        let d2 = crate::game::types::Direction::ALL[gen.generate_rnd(8) as usize];
+        assert_eq!(monsters[0].x, ax + crate::game::monster::direction_dx(d1), "x = anchor + nudge");
+        assert_eq!(monsters[0].y, ay + crate::game::monster::direction_dx(d2), "y = anchor + nudge(deltaX)");
+    }
+
+
 
     #[test]
     fn test_descend_to_level_enters_dungeon() {
