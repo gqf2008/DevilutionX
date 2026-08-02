@@ -10,7 +10,7 @@ pub const MAX_BELT_ITEMS: usize = 8;
 /// Inventory grid cell count
 pub const INVENTORY_GRID_CELLS: usize = 40;
 /// Player name length
-pub const PLAYER_NAME_LENGTH: usize = 16;
+pub const PLAYER_NAME_LENGTH: usize = 32; // C++ PlayerNameLength (player.h:41)
 
 /// Simplified Item for pack/unpack operations
 /// (This is NOT the full game Item - see items.rs for that)
@@ -664,6 +664,8 @@ impl PlayerPack {
             pack.difficulty = u32::from_le_bytes([bytes[offset], bytes[offset+1], bytes[offset+2], bytes[offset+3]]);
             offset += 4;
             pack.dam_ac_flags = u32::from_le_bytes([bytes[offset], bytes[offset+1], bytes[offset+2], bytes[offset+3]]);
+            offset += 4;
+            pack.reserved3.copy_from_slice(&bytes[offset..offset + 20]);
         }
 
         pack

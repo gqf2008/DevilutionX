@@ -466,6 +466,32 @@ fn save_writer_header_matches_cpp_reference_bytes() {
     );
 }
 
+/// PlayerPack write direction: decoding the C++ reference hero entry and
+/// re-encoding with `PlayerPack::to_bytes` must be byte-stable (the pack
+/// layout round-trips exactly), so the save writer can emit the `hero`
+/// entry byte-for-byte from engine state.
+#[test]
+fn player_pack_round_trip_is_byte_stable() {
+    use devilutionx_rs::game::codec::codec_decode;
+    use devilutionx_rs::game::pack::PlayerPack;
+
+    const PASSWORD_SPAWN_SINGLE: &str = "adslhfb1";
+    let mut save = load_save_archive(fixture_path("demo_0_reference_spawn_0.sv"))
+        .expect("reference save opens as MPQ");
+    let raw = save.read_entry("hero").expect("hero entry");
+    let hero = codec_decode(&raw, PASSWORD_SPAWN_SINGLE);
+    assert!(hero.len() > 100, "hero blob is substantial");
+
+    let pack = PlayerPack::from_bytes(&hero);
+    let reencoded = pack.to_bytes();
+    assert_eq!(
+        reencoded, hero,
+        "PlayerPack round-trip must be byte-stable vs C++ EncodeHero (len {} vs {})",
+        reencoded.len(),
+        hero.len()
+    );
+}
+
 /// Byte-exact decoding against the C++ `demomode.cpp` record layout
 /// (`WriteDemoMsgHeader` + per-type payload, version 3):
 ///   header: [version u8][save u32le][w u16le][h u16le][23 settings bytes]
