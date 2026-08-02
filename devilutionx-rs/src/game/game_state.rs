@@ -2258,6 +2258,18 @@ impl GameState {
             .map(|&b| if b { 1 } else { 0 })
             .collect();
         let zero_grid = vec![0u8; 112 * 112];
+        // Dungeon-only grids: dMonster/dCorpse are zeros (no per-tile monster
+        // or corpse grid in the engine), dPreLight comes from the generated
+        // layout, AutomapView and the missile-occupancy grid are zeros.
+        let mut dungeon_only = Vec::new();
+        dungeon_only.extend(std::iter::repeat(0u8).take(112 * 112 * 4)); // dMonster (BE i32 area)
+        dungeon_only.extend(std::iter::repeat(0u8).take(112 * 112)); // dCorpse
+        match &self.dungeon_layout {
+            Some(layout) => dungeon_only.extend_from_slice(&layout.pre_light),
+            None => dungeon_only.extend(std::iter::repeat(0u8).take(112 * 112)),
+        }
+        dungeon_only.extend(std::iter::repeat(0u8).take(40 * 40)); // AutomapView
+        dungeon_only.extend(std::iter::repeat(0u8).take(112 * 112)); // missile occupancy
         let return_state = (
             self.quests.return_lvl_position.0,
             self.quests.return_lvl_position.1,
@@ -2266,7 +2278,8 @@ impl GameState {
         );
         loadsave::write_game_data_v3(
             &header, &seeds, &player_pack, &quests, return_state, &portals, &kill,
-            &dungeon_body, &dropped_items, &[], &dlight, &dflags, &zero_grid, &[], &[], &[],
+            &dungeon_body, &dropped_items, &[], &dlight, &dflags, &zero_grid,
+            &dungeon_only, &[], &[],
         )
     }
 
