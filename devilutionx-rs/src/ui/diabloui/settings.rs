@@ -29,6 +29,10 @@ pub struct SettingsEntry {
     /// C++ `ChangeOptionValue`: advance/cycle the value. Returns `true` when
     /// the UI should refresh the value description.
     cycle: Box<dyn Fn() -> bool>,
+    /// C++ `OptionEntryListBase` value list (list-type entries only).
+    list_values: Option<&'static [i32]>,
+    list_get: Option<fn(&opt::Options) -> i32>,
+    list_set: Option<fn(&mut opt::Options, i32)>,
 }
 
 impl SettingsEntry {
@@ -37,9 +41,37 @@ impl SettingsEntry {
         (self.value)()
     }
 
-    /// C++ `ChangeOptionValue(pEntry, ...)` for boolean/list entries.
+    /// C++ `ChangeOptionValue(pEntry, ...)` for boolean / short-list entries.
     pub fn change(&self) -> bool {
         (self.cycle)()
+    }
+
+    /// C++ `OptionEntryListBase::GetListSize()`.
+    pub fn list_size(&self) -> usize {
+        self.list_values.map_or(0, |v| v.len())
+    }
+
+    /// C++ `GetListValue(listIndex)`.
+    pub fn list_value(&self, idx: usize) -> Option<String> {
+        self.list_values.and_then(|v| v.get(idx)).map(|x| x.to_string())
+    }
+
+    /// C++ `OptionEntryListBase::GetActiveListIndex()`.
+    pub fn active_index(&self) -> usize {
+        let Some(values) = self.list_values else { return 0 };
+        let Some(get) = self.list_get else { return 0 };
+        values.iter().position(|&v| get(&opt::options()) == v).unwrap_or(0)
+    }
+
+    /// C++ `ChangeOptionValue(pEntry, listIndex)`: write the chosen value.
+    pub fn set_active_index(&self, idx: usize) -> bool {
+        let (Some(values), Some(set)) = (self.list_values, self.list_set) else {
+            return false;
+        };
+        let Some(&value) = values.get(idx) else { return false };
+        let mut o = opt::options_mut();
+        set(&mut o, value);
+        true
     }
 }
 
@@ -72,21 +104,50 @@ fn boolean(
             set(&mut o, next);
             true
         }),
+        list_values: None,
+        list_get: None,
+        list_set: None,
     }
 }
 
-/// Build a list entry showing the current value; cycling is a follow-up.
-fn list_value(
+/// Build a list entry (C++ `OptionEntryListBase`). Lists with 2 values cycle
+/// directly on Enter (C++ settingsmenu.cpp:292-296); larger lists open the
+/// ListOption submenu.
+fn list(
     name: &'static str,
     description: &'static str,
-    get: fn(&opt::Options) -> String,
+    values: &'static [i32],
+    get: fn(&opt::Options) -> i32,
+    set: fn(&mut opt::Options, i32),
 ) -> SettingsEntry {
     SettingsEntry {
         name,
         description,
         kind: SettingsEntryType::List,
-        value: Box::new(move || get(&opt::options())),
-        cycle: Box::new(|| false),
+        value: Box::new(move || {
+            let current = get(&opt::options());
+            values
+                .iter()
+                .find(|&&v| v == current)
+                .map_or_else(|| current.to_string(), |v| v.to_string())
+        }),
+        cycle: Box::new(move || {
+            if values.len() > 2 {
+                return false; // handled by the ListOption submenu
+            }
+            let mut o = opt::options_mut();
+            let current = get(&o);
+            let next = values
+                .iter()
+                .position(|&v| v == current)
+                .map(|i| values[(i + 1) % values.len()])
+                .unwrap_or(values[0]);
+            set(&mut o, next);
+            true
+        }),
+        list_values: Some(values),
+        list_get: Some(get),
+        list_set: Some(set),
     }
 }
 
@@ -102,10 +163,12 @@ pub fn settings_categories() -> Vec<SettingsCategory> {
             key: "Language",
             name: "Language",
             description: "Language Settings",
-            entries: vec![list_value(
+            entries: vec![list(
                 "Language",
                 "Select the language used by the game.",
-                |o| o.language.code.clone(),
+                &[0, 1],
+                |o| if o.language.code.starts_with("zh") { 1 } else { 0 },
+                |o, v| o.language.code = if v == 1 { "zh_CN".to_string() } else { "en".to_string() },
             )],
         },
         SettingsCategory {
@@ -127,11 +190,12 @@ pub fn settings_categories() -> Vec<SettingsCategory> {
             name: "Audio",
             description: "Audio Settings",
             entries: vec![
-                list_value("Sound Volume", "Sound effect volume (0-100).", |o| format!("{}", o.audio.sound_volume)),
-                list_value("Music Volume", "Music volume (0-100).", |o| format!("{}", o.audio.music_volume)),
-                boolean("Walking Sound", "Play a sound while walking.", |o| o.audio.walking_sound, |o, v| o.audio.walking_sound = v),
-                boolean("Auto Equip Sound", "Play a sound when auto-equipping.", |o| o.audio.auto_equip_sound, |o, v| o.audio.auto_equip_sound = v),
-                boolean("Item Pickup Sound", "Play a sound when picking up items.", |o| o.audio.item_pickup_sound, |o, v| o.audio.item_pickup_sound = v),
+                list("Sample Rate", "Output sample rate (Hz).", &[22050, 44100, 48000], |o| o.audio.sample_rate as i32, |o, v| o.audio.sample_rate = v as u32),
+                list("Channels", "Number of output channels.", &[1, 2], |o| o.audio.channels as i32, |o, v| o.audio.channels = v as u8),
+                list("Buffer Size", "Buffer size (number of frames per channel).", &[1024, 2048, 5120], |o| o.audio.buffer_size as i32, |o, v| o.audio.buffer_size = v as u32),
+                boolean("Walking Sound", "Player emits sound when walking.", |o| o.audio.walking_sound, |o, v| o.audio.walking_sound = v),
+                boolean("Auto Equip Sound", "Automatically equipping items on pickup emits the equipment sound.", |o| o.audio.auto_equip_sound, |o, v| o.audio.auto_equip_sound = v),
+                boolean("Item Pickup Sound", "Picking up items emits the items pickup sound.", |o| o.audio.item_pickup_sound, |o, v| o.audio.item_pickup_sound = v),
             ],
         },
         SettingsCategory {
@@ -182,6 +246,9 @@ pub fn settings_categories() -> Vec<SettingsCategory> {
 pub struct SettingsMenu {
     categories: Vec<SettingsCategory>,
     active_category: Option<usize>,
+    /// C++ `ShownMenuType::ListOption`: the entry index whose value list is
+    /// currently shown.
+    list_entry: Option<usize>,
     selected: usize,
 }
 
@@ -190,17 +257,21 @@ impl SettingsMenu {
         Self {
             categories: settings_categories(),
             active_category: None,
+            list_entry: None,
             selected: 0,
         }
     }
 
-    /// Number of rows in the current level (categories or the active
-    /// category's entries).
+    /// Number of rows in the current level: categories, a category's entries,
+    /// or a list entry's values (C++ `ShownMenuType`).
     pub fn item_count(&self) -> usize {
-        match self.active_category {
-            None => self.categories.len(),
-            Some(i) => self.categories[i].entries.len(),
+        let Some(ci) = self.active_category else {
+            return self.categories.len();
+        };
+        if let Some(ei) = self.list_entry {
+            return self.categories[ci].entries[ei].list_size();
         }
+        self.categories[ci].entries.len()
     }
 
     pub fn selected_index(&self) -> usize {
@@ -225,57 +296,84 @@ impl SettingsMenu {
         self.active_category.is_none()
     }
 
-    /// Screen title (C++ shows the category name in the settings level).
+    /// True when the value-list submenu (C++ `ListOption`) is shown.
+    pub fn in_list_option(&self) -> bool {
+        self.list_entry.is_some()
+    }
+
+    /// Screen title (C++ shows the category / option name in the sub-levels).
     pub fn title(&self) -> String {
-        match self.active_category {
-            None => "Settings".to_string(),
-            Some(i) => self.categories[i].name.to_string(),
+        let Some(ci) = self.active_category else {
+            return "Settings".to_string();
+        };
+        if let Some(ei) = self.list_entry {
+            return self.categories[ci].entries[ei].name.to_string();
         }
+        self.categories[ci].name.to_string()
     }
 
-    /// Row label: category name, or "Entry: current value" for an entry.
+    /// Row label: category name, "Entry: current value", or a list value.
     pub fn row_label(&self, idx: usize) -> String {
-        match self.active_category {
-            None => self.categories[idx].name.to_string(),
-            Some(ci) => {
-                let entry = &self.categories[ci].entries[idx];
-                format!("{}: {}", entry.name, entry.value_description())
-            }
+        let Some(ci) = self.active_category else {
+            return self.categories[idx].name.to_string();
+        };
+        if let Some(ei) = self.list_entry {
+            return self.categories[ci].entries[ei]
+                .list_value(idx)
+                .unwrap_or_default();
         }
+        let entry = &self.categories[ci].entries[idx];
+        format!("{}: {}", entry.name, entry.value_description())
     }
 
-    /// Enter: drill into the selected category, or cycle the selected entry.
-    /// Returns `true` when an entry value changed (UI re-reads the labels).
+    /// Enter: drill into a category / value list, or apply the selected value
+    /// (C++ `ItemSelected`). Returns `true` when a value changed.
     pub fn activate(&mut self) -> bool {
-        match self.active_category {
-            None => {
-                if self.selected < self.categories.len() {
-                    self.active_category = Some(self.selected);
-                    self.selected = 0;
-                }
-                false
+        let Some(ci) = self.active_category else {
+            if self.selected < self.categories.len() {
+                self.active_category = Some(self.selected);
+                self.selected = 0;
             }
-            Some(ci) => {
-                if self.selected < self.categories[ci].entries.len() {
-                    self.categories[ci].entries[self.selected].change()
-                } else {
-                    false
-                }
-            }
+            return false;
+        };
+        if let Some(ei) = self.list_entry {
+            // ListOption level: pick the value, then return to the settings level.
+            let changed = self.categories[ci].entries[ei].set_active_index(self.selected);
+            self.list_entry = None;
+            self.selected = ei; // keep the entry highlighted (C++ returns to Settings)
+            return changed;
         }
-    }
-
-    /// Esc: back to the category list; at the top level, `true` exits the
-    /// settings screen (C++ `GoBackOneMenuLevel` -> `backToMain`).
-    pub fn escape(&mut self) -> bool {
-        if self.active_category.take().is_some() {
-            self.selected = 0;
+        if self.selected >= self.categories[ci].entries.len() {
+            return false;
+        }
+        let entry = &self.categories[ci].entries[self.selected];
+        if entry.kind == SettingsEntryType::List && entry.list_size() > 2 {
+            // Open the ListOption submenu (C++ settingsmenu.cpp:285-290).
+            self.list_entry = Some(self.selected);
+            self.selected = entry.active_index();
             false
         } else {
-            true
+            // Booleans and 2-value lists change immediately (C++:292-296).
+            entry.change()
         }
     }
+
+    /// Esc: back one level; at the top level, `true` exits the settings
+    /// screen (C++ `GoBackOneMenuLevel` -> `backToMain`).
+    pub fn escape(&mut self) -> bool {
+        if self.list_entry.take().is_some() {
+            self.selected = 0;
+            return false;
+        }
+        if self.active_category.take().is_some() {
+            self.selected = 0;
+            return false;
+        }
+        true
+    }
 }
+
+
 
 #[cfg(test)]
 mod tests {
@@ -349,24 +447,7 @@ mod tests {
         assert_eq!(entry.value_description(), "Off");
     }
 
-    #[test]
-    fn test_audio_entries_reflect_live_values() {
-        {
-            let mut o = opt::options_mut();
-            o.audio.sound_volume = 73;
-            o.audio.music_volume = 41;
-        }
-        let categories = settings_categories();
-        let audio = categories.iter().find(|c| c.name == "Audio").unwrap();
-        let sound = audio.entries.iter().find(|e| e.name == "Sound Volume").unwrap();
-        assert_eq!(sound.kind, SettingsEntryType::List);
-        assert_eq!(sound.value_description(), "73");
-        let music = audio.entries.iter().find(|e| e.name == "Music Volume").unwrap();
-        assert_eq!(music.value_description(), "41");
-    }
-
-
-    #[test]
+    #[test]    #[test]
     fn test_settings_menu_navigation() {
         let mut menu = SettingsMenu::new();
         assert!(menu.in_categories());
@@ -395,6 +476,61 @@ mod tests {
         assert!(!menu.escape());
         assert!(menu.in_categories());
         assert!(menu.escape());
+    }
+
+
+
+    #[test]
+    fn test_settings_menu_list_option_level() {
+        // Set the live value first (the options global is shared across tests).
+        {
+            let mut o = opt::options_mut();
+            o.audio.sample_rate = 48000;
+        }
+        let mut menu = SettingsMenu::new();
+        // Audio list entries reflect the live value (checked in the same
+        // test to avoid racing the shared options global).
+        let categories = settings_categories();
+        let audio = categories.iter().find(|c| c.name == "Audio").unwrap();
+        let sample = audio.entries.iter().find(|e| e.name == "Sample Rate").unwrap();
+        assert_eq!(sample.kind, SettingsEntryType::List);
+        assert_eq!(sample.list_size(), 3);
+        assert_eq!(sample.value_description(), "48000");
+        assert!(!sample.change(), "3-value lists open the submenu, not cycle");
+        let channels = audio.entries.iter().find(|e| e.name == "Channels").unwrap();
+        {
+            let mut o = opt::options_mut();
+            o.audio.channels = 1;
+        }
+        assert!(channels.change(), "2-value lists cycle directly (C++)");
+        assert_eq!(opt::options().audio.channels, 2);
+        // Drill into Audio (index 2) -> Sample Rate (index 0, a 3-value list).
+        menu.set_selection(2);
+        menu.activate();
+        menu.set_selection(0);
+        assert!(menu.in_categories() == false && menu.in_list_option() == false);
+        // Entering the Sample Rate entry opens the ListOption submenu.
+        menu.activate();
+        assert!(menu.in_list_option(), "large list opens the ListOption level");
+        assert_eq!(menu.title(), "Sample Rate");
+        assert_eq!(menu.item_count(), 3);
+        // Active value is highlighted first.
+        assert_eq!(menu.selected_index(), 2, "selection starts on the active value");
+        // Esc returns to the settings level without changing anything.
+        assert!(!menu.escape());
+        assert!(!menu.in_list_option());
+        assert_eq!(opt::options().audio.sample_rate, 48000);
+        // Re-enter and pick 22050.
+        menu.set_selection(0);
+        menu.activate();
+        assert!(menu.in_list_option());
+        menu.set_selection(0);
+        assert!(menu.activate(), "picking a list value reports a change");
+        assert_eq!(opt::options().audio.sample_rate, 22050);
+        assert_eq!(menu.selected_index(), 0, "back on the entry, still highlighted");
+        assert!(!menu.escape(), "settings level goes back to categories");
+        assert!(menu.in_categories());
+        assert!(menu.escape(), "category level exits the settings screen");
     }
 
 }
