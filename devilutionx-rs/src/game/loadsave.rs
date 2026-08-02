@@ -2292,6 +2292,34 @@ pub fn item_to_binary(item: &crate::game::items::Item) -> BinaryItemData {
 fn player_item_to_binary(item: &crate::game::player_exact::PlayerItem) -> BinaryItemData {
     let mut b = BinaryItemData::default();
     b.item_idx = item.item_id;
+    // C++ fills Item fields from AllItemsList at item creation (GetItemAttrs);
+    // the engine's PlayerItem only tracks the TSV row, so pull the base
+    // attributes from the authoritative itemdat.tsv row. Empty slots
+    // (item_id == 0) keep the all-default stub (C++ writes empty items with
+    // idx = IDI_GOLD and default fields).
+    if item.item_id > 0 {
+        if let Some(d) = crate::game::item_dat::get_item_data(item.item_id as usize) {
+            b.item_type = d.item_type as i32;
+            b.class = d.class as u8;
+            b.loc = d.equip_type as i8;
+            b.cursor = d.cursor_graphic as i32;
+            b.min_dam = d.min_damage as i32;
+            b.max_dam = d.max_damage as i32;
+            b.ac = d.min_ac as i32; // C++ randomises in [min_ac, max_ac]
+            b.durability = d.durability as i32;
+            b.max_dur = d.durability as i32;
+            b.flags = d.special_effects.0;
+            b.misc_id = d.misc_id as i32;
+            b.spell = d.spell as i8 as i32;
+            b.min_str = d.min_str as i8;
+            b.min_mag = d.min_mag;
+            b.min_dex = d.min_dex as i8;
+            b.value = d.value as i32;
+            b.ivalue = d.value as i32;
+            b.name = cpp_name_bytes(d.name).to_vec();
+            b.iname = cpp_name_bytes(d.name).to_vec();
+        }
+    }
     b
 }
 
@@ -3890,5 +3918,30 @@ mod tests {
         // Every slot is the -1 sentinel.
         assert!(back.active.iter().all(|&v| v == -1));
         assert!(back.available.iter().all(|&v| v == -1));
+    }
+
+    #[test]
+    fn test_player_item_maps_base_attrs_from_tsv_row() {
+        use crate::game::player_exact::PlayerItem;
+        let mut it = PlayerItem::empty();
+        it.item_id = 119; // Short Sword (itemdat.tsv row)
+        let b = player_item_to_binary(&it);
+        assert_eq!(b.item_idx, 119, "IDidx is the TSV row");
+        assert_eq!(b.item_type, crate::game::item_dat::ItemType::Sword as i32);
+        assert_eq!(b.class, crate::game::item_dat::ItemClass::Weapon as u8);
+        assert_eq!(b.loc, crate::game::item_dat::ItemEquipType::OneHand as i8);
+        assert_eq!(b.min_dam, 2, "base min damage from itemdat.tsv");
+        assert_eq!(b.max_dam, 6, "base max damage from itemdat.tsv");
+        assert_eq!(b.durability, 24, "base durability from itemdat.tsv");
+        assert_eq!(b.max_dur, 24);
+        assert_eq!(b.value, 120, "base value from itemdat.tsv");
+        assert_eq!(b.ivalue, 120);
+        assert_eq!(b.cursor, 64, "cursor graphic from itemdat.tsv");
+        assert_eq!(b.min_str, 18, "strength requirement from itemdat.tsv");
+        assert_eq!(&b.name[..11], b"Short Sword");
+        // Empty slots stay the all-default stub.
+        let empty = player_item_to_binary(&PlayerItem::empty());
+        assert_eq!(empty.item_idx, 0);
+        assert!(empty.name.iter().all(|&b| b == 0), "empty slot keeps empty name");
     }
 }
