@@ -56,6 +56,24 @@ pub fn bar_metrics(bar_width: i32, hit_points: i32, max_hit_points: i32) -> BarM
     }
 }
 
+/// C++ `pcursmonst`: the monster currently under the mouse cursor.
+///
+/// The demo cursor is projected to a world tile (same space as `Monster::x/y`);
+/// returns the first alive monster on that tile, mirroring the C++ hover lookup.
+pub fn find_hovered_monster<'a>(
+    monsters: impl IntoIterator<Item = &'a crate::game::monster::Monster>,
+    tile: (i32, i32),
+) -> Option<&'a crate::game::monster::Monster> {
+    monsters
+        .into_iter()
+        .find(|m| m.x == tile.0 && m.y == tile.1 && m.is_alive())
+}
+
+/// C++ `DrawMonsterHealthBar` bar geometry constants (the CLX sprite width is
+/// replaced by a fixed pixel width for the rect-based renderer).
+pub const HEALTH_BAR_WIDTH: i32 = 94;
+pub const HEALTH_BAR_HEIGHT: i32 = 10;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -100,4 +118,23 @@ mod tests {
         assert_eq!(m.progress, 0);
         assert_eq!(m.multiplier, 0);
     }
+
+
+    #[test]
+    fn test_find_hovered_monster_by_tile() {
+        use crate::game::monster::{Monster, MonsterAIState, MonsterType};
+        let mut zombie = Monster::new(1, MonsterType::Zombie, 20, 10, 1);
+        zombie.ai_state = MonsterAIState::Idle;
+        let mut dead = Monster::new(2, MonsterType::Zombie, 21, 10, 1);
+        dead.ai_state = MonsterAIState::Dead;
+        let others = vec![zombie, dead];
+
+        // Monster on the hovered tile.
+        assert!(find_hovered_monster(others.iter(), (20, 10)).is_some());
+        // Dead monster is skipped.
+        assert!(find_hovered_monster(others.iter(), (21, 10)).is_none());
+        // Empty tile.
+        assert!(find_hovered_monster(others.iter(), (30, 30)).is_none());
+    }
+
 }

@@ -1600,6 +1600,9 @@ fn draw_and_blit(
     // Ground item name labels (C++ qol/itemlabels.cpp DrawItemNameLabels).
     draw_item_labels(window, game_state, cam_tile_x, cam_tile_y, screen_center_x, screen_center_y);
 
+    // Hovered-monster health bar (C++ qol/monhealthbar.cpp DrawMonsterHealthBar).
+    draw_monster_health_bar(window, game_state, mouse_pos);
+
     // Draw the player at its tile (camera == player position). Anchored via
     // tile_to_screen so it lands on the pipeline's floor tile for the camera.
     // Prefer the real Warrior town-walk sprite; fall back to the yellow
@@ -2994,6 +2997,44 @@ fn draw_item_labels(
             label.y,
             sdl2::pixels::Color::RGB(230, 230, 200),
         );
+    }
+}
+
+/// Draw the hovered monster's health bar at the top of the screen
+/// (C++ `qol/monhealthbar.cpp` `DrawMonsterHealthBar`). Gated by the
+/// "Enemy Health Bar" option; the CLX sprite art is replaced by a rect bar
+/// using the same `bar_metrics` geometry (blue fill for lifesteal bars).
+fn draw_monster_health_bar(window: &mut GameWindow, game_state: &GameState, mouse_pos: (i32, i32)) {
+    use crate::game::monhealthbar::{
+        bar_metrics, find_hovered_monster, HEALTH_BAR_HEIGHT, HEALTH_BAR_WIDTH,
+    };
+    if !crate::utils::options::options().gameplay.enemy_health_bar || !game_state.in_dungeon {
+        return;
+    }
+    let cam = game_state.camera;
+    let tile = convert_screen_to_tile(mouse_pos.0, mouse_pos.1, cam.tile_x, cam.tile_y);
+    let hovered = find_hovered_monster(game_state.monster_manager.iter().map(|(_, m)| m), tile);
+    let Some(monster) = hovered else { return };
+
+    let metrics = bar_metrics(HEALTH_BAR_WIDTH, monster.hp, monster.max_hp);
+    let bar_x = (LOGICAL_WIDTH as i32 - HEALTH_BAR_WIDTH) / 2;
+    let bar_y = 18;
+    let canvas = window.canvas_mut();
+    // Border.
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(40, 40, 40));
+    let _ = canvas.fill_rect(Rect::new(bar_x - 1, bar_y - 1, (HEALTH_BAR_WIDTH + 2) as u32, (HEALTH_BAR_HEIGHT + 2) as u32));
+    // Background.
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(20, 20, 20));
+    let _ = canvas.fill_rect(Rect::new(bar_x, bar_y, HEALTH_BAR_WIDTH as u32, HEALTH_BAR_HEIGHT as u32));
+    // Fill (blue when the lifesteal multiplier is active, C++ healthBlue).
+    if metrics.progress > 0 {
+        let fill = if metrics.multiplier > 0 {
+            sdl2::pixels::Color::RGB(70, 90, 200)
+        } else {
+            sdl2::pixels::Color::RGB(180, 40, 40)
+        };
+        canvas.set_draw_color(fill);
+        let _ = canvas.fill_rect(Rect::new(bar_x, bar_y, metrics.progress as u32, HEALTH_BAR_HEIGHT as u32));
     }
 }
 
