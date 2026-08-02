@@ -1280,10 +1280,10 @@ impl GameState {
         //   if (GenerateRnd(100) > 25) return IDI_GOLD;
         //   return GetItemIndexForDroppableItem(...);
         // `random_range(0..100)` yields [0,99] exactly like `GenerateRnd(100)`.
-        if rng.random_range(0..100) > 40 {
+        if crate::engine::random::gameplay_rnd(0, 99) > 40 {
             return;
         }
-        if rng.random_range(0..100) > 25 {
+        if crate::engine::random::gameplay_rnd(0, 99) > 25 {
             let item_type = GroundItemType::Gold;
             self.ground_items.push(GroundItem { x, y, item_type, item_index: None, item: None });
             println!("[Drop] spawned {:?} '{}' at ({}, {})", item_type, item_type.display_name(), x, y);
@@ -1342,7 +1342,7 @@ impl GameState {
             None => {
                 // No droppable item for this monster level: fall back to a
                 // demo potion so the tile still yields loot.
-                let item_type = if rng.random_range(0..2) == 0 {
+                let item_type = if crate::engine::random::gameplay_rnd(0, 1) == 0 {
                     GroundItemType::HealingPotion
                 } else {
                     GroundItemType::ManaPotion
@@ -1617,12 +1617,12 @@ impl GameState {
                     // Rolls come from the level-seeded gameplay RNG so monster
                     // wandering is deterministic per level (C++ advances the
                     // DungeonSeeds[currlevel]-seeded generator for AI rolls).
-                    if rng.random_range(0..10) == 0 {
+                    if crate::engine::random::gameplay_rnd(0, 9) == 0 {
                         let dirs: [(i32, i32); 8] = [
                             (1, 0), (-1, 0), (0, 1), (0, -1),
                             (1, 1), (1, -1), (-1, 1), (-1, -1),
                         ];
-                        let (dx, dy) = dirs[rng.random_range(0..dirs.len())];
+                        let (dx, dy) = dirs[crate::engine::random::gameplay_rnd(0, dirs.len() as i32 - 1) as usize];
                         let nx = monster.x + dx;
                         let ny = monster.y + dy;
                         if walkable.contains(&(nx, ny)) && (nx != player_pos.x || ny != player_pos.y) {

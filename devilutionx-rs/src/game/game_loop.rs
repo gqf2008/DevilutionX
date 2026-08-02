@@ -772,6 +772,11 @@ pub fn descend_to_level(game_state: &mut GameState, level: u8) -> Result<(), Str
     // `DungeonSeeds[currlevel]` to `CreateDungeon` (diablo.cpp:1430); the Rust
     // port uses the same per-level seed so layouts are stable and reproducible.
     let seed = game_state.dungeon_seeds[level as usize];
+
+    // C++ `SetRndSeedForDungeonLevel` (diablo.cpp:3025-3034): seed the
+    // gameplay RNG once per level load; rolls advance continuously.
+    crate::engine::random::seed_gameplay_rng(seed);
+
     let layout = crate::game::dungeon_level::generate_dungeon_layout(level, seed, &art)?;
     let filled = crate::game::dungeon_level::count_filled(&layout);
     println!(

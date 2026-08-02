@@ -22,6 +22,11 @@ impl DiabloGenerator {
         Self { state: seed }
     }
 
+    /// const 构造（thread_local 初始化用）
+    pub const fn const_new(seed: u32) -> Self {
+        Self { state: seed }
+    }
+
     /// 获取当前状态
     pub fn state(&self) -> u32 {
         self.state
@@ -361,6 +366,31 @@ pub fn reserve_seed_sequence() -> Xoshiro128PlusPlus {
     result
 }
 
+/// Gameplay RNG (C++ `sgRndSeed`): a per-thread Diablo LCG that the game
+/// loop seeds once per level (`SetRndSeedForDungeonLevel`, diablo.cpp:3025)
+/// and that gameplay rolls advance continuously. Kept separate from the
+/// item-generation global RNG so `SetupAllItems`' `SetRndSeed(iseed)` does not
+/// corrupt combat/drop sequences.
+use std::cell::RefCell;
+
+thread_local! {
+    static GAMEPLAY_RNG: RefCell<DiabloGenerator> = const { RefCell::new(DiabloGenerator::const_new(0)) };
+}
+
+/// C++ `SetRndSeedForDungeonLevel`: seed the gameplay RNG with the current
+/// dungeon seed (town = index 0).
+pub fn seed_gameplay_rng(seed: u32) {
+    GAMEPLAY_RNG.with(|r| *r.borrow_mut() = DiabloGenerator::new(seed));
+}
+
+/// C++ `GenerateRnd(max - min + 1) + min` on the gameplay RNG.
+pub fn gameplay_rnd(min: i32, max: i32) -> i32 {
+    if min >= max {
+        return min;
+    }
+    GAMEPLAY_RNG.with(|r| r.borrow_mut().generate_rnd(max - min + 1) + min)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -430,4 +460,30 @@ mod tests {
         assert!(true_count > 400 && true_count < 600);
         assert!(false_count > 400 && false_count < 600);
     }
+
+
+    #[test]
+    fn test_gameplay_rnd_matches_generate_rnd() {
+        // gameplay_rnd(min, max) == DiabloGenerator::generate_rnd(max-min+1)+min
+        // with the same seed, so the migration is byte-identical to C++.
+        seed_gameplay_rng(0xDEADBEEF);
+        let mut direct = DiabloGenerator::new(0xDEADBEEF);
+        for _ in 0..64 {
+            let expected = direct.generate_rnd(100);
+            assert_eq!(gameplay_rnd(0, 99), expected);
+            let expected2 = direct.generate_rnd(11);
+            assert_eq!(gameplay_rnd(3, 13), expected2 + 3);
+        }
+    }
+
+    #[test]
+    fn test_gameplay_rng_reproducible_per_seed() {
+        seed_gameplay_rng(42);
+        let a = gameplay_rnd(0, 99);
+        let b = gameplay_rnd(0, 99);
+        seed_gameplay_rng(42);
+        assert_eq!(gameplay_rnd(0, 99), a);
+        assert_eq!(gameplay_rnd(0, 99), b);
+    }
+
 }
