@@ -96,13 +96,16 @@ pub enum MonsterMode {
     RangedAttack = 10,
     SpecialStand = 11,
     SpecialRangedAttack = 12,
-    DelayedDeath = 13,
-    Delay = 14,
-    Charge = 15,
-    StoneStand = 16,
-    Heal = 17,
-    Talk = 18,
-    Teleport = 19,
+    Delay = 13,
+    Charge = 14,
+    Petrified = 15,
+    Heal = 16,
+    Talk = 17,
+    // Rust-only extensions (C++ has no such modes; kept above the C++
+    // range so the shared variants above serialise with C++-exact values).
+    DelayedDeath = 18,
+    StoneStand = 19,
+    Teleport = 20,
 }
 
 /// Unique monster type (C++ UniqueMonsterType)
@@ -5115,6 +5118,31 @@ mod tests {
 
         // Test with frequency 0 (always false)
         assert_eq!(flip_coin(0), false);
+    }
+
+    /// The MonsterMode discriminants shared with C++ must match
+    /// `enum class MonsterMode` (monster.h:75-95) exactly so SaveMonster's
+    /// `mode` field serialises the right byte.
+    #[test]
+    fn test_monster_mode_values_match_cpp() {
+        assert_eq!(MonsterMode::Stand as u8, 0);
+        assert_eq!(MonsterMode::MoveNorthwards as u8, 1);
+        assert_eq!(MonsterMode::MoveSouthwards as u8, 2);
+        assert_eq!(MonsterMode::MoveSideways as u8, 3);
+        assert_eq!(MonsterMode::MeleeAttack as u8, 4);
+        assert_eq!(MonsterMode::HitRecovery as u8, 5);
+        assert_eq!(MonsterMode::Death as u8, 6);
+        assert_eq!(MonsterMode::SpecialMeleeAttack as u8, 7);
+        assert_eq!(MonsterMode::FadeIn as u8, 8);
+        assert_eq!(MonsterMode::FadeOut as u8, 9);
+        assert_eq!(MonsterMode::RangedAttack as u8, 10);
+        assert_eq!(MonsterMode::SpecialStand as u8, 11);
+        assert_eq!(MonsterMode::SpecialRangedAttack as u8, 12);
+        assert_eq!(MonsterMode::Delay as u8, 13);
+        assert_eq!(MonsterMode::Charge as u8, 14);
+        assert_eq!(MonsterMode::Petrified as u8, 15);
+        assert_eq!(MonsterMode::Heal as u8, 16);
+        assert_eq!(MonsterMode::Talk as u8, 17);
     }
 
     #[test]
