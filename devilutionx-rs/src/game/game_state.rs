@@ -211,6 +211,9 @@ pub struct GroundItem {
     pub y: i32,
     /// What kind of loot this is (gold / healing / mana).
     pub item_type: GroundItemType,
+    /// Real ITEMS_DATA index when this is a genuine dropped item (C++
+    /// `AllItemsList` row / IDidx), `None` for gold and the demo potions.
+    pub item_index: Option<usize>,
 }
 
 /// Main game state integrating all subsystems
@@ -1144,7 +1147,7 @@ impl GameState {
         // so we can roll a ground-item drop once the monster_manager borrow is
         // released.
         let mut xp_gained: i32 = 0;
-        let mut kill_positions: Vec<(i32, i32)> = Vec::new();
+        let mut kill_positions: Vec<(i32, i32, i32)> = Vec::new();
         let mut sfx_hits = 0u32;
         let mut sfx_kills = 0u32;
         for monster_id in monster_ids {
@@ -1159,7 +1162,7 @@ impl GameState {
                             xp_gained += monster.experience as i32;
                             // Record the death tile for loot drop.
                             let mp = monster.position();
-                            kill_positions.push((mp.x, mp.y));
+                            kill_positions.push((mp.x, mp.y, monster.level as i32));
                             // Queue the monster-death SFX. The game loop drains
                             // pending_sfx and forwards it to AudioManager.
                             sfx_kills += 1;
@@ -1195,8 +1198,8 @@ impl GameState {
         }
 
         // Roll loot drops for each kill (after the monster_manager borrow ends).
-        for (kx, ky) in kill_positions {
-            self.roll_monster_drop(kx, ky, rng);
+        for (kx, ky, klevel) in kill_positions {
+            self.roll_monster_drop(kx, ky, klevel, rng);
         }
     }
 
@@ -1234,7 +1237,7 @@ impl GameState {
     ///
     /// This mirrors the high-level shape of C++ `MonstDeath`/`SpawnItem`
     /// (`Source/items.cpp`) while staying intentionally simple for the demo.
-    pub fn roll_monster_drop(&mut self, x: i32, y: i32, rng: &mut impl Rng) {
+    pub fn roll_monster_drop(&mut self, x: i32, y: i32, monster_level: i32, rng: &mut impl Rng) {
         // C++ `RndItemForMonsterLevel` (items.cpp:3240-3251):
         //   if (GenerateRnd(100) > 40) return IDI_NONE;
         //   if (GenerateRnd(100) > 25) return IDI_GOLD;
@@ -1245,18 +1248,36 @@ impl GameState {
         }
         if rng.random_range(0..100) > 25 {
             let item_type = GroundItemType::Gold;
-            self.ground_items.push(GroundItem { x, y, item_type });
+            self.ground_items.push(GroundItem { x, y, item_type, item_index: None });
             println!("[Drop] spawned {:?} '{}' at ({}, {})", item_type, item_type.display_name(), x, y);
             return;
         }
-        // Non-gold droppable item. Full `SetupAllItems` spawning is not ported;
-        // keep the two demo potion types as the placeholder roll (50/50).
-        let item_type = if rng.random_range(0..2) == 0 {
-            GroundItemType::HealingPotion
-        } else {
-            GroundItemType::ManaPotion
+        // Non-gold droppable item: pick a real base item from the aligned
+        // ITEMS_DATA by monster level (C++ GetItemIndexForDroppableItem +
+        // RndItemForMonsterLevel). Full SetupAllItems spawning (attributes,
+        // affixes, uniques) is a follow-up; the item index is stored so the
+        // pickup can build the real Item.
+        let item_index = crate::game::item_affix::get_item_index_for_droppable(
+            false,
+            |item_data| item_data.min_mlvl as i32 <= monster_level,
+            rng,
+            false,
+            false,
+            false,
+            false,
+        );
+        let (item_type, item_index) = match item_index {
+            Some(idx) => (GroundItemType::ManaPotion, Some(idx)),
+            None => (
+                if rng.random_range(0..2) == 0 {
+                    GroundItemType::HealingPotion
+                } else {
+                    GroundItemType::ManaPotion
+                },
+                None,
+            ),
         };
-        self.ground_items.push(GroundItem { x, y, item_type });
+        self.ground_items.push(GroundItem { x, y, item_type, item_index });
         println!(
             "[Drop] spawned {:?} '{}' at ({}, {})",
             item_type,
@@ -1305,7 +1326,12 @@ impl GameState {
                 }
                 GroundItemType::HealingPotion | GroundItemType::ManaPotion => {
                     // Inventory/belt integration is deferred; just log the pickup.
-                    println!("[Pickup] picked up {}", g.item_type.display_name());
+                    let name = g
+                        .item_index
+                        .and_then(|idx| crate::game::item_dat::get_item_data(idx))
+                        .map(|d| d.name)
+                        .unwrap_or_else(|| g.item_type.display_name());
+                    println!("[Pickup] picked up {}", name);
                 }
             }
         }
@@ -1395,7 +1421,7 @@ impl GameState {
     fn process_simple_missiles(&mut self, rng: &mut impl Rng) {
         // Snapshot missile positions to iterate while mutating monsters.
         let mut xp_gained: i32 = 0;
-        let mut kill_positions: Vec<(i32, i32)> = Vec::new();
+        let mut kill_positions: Vec<(i32, i32, i32)> = Vec::new();
         let mut alive: Vec<SimpleMissile> = Vec::with_capacity(self.simple_missiles.len());
         for mut m in self.simple_missiles.drain(..) {
             m.x += m.dx;
@@ -1422,7 +1448,7 @@ impl GameState {
                                 mon.ai_state = crate::game::monster::MonsterAIState::Dead;
                                 xp_gained += mon.experience as i32;
                                 // Record the death tile for loot drop.
-                                kill_positions.push((mp.x, mp.y));
+                                kill_positions.push((mp.x, mp.y, mon.level as i32));
                             }
                             break;
                         }
@@ -1443,8 +1469,8 @@ impl GameState {
 
         // Roll loot drops for each spell kill (after the monster_manager borrow
         // ends). The rng was previously unused here; it now drives the drop roll.
-        for (kx, ky) in kill_positions {
-            self.roll_monster_drop(kx, ky, rng);
+        for (kx, ky, klevel) in kill_positions {
+            self.roll_monster_drop(kx, ky, klevel, rng);
         }
     }
 
@@ -2310,7 +2336,7 @@ impl crate::game::save::LevelStateMut for GameState {
                 1 => GroundItemType::HealingPotion,
                 _ => GroundItemType::ManaPotion,
             };
-            self.ground_items.push(GroundItem { x: it.x, y: it.y, item_type });
+            self.ground_items.push(GroundItem { x: it.x, y: it.y, item_type, item_index: None });
         }
     }
 }
@@ -2550,7 +2576,7 @@ mod tests {
         let mut potions = 0usize;
         for i in 0..2000 {
             gs.ground_items.clear();
-            gs.roll_monster_drop(i % 40, i % 40, &mut rng);
+            gs.roll_monster_drop(i % 40, i % 40, 1, &mut rng);
             if let Some(g) = gs.ground_items.first() {
                 drops += 1;
                 match g.item_type {
@@ -2576,7 +2602,7 @@ mod tests {
     #[test]
     fn test_ground_item_struct_fields() {
         // GroundItem carries tile coords + type and is Copy.
-        let g = GroundItem { x: 12, y: 7, item_type: GroundItemType::Gold };
+        let g = GroundItem { x: 12, y: 7, item_type: GroundItemType::Gold, item_index: None };
         assert_eq!(g.x, 12);
         assert_eq!(g.y, 7);
         assert_eq!(g.item_type, GroundItemType::Gold);
@@ -2600,13 +2626,13 @@ mod tests {
         // With this RNG seed the first roll (0..100) is >= 40, so nothing drops.
         let mut gs = GameState::new(Player::new(), false, 1);
         let mut rng = rand::rngs::StdRng::seed_from_u64(1);
-        gs.roll_monster_drop(10, 10, &mut rng);
+        gs.roll_monster_drop(10, 10, 1, &mut rng);
         // We can't assert exact emptiness (seed-dependent), so instead we run
         // many rolls and assert the drop rate stays within the expected band.
         let mut drops = 0usize;
         for _ in 0..1000 {
             let before = gs.ground_items.len();
-            gs.roll_monster_drop(0, 0, &mut rng);
+            gs.roll_monster_drop(0, 0, 1, &mut rng);
             if gs.ground_items.len() > before {
                 drops += 1;
             }
@@ -2625,7 +2651,7 @@ mod tests {
         for seed in 0..50u64 {
             let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
             let before = gs.ground_items.len();
-            gs.roll_monster_drop(21, 22, &mut rng);
+            gs.roll_monster_drop(21, 22, 1, &mut rng);
             if gs.ground_items.len() > before {
                 let g = gs.ground_items.last().unwrap();
                 assert_eq!(g.x, 21);
@@ -2642,19 +2668,25 @@ mod tests {
 
     #[test]
     fn test_drop_type_distribution() {
-        // Over many forced drops the type distribution should roughly match
-        // 70/20/10. We collect drops and check the bands.
+        // C++ `RndItemForMonsterLevel`: ~60% no drop, ~74% gold, ~26% item.
+        // The non-gold item is now a real ITEMS_DATA pick (stored as
+        // item_index) rendered with the potion icon; the heal/mana potion
+        // fallback only fires when no level-1 droppable item exists.
         let mut counts = [0usize; 3]; // [gold, heal, mana]
+        let mut real_items = 0usize;
         let mut rng = rand::rngs::StdRng::seed_from_u64(99);
         let mut gs = GameState::new(Player::new(), false, 1);
         let mut attempts = 0;
         while counts.iter().sum::<usize>() < 2000 && attempts < 20000 {
             attempts += 1;
             let before = gs.ground_items.len();
-            gs.roll_monster_drop(0, 0, &mut rng);
+            gs.roll_monster_drop(0, 0, 1, &mut rng);
             if gs.ground_items.len() > before {
-                let t = gs.ground_items.last().unwrap().item_type;
-                match t {
+                let g = gs.ground_items.last().unwrap();
+                if g.item_index.is_some() {
+                    real_items += 1;
+                }
+                match g.item_type {
                     GroundItemType::Gold => counts[0] += 1,
                     GroundItemType::HealingPotion => counts[1] += 1,
                     GroundItemType::ManaPotion => counts[2] += 1,
@@ -2663,12 +2695,12 @@ mod tests {
         }
         let total = counts.iter().sum::<usize>() as f64;
         let gold_pct = counts[0] as f64 / total * 100.0;
-        let heal_pct = counts[1] as f64 / total * 100.0;
-        let mana_pct = counts[2] as f64 / total * 100.0;
-        // 70/20/10 with a generous tolerance band.
-        assert!(gold_pct > 60.0 && gold_pct < 80.0, "gold pct {}", gold_pct);
-        assert!(heal_pct > 12.0 && heal_pct < 28.0, "heal pct {}", heal_pct);
-        assert!(mana_pct > 4.0 && mana_pct < 18.0, "mana pct {}", mana_pct);
+        let non_gold_pct = (counts[1] + counts[2]) as f64 / total * 100.0;
+        // ~74% gold / ~26% non-gold with a generous tolerance band.
+        assert!(gold_pct > 64.0 && gold_pct < 84.0, "gold pct {}", gold_pct);
+        assert!(non_gold_pct > 16.0 && non_gold_pct < 36.0, "non-gold pct {}", non_gold_pct);
+        // Real ITEMS_DATA picks must occur (they dominate the non-gold branch).
+        assert!(real_items > 100, "expected real item drops, got {real_items}");
     }
 
     #[test]
@@ -2677,7 +2709,7 @@ mod tests {
         let gold_before = gs.player._p_gold;
         // Drop a gold item directly onto the player's tile.
         gs.player.position = Point::new(30, 30);
-        gs.ground_items.push(GroundItem { x: 30, y: 30, item_type: GroundItemType::Gold });
+        gs.ground_items.push(GroundItem { x: 30, y: 30, item_type: GroundItemType::Gold, item_index: None });
         gs.pickup_ground_items();
         assert_eq!(
             gs.player._p_gold,
@@ -2692,8 +2724,8 @@ mod tests {
         let mut gs = GameState::new(Player::new(), false, 1);
         gs.player.position = Point::new(30, 30);
         // One item on the player's tile, one elsewhere.
-        gs.ground_items.push(GroundItem { x: 30, y: 30, item_type: GroundItemType::Gold });
-        gs.ground_items.push(GroundItem { x: 40, y: 40, item_type: GroundItemType::HealingPotion });
+        gs.ground_items.push(GroundItem { x: 30, y: 30, item_type: GroundItemType::Gold, item_index: None });
+        gs.ground_items.push(GroundItem { x: 40, y: 40, item_type: GroundItemType::HealingPotion, item_index: None });
         assert_eq!(gs.ground_items.len(), 2);
         gs.pickup_ground_items();
         // Only the coincident item is removed.
@@ -2710,8 +2742,8 @@ mod tests {
         let mut gs = GameState::new(Player::new(), false, 1);
         gs.player.position = Point::new(5, 5);
         let gold_before = gs.player._p_gold;
-        gs.ground_items.push(GroundItem { x: 5, y: 5, item_type: GroundItemType::HealingPotion });
-        gs.ground_items.push(GroundItem { x: 5, y: 5, item_type: GroundItemType::ManaPotion });
+        gs.ground_items.push(GroundItem { x: 5, y: 5, item_type: GroundItemType::HealingPotion, item_index: None });
+        gs.ground_items.push(GroundItem { x: 5, y: 5, item_type: GroundItemType::ManaPotion, item_index: None });
         gs.pickup_ground_items();
         assert!(gs.ground_items.is_empty());
         assert_eq!(gs.player._p_gold, gold_before, "potion pickup must not change gold");
@@ -2729,7 +2761,7 @@ mod tests {
     fn test_pickup_noop_when_not_coincident() {
         let mut gs = GameState::new(Player::new(), false, 1);
         gs.player.position = Point::new(10, 10);
-        gs.ground_items.push(GroundItem { x: 99, y: 99, item_type: GroundItemType::Gold });
+        gs.ground_items.push(GroundItem { x: 99, y: 99, item_type: GroundItemType::Gold, item_index: None });
         gs.pickup_ground_items();
         // Item stays because the player isn't on its tile.
         assert_eq!(gs.ground_items.len(), 1);
@@ -2740,9 +2772,9 @@ mod tests {
         // Walking onto a tile with several items should pick them all up.
         let mut gs = GameState::new(Player::new(), false, 1);
         gs.player.position = Point::new(7, 7);
-        gs.ground_items.push(GroundItem { x: 7, y: 7, item_type: GroundItemType::Gold });
-        gs.ground_items.push(GroundItem { x: 7, y: 7, item_type: GroundItemType::Gold });
-        gs.ground_items.push(GroundItem { x: 7, y: 7, item_type: GroundItemType::HealingPotion });
+        gs.ground_items.push(GroundItem { x: 7, y: 7, item_type: GroundItemType::Gold, item_index: None });
+        gs.ground_items.push(GroundItem { x: 7, y: 7, item_type: GroundItemType::Gold, item_index: None });
+        gs.ground_items.push(GroundItem { x: 7, y: 7, item_type: GroundItemType::HealingPotion, item_index: None });
         let gold_before = gs.player._p_gold;
         gs.pickup_ground_items();
         assert!(gs.ground_items.is_empty());
@@ -2972,11 +3004,9 @@ mod tests {
 
         // Populate a ground item.
         gs.ground_items.clear();
-        gs.ground_items.push(GroundItem {
-            x: 30,
+        gs.ground_items.push(GroundItem { x: 30,
             y: 31,
-            item_type: GroundItemType::HealingPotion,
-        });
+            item_type: GroundItemType::HealingPotion, item_index: None });
 
         // Snapshot the distinctive values.
         let saved_monster_hp = 37i32;
@@ -3383,7 +3413,7 @@ mod tests {
         gs.player_dead = true;
         // Populate some dungeon state that should be cleared.
         gs.dungeon_up_stairs = Some((5, 5));
-        gs.ground_items.push(GroundItem { x: 1, y: 1, item_type: GroundItemType::Gold });
+        gs.ground_items.push(GroundItem { x: 1, y: 1, item_type: GroundItemType::Gold, item_index: None });
         gs.simple_missiles.push(SimpleMissile {
             x: 0, y: 0, dx: 1, dy: 0, damage: 5, range_left: 5,
         });
