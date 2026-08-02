@@ -1768,6 +1768,85 @@ impl CppGameHeader {
 }
 
 // ============================================================================
+// C++ SaveQuest / SavePortal (loadsave.cpp:1762-1789 / 1811-1818)
+// ============================================================================
+
+/// C++ `SaveQuest` (loadsave.cpp:1762-1789), classic (non-Hellfire) layout:
+/// 44 bytes per quest, little-endian fields followed by BE return-position
+/// fields and a 4-byte DoomQuestState skip.
+pub fn write_quest(
+    helper: &mut SaveHelper,
+    quest: &crate::game::quest_new::Quest,
+    return_pos: (i32, i32),
+    return_level: i32,
+    return_level_type: i32,
+) {
+    helper.write_u8(quest._qlevel);
+    helper.write_u8(quest._qidx as i8 as u8);
+    helper.write_u8(quest._qactive as u8);
+    helper.write_u8(quest._qlvltype as u8);
+    helper.write_le_i32(quest.position.0);
+    helper.write_le_i32(quest.position.1);
+    helper.write_u8(quest._qslvl as u8);
+    helper.write_u8(quest._qidx as i8 as u8);
+    helper.write_u8(quest._qmsg as u8);
+    helper.write_u8(quest._qvar1);
+    helper.write_u8(quest._qvar2);
+    helper.skip(3); // Alignment (2) + non-Hellfire (1)
+    helper.write_le_u32(if quest._qlog { 1 } else { 0 });
+    helper.write_be_i32(return_pos.0);
+    helper.write_be_i32(return_pos.1);
+    helper.write_be_i32(return_level);
+    helper.write_be_i32(return_level_type);
+    helper.skip(4); // DoomQuestState
+}
+
+/// Read a classic `SaveQuest` block; returns the quest and the next offset.
+pub fn parse_quest(decoded: &[u8], offset: usize) -> Option<(crate::game::quest_new::Quest, usize)> {
+    if decoded.len() < offset + 44 {
+        return None;
+    }
+    let le_i32 = |i: usize| i32::from_le_bytes([decoded[i], decoded[i + 1], decoded[i + 2], decoded[i + 3]]);
+    let mut q = crate::game::quest_new::Quest::default();
+    q._qlevel = decoded[offset];
+    q._qidx = unsafe { std::mem::transmute(decoded[offset + 1] as i8) };
+    q._qactive = unsafe { std::mem::transmute(decoded[offset + 2]) };
+    // level_new::DungeonType is repr(i8) with C++ dungeon_type values 0..6.
+    q._qlvltype = unsafe { std::mem::transmute(decoded[offset + 3] as i8) };
+    q.position = (le_i32(offset + 4), le_i32(offset + 8));
+    q._qslvl = unsafe { std::mem::transmute(decoded[offset + 12] as i8) };
+    q._qmsg = unsafe { std::mem::transmute(decoded[offset + 14] as i16) };
+    q._qvar1 = decoded[offset + 15];
+    q._qvar2 = decoded[offset + 16];
+    q._qlog = le_i32(offset + 20) != 0;
+    Some((q, offset + 44))
+}
+
+/// C++ `SavePortal` (loadsave.cpp:1811-1818): 24 bytes.
+pub fn write_portal(helper: &mut SaveHelper, open: bool, pos: (i32, i32), level: i32, ltype: i32, setlvl: bool) {
+    helper.write_le_u32(if open { 1 } else { 0 });
+    helper.write_le_i32(pos.0);
+    helper.write_le_i32(pos.1);
+    helper.write_le_i32(level);
+    helper.write_le_i32(ltype);
+    helper.write_le_u32(if setlvl { 1 } else { 0 });
+}
+
+/// Read a classic `SavePortal` block; returns `(open, pos, level, ltype, setlvl)`.
+pub fn parse_portal(decoded: &[u8], offset: usize) -> Option<((bool, (i32, i32), i32, i32, bool), usize)> {
+    if decoded.len() < offset + 24 {
+        return None;
+    }
+    let le_i32 = |i: usize| i32::from_le_bytes([decoded[i], decoded[i + 1], decoded[i + 2], decoded[i + 3]]);
+    let open = le_i32(offset) != 0;
+    let pos = (le_i32(offset + 4), le_i32(offset + 8));
+    let level = le_i32(offset + 12);
+    let ltype = le_i32(offset + 16);
+    let setlvl = le_i32(offset + 20) != 0;
+    Some(((open, pos, level, ltype, setlvl), offset + 24))
+}
+
+// ============================================================================
 // SaveLevel / LoadLevel — full per-level persistence
 //
 // Mirrors C++ `SaveLevel`/`LoadLevel` from Source/loadsave.cpp (lines

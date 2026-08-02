@@ -433,6 +433,54 @@ fn replay_warrior_level1to2() {
     // byte-for-byte (HeroCompareResult::Same in C++).
 }
 
+/// SaveQuest/SavePortal writers must match the C++ byte layout
+/// (loadsave.cpp:1762-1789 / 1811-1818): 44-byte quests and 24-byte portals
+/// that round-trip through the parser.
+#[test]
+fn quest_portal_writers_round_trip() {
+    use devilutionx_rs::game::loadsave::{
+        SaveHelper, parse_portal, parse_quest, write_portal, write_quest,
+    };
+    use devilutionx_rs::game::quest_new::{Quest, QuestId, QuestState, SpeechId};
+
+    let mut q = Quest::default();
+    q._qlevel = 3;
+    q._qidx = QuestId::Mushroom;
+    q._qactive = QuestState::Active;
+    q.position = (10, 20);
+    q._qmsg = SpeechId::Mush10;
+    q._qvar1 = 5;
+    q._qlog = true;
+
+    let mut helper = SaveHelper::new(44);
+    write_quest(&mut helper, &q, (5, 6), 2, 1);
+    let data = helper.into_data();
+    assert_eq!(data.len(), 44, "classic SaveQuest is 44 bytes");
+    let (parsed, next) = parse_quest(&data, 0).expect("quest parses");
+    assert_eq!(next, 44);
+    assert_eq!(parsed._qlevel, q._qlevel);
+    assert_eq!(parsed._qidx, q._qidx);
+    assert_eq!(parsed._qactive, q._qactive);
+    assert_eq!(parsed.position, q.position);
+    assert_eq!(parsed._qslvl, q._qslvl);
+    assert_eq!(parsed._qmsg, q._qmsg);
+    assert_eq!(parsed._qvar1, q._qvar1);
+    assert_eq!(parsed._qvar2, q._qvar2);
+    assert_eq!(parsed._qlog, q._qlog);
+
+    let mut helper = SaveHelper::new(24);
+    write_portal(&mut helper, true, (30, 31), 2, 1, false);
+    let data = helper.into_data();
+    assert_eq!(data.len(), 24, "SavePortal is 24 bytes");
+    let ((open, pos, level, ltype, setlvl), next) = parse_portal(&data, 0).expect("portal parses");
+    assert_eq!(next, 24);
+    assert!(open);
+    assert_eq!(pos, (30, 31));
+    assert_eq!(level, 2);
+    assert_eq!(ltype, 1);
+    assert!(!setlvl);
+}
+
 /// Tier 3 foundation: the Rust `CppGameHeader` writer must reproduce the
 /// C++ `SaveGameData` header + level-seed table byte-for-byte. Decodes the
 /// real C++ reference save, re-serialises the parsed header/seeds, and
