@@ -1913,6 +1913,38 @@ pub fn parse_portal(decoded: &[u8], offset: usize) -> Option<((bool, (i32, i32),
 }
 
 // ============================================================================
+// SaveGameData dropped items (C++ loadsave.cpp:1823-1850 / 2909-2914)
+// ============================================================================
+
+/// C++ `MAXITEMS` (loadsave.cpp / items.h).
+pub const MAX_ITEMS_FOR_SAVE: usize = 127;
+
+/// C++ `SaveDroppedItems` (loadsave.cpp:1823-1850): MAXITEMS active-item index
+/// array (0..126 for vanilla compatibility), MAXITEMS available-item array
+/// (`(i + ActiveItemCount) % MAXITEMS`), then one `SaveItem` body per active
+/// item.
+pub fn write_dropped_items(helper: &mut SaveHelper, items: &[BinaryItemData], is_hellfire: bool) {
+    for i in 0..MAX_ITEMS_FOR_SAVE {
+        helper.write_u8(i as u8);
+    }
+    let count = items.len().min(MAX_ITEMS_FOR_SAVE);
+    for i in 0..MAX_ITEMS_FOR_SAVE {
+        helper.write_u8(((i + count) % MAX_ITEMS_FOR_SAVE) as u8);
+    }
+    for item in items.iter().take(count) {
+        item.to_binary(helper, is_hellfire);
+    }
+}
+
+/// C++ `SaveDroppedItemLocations` (loadsave.cpp:2909-2914): one u8 per active
+/// item indexing into the save file (0 is reserved, so items start at 1).
+pub fn write_dropped_item_locations(helper: &mut SaveHelper, count: usize) {
+    for i in 0..count {
+        helper.write_u8((i + 1) as u8);
+    }
+}
+
+// ============================================================================
 // SaveGameData dungeon body (C++ loadsave.cpp:2808-2844)
 // ============================================================================
 

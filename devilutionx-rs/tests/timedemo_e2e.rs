@@ -621,6 +621,32 @@ fn dungeon_body_writer_matches_cpp_layout() {
     assert!(d.len() > 24, "body is substantial");
 }
 
+/// SaveDroppedItems must match the C++ layout: 127 active + 127 available
+/// index bytes then one SaveItem body per active item, plus the locations
+/// array.
+#[test]
+fn dropped_items_writer_matches_cpp_layout() {
+    use devilutionx_rs::game::loadsave::{
+        BinaryItemData, SaveHelper, write_dropped_item_locations, write_dropped_items,
+    };
+
+    let item = BinaryItemData::default();
+    let mut ih = SaveHelper::new(512);
+    item.to_binary(&mut ih, false);
+    let item_len = ih.into_data().len();
+
+    let mut h = SaveHelper::new(4096);
+    write_dropped_items(&mut h, &[item], false);
+    let d = h.into_data();
+    assert_eq!(d.len(), 254 + item_len, "127 active + 127 available + item body");
+    assert_eq!(&d[0..3], &[0, 1, 2], "active-item array is 0..126");
+    assert_eq!(d[127], 1, "available array starts at (0+count)%127 = 1");
+
+    let mut h = SaveHelper::new(8);
+    write_dropped_item_locations(&mut h, 3);
+    assert_eq!(h.into_data(), vec![1, 2, 3], "locations are 1-based");
+}
+
 /// Tier 3 foundation: the Rust `CppGameHeader` writer must reproduce the
 /// C++ `SaveGameData` header + level-seed table byte-for-byte. Decodes the
 /// real C++ reference save, re-serialises the parsed header/seeds, and
