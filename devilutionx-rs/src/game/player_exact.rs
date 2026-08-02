@@ -483,7 +483,7 @@ pub struct Player {
     pub _p_block_flag: bool,
     /// Invincible flag
     pub _p_invincible: bool,
-    /// Light radius
+    /// Light radius (C++ `_pLightRad`; base 10 per InitPlayer player.cpp:2338)
     pub _p_light_rad: i8,
 
     // === Spell System (C++ Exact Alignment) ===
@@ -624,7 +624,7 @@ impl Player {
             _p_lght_resist: 0,
             _p_block_flag: false,
             _p_invincible: false,
-            _p_light_rad: 0,
+            _p_light_rad: 10,
             // Spell system
             _p_mem_spells: 0,
             _p_i_spells: 0,

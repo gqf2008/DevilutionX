@@ -861,7 +861,7 @@ pub fn descend_to_level(game_state: &mut GameState, level: u8) -> Result<(), Str
     }
     game_state.player_light_index = game_state.light_manager.add_light(
         crate::game::types::Point::new(center_x, center_y),
-        9,
+        game_state.player._p_light_rad as u8,
     );
 
     println!("[Descend] Entered L{} at ({}, {})", level, center_x, center_y);
@@ -1407,6 +1407,7 @@ fn render_world_pipeline(
     view_pos: TilePoint,
     viewport_h: i32,
     entities: &dyn Fn(&mut crate::engine::surface::Surface, &crate::engine::scrollrt::Lighting),
+    player_light_radius: u8,
 ) {
     let palette = crate::engine::palette::Palette::from_rgb_bytes(&level.palette.colors)
         .unwrap_or_else(crate::engine::palette::Palette::new);
@@ -1432,12 +1433,11 @@ fn render_world_pipeline(
         if !any_pre_light {
             dlight.fill(crate::engine::lighting::LIGHTS_MAX as u8);
         }
-        const PLAYER_LIGHT_RADIUS: u8 = 9;
         lm.do_lighting(
             &mut dlight,
             112,
             crate::engine::lighting::Point::new(view_pos.x, view_pos.y),
-            PLAYER_LIGHT_RADIUS,
+            player_light_radius,
         );
     }
     // Transparency (C++ scrollrt.cpp:540 `TransList[dTransVal[tile]]`).
@@ -1629,11 +1629,11 @@ fn draw_and_blit(
 
     if game_state.in_dungeon {
         if let (Some(level), Some(layout)) = (&game_state.dungeon_level_data, &game_state.dungeon_layout) {
-            render_world_pipeline(window, level, layout, view_pos, viewport_h, &monster_entities_closure);
+            render_world_pipeline(window, level, layout, view_pos, viewport_h, &monster_entities_closure, game_state.player._p_light_rad as u8);
             drew_pipeline = true;
         }
     } else if let (Some(level), Some(layout)) = (&game_state.level_data, &game_state.town_layout) {
-        render_world_pipeline(window, level, layout, view_pos, viewport_h, &monster_entities_closure);
+        render_world_pipeline(window, level, layout, view_pos, viewport_h, &monster_entities_closure, game_state.player._p_light_rad as u8);
         drew_pipeline = true;
     }
 
@@ -3911,6 +3911,14 @@ mod tests {
         assert!(gs.dungeon_layout.is_some(), "dungeon layout generated");
         assert!(gs.dungeon_level_data.is_some(), "active art set");
         assert_eq!(gs.camera.tile_x, 16 + 20 * 2, "camera centered in dungeon");
+
+        // Player light radius follows `_pLightRad` (C++ InitPlayer base 10).
+        assert_eq!(gs.player._p_light_rad, 10, "C++ player.cpp:2338 base light radius");
+        assert_eq!(
+            gs.light_manager.lights[gs.player_light_index as usize].radius,
+            gs.player._p_light_rad as u8,
+            "descend adds the player light with _pLightRad"
+        );
 
         // A level whose art was never loaded fails gracefully (no panic).
         let player2 = Player::new();
