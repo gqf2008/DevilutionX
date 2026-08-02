@@ -12,13 +12,12 @@
 //!      and stamp the four micro values into the grid at offset
 //!      `(16 + i*2, 16 + j*2)`.
 //!
-//! The logical `Tile` enum produced by drlg_l1 (Floor, Dirt, VWalls, corners,
-//! ...) is an *algorithmic* representation; C++ converts those into actual
-//! `dungeon[x][y]` TIL indices via the Cathedral tile set before `DRLG_LPass3`
-//! runs. We replicate that step with `tile_to_l1_til_index`, a hand-written
-//! mapping from each logical tile to a reasonable L1 TIL mega index (floor /
-//! wall / corner variants). When the L1 TIL file is available we validate the
-//! indices against it; out-of-range indices fall back to the floor tile.
+//! The logical `Tile` enum produced by drlg_l1 keeps the *exact* C++
+//! discriminants (drlg_l1.cpp `enum Tile`), which are 1-based L1 TIL mega
+//! indices. `DRLG_LPass3` therefore maps each logical tile straight into the
+//! TIL table with `tileId = dungeon[i][j] - 1` — no remapping step is needed.
+//! (`tile_to_l1_til_index` remains only as a legacy reference for the enum's
+//! semantic groups.)
 
 use crate::engine::dungeon::DungeonLevelData;
 use crate::game::game_state::DungeonLayout;
@@ -27,10 +26,10 @@ use crate::levels::gendung::Dungeon;
 use crate::levels::types::{DMAXX, DMAXY, MAXDUNX, MAXDUNY};
 
 /// The L1 TIL index used as the "dirt background" for `DRLG_LPass3`'s first
-/// pass. C++ uses `Dirt - 1` = tile id 26 (0-based index 25) for Cathedral.
-/// We use a known L1 floor/dirt mega index; the exact value only affects the
-/// look of areas outside the generated rooms.
-const L1_BG_TIL_INDEX: usize = 7;
+/// pass. C++ `Pass3()` calls `DRLG_LPass3(Dirt - 1)` with `Dirt = 22`
+/// (drlg_l1.cpp enum), so the background mega is TIL entry 21 (0-based).
+/// Its four micros are all solid dirt (verified against l1.til/l1.sol).
+const L1_BG_TIL_INDEX: usize = 21;
 
 /// Generate an L1 Cathedral dungeon with the given seed and produce a
 /// render-ready `DungeonLayout` (dPiece grid) by mapping the generator's
@@ -113,6 +112,9 @@ pub fn stamp_dungeon_layout(
     // Bake per-level static lights into dPreLight (C++ calls DoLighting during
     // level generation, then SavePreLighting() snapshots dLight -> dPreLight).
     apply_static_lights(level, &mut layout);
+
+    // Keep the level's SOL table with the layout (C++ `SOLData`).
+    layout.sol = level.sol.properties.clone();
 
     layout
 }
@@ -205,26 +207,28 @@ fn add_l2_torch_lights(layout: &mut DungeonLayout, seed: u32) {
     }
 }
 
-/// Scan a generated layout for door objects, mirroring C++ `AddL1Objs`,
-/// `AddL2Objs` and `AddL3Objs` (objects.cpp:3756-3795). Those functions place
-/// door objects from pure dPiece micro-value scans (no RNG), so the scan here
-/// is deterministic and byte-faithful given a fixture-aligned d_piece grid:
+/// Scan a generated layout for door and light objects, mirroring C++
+/// `AddL1Objs`, `AddL2Objs` and `AddL3Objs` (objects.cpp:3756-3795). Those
+/// functions place objects from pure dPiece micro-value scans (no RNG), so the
+/// scan here is deterministic and byte-faithful given a C++-aligned d_piece
+/// grid:
 ///
-/// * Cathedral (L1): 43/50/213 -> OBJ_L1LDOOR, 45/55 -> OBJ_L1RDOOR
+/// * Cathedral (L1): 269 -> OBJ_L1LIGHT, 43/50/213 -> OBJ_L1LDOOR,
+///   45/55 -> OBJ_L1RDOOR
 /// * Catacombs (L2): 12/540 -> OBJ_L2LDOOR, 16/541 -> OBJ_L2RDOOR
 /// * Caves (L3): 530 -> OBJ_L3LDOOR, 533 -> OBJ_L3RDOOR
 ///
-/// Returns `(x, y, door_type)` in C++ scan order (row-major y then x). The L1
-/// lava lights (dPiece 269 -> OBJ_L1LIGHT) are baked into dPreLight by
-/// `apply_static_lights` and are not returned as doors.
+/// Returns `(x, y, object_type)` in C++ scan order (row-major y then x, light
+/// before doors within a cell, matching `AddL1Objs`).
 pub fn scan_level_doors(level: u8, layout: &DungeonLayout) -> Vec<(i32, i32, crate::game::objdat::ObjectId)> {
     use crate::game::objdat::ObjectId;
-    let mut doors = Vec::new();
+    let mut objects = Vec::new();
     for y in 0..MAXDUNY {
         for x in 0..MAXDUNX {
             let pn = layout.d_piece[y * MAXDUNX + x];
-            let door = match level {
+            let otype = match level {
                 1 => match pn {
+                    269 => Some(ObjectId::L1Light),
                     43 | 50 | 213 => Some(ObjectId::L1LDoor),
                     45 | 55 => Some(ObjectId::L1RDoor),
                     _ => None,
@@ -241,12 +245,12 @@ pub fn scan_level_doors(level: u8, layout: &DungeonLayout) -> Vec<(i32, i32, cra
                 },
                 _ => None,
             };
-            if let Some(door) = door {
-                doors.push((x as i32, y as i32, door));
+            if let Some(otype) = otype {
+                objects.push((x as i32, y as i32, otype));
             }
         }
     }
-    doors
+    objects
 }
 
 /// Build a render-ready `DungeonLayout` for an L2 Catacombs level
@@ -387,9 +391,12 @@ pub fn build_dungeon_layout(gen: &CathedralGenerator, level: &DungeonLevelData) 
     for j in 0..DMAXY {
         let mut xx = 16usize;
         for i in 0..DMAXX {
+            // C++ DRLG_LPass3: `tileId = dungeon[i][j] - 1` — the Cathedral
+            // Tile enum discriminants *are* 1-based L1 TIL mega indices, so
+            // the logical tile maps straight into pMegaTiles (no remapping).
             let tile = gen.dungeon[i][j];
-            let til_idx = tile_to_l1_til_index(tile);
-            if let Some((m1, m2, m3, m4)) = mega_for_til_index(level, til_idx) {
+            let tile_id = tile as u8 as usize;
+            if let Some((m1, m2, m3, m4)) = tile_id.checked_sub(1).and_then(|idx| mega_for_til_index(level, idx)) {
                 let b = yy * MAXDUNX + xx;
                 if xx + 1 < MAXDUNX && yy + 1 < MAXDUNY {
                     layout.d_piece[b] = m1;
@@ -437,6 +444,10 @@ pub fn build_dungeon_layout(gen: &CathedralGenerator, level: &DungeonLevelData) 
         }
     }
 
+    // Keep the level's SOL table with the layout so monster placement and
+    // tile queries can use C++ `IsTileSolid` (SOLData[dPiece]) exactly.
+    layout.sol = level.sol.properties.clone();
+
     layout
 }
 
@@ -466,6 +477,7 @@ fn mega_for_til_index(level: &DungeonLevelData, til_idx: usize) -> Option<(u16, 
 ///
 /// All indices are kept small (< ~12) so they stay within the L1 TIL table
 /// even in shareware builds; out-of-range lookups safely fall back.
+#[allow(dead_code)]
 fn tile_to_l1_til_index(tile: Tile) -> usize {
     match tile {
         // Floors
@@ -592,6 +604,50 @@ mod tests {
                 assert!(idx < 16, "tile {:?} mapped to implausibly large index {}", tile, idx);
             }
         }
+    }
+
+    /// C++-exact dPiece alignment for the Timedemo L1 seed (1545811660):
+    /// with the real l1.til/l1.sol from spawn.mpq, `build_dungeon_layout`
+    /// must reproduce the door/light object scan (AddL1Objs) and the
+    /// `InitMonsters` non-solid count (`na` = 2462 -> 82 monsters), both of
+    /// which the old hand-written tile mapping got wrong (0 objects, 49).
+    #[test]
+    fn test_l1_dpiece_matches_cpp_timedemo_seed() {
+        use crate::engine::dungeon::{DungeonLevelData, DungeonType};
+        use crate::engine::mpq::MpqArchive;
+        use crate::levels::drlg_l1::CathedralGenerator;
+        use crate::levels::types::DungeonType as LvType;
+
+        let mut archive = match MpqArchive::open("spawn.mpq") {
+            Ok(a) => a,
+            Err(_) => return, // skip without shareware assets
+        };
+        let art = match DungeonLevelData::load_from_mpq(&mut archive, DungeonType::Cathedral) {
+            Ok(a) => a,
+            Err(_) => return,
+        };
+        let mut gen = CathedralGenerator::new();
+        gen.generate(LvType::Cathedral, 1545811660);
+        let layout = build_dungeon_layout(&gen, &art);
+
+        // AddL1Objs scan: 11 door tiles + 6 lava lights.
+        let objects = scan_level_doors(1, &layout);
+        let doors = objects.iter().filter(|(_, _, t)| {
+            matches!(*t, crate::game::objdat::ObjectId::L1LDoor | crate::game::objdat::ObjectId::L1RDoor)
+        }).count();
+        let lights = objects.iter().filter(|(_, _, t)| matches!(*t, crate::game::objdat::ObjectId::L1Light)).count();
+        assert_eq!(doors, 11, "L1 door micro scan (dPiece 43/50/213/45/55)");
+        assert_eq!(lights, 6, "L1 light micro scan (dPiece 269)");
+
+        // InitMonsters na = non-solid micros in 16..96 via SOLData[dPiece].
+        let na = (16usize..96).flat_map(|t| (16usize..96).map(move |s| (s, t)))
+            .filter(|&(s, t)| {
+                let pn = layout.d_piece[t * layout.width + s] as usize;
+                !layout.sol.get(pn).copied().unwrap_or_default().contains(
+                    crate::engine::dungeon::TileProperties::SOLID)
+            }).count();
+        assert_eq!(na, 2462, "InitMonsters non-solid count");
+        assert_eq!(na / 30, 82, "numplacemonsters = na/30");
     }
 
     #[test]

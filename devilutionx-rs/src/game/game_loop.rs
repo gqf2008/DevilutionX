@@ -1026,7 +1026,16 @@ fn can_place_monster(
     if occupied.contains(&(x, y)) {
         return false;
     }
-    layout.floor_tiles.contains(&(x, y))
+    // C++ `CanPlaceMonster` -> `IsTileOccupied` -> `IsTileSolid`:
+    // `SOLData[dPiece[x][y]] & Solid`. When the layout carries the level's
+    // SOL table (real art), use it exactly; the synthetic headless layout
+    // falls back to the floor-tile proxy.
+    if layout.sol.is_empty() {
+        return layout.floor_tiles.contains(&(x, y));
+    }
+    let pn = layout.d_piece[y as usize * layout.width + x as usize] as usize;
+    let props = layout.sol.get(pn).copied().unwrap_or_default();
+    !props.contains(crate::engine::dungeon::TileProperties::SOLID)
 }
 
 /// C++ `PlaceGroup` (monster.cpp:308-359) + `PlaceMonster` (290-306): place a
@@ -1159,13 +1168,31 @@ fn place_dungeon_monsters(game_state: &mut GameState, spawn_x: i32, spawn_y: i32
         scatter = level_types.scatter_indices();
     }
 
-    // C++: na = non-solid tiles in the 16..96 region; numplacemonsters = na/30
-    // (single player), capped so ActiveMonsterCount stays <= MaxMonsters-10.
-    let na = layout
-        .floor_tiles
-        .iter()
-        .filter(|(x, y)| (16..96).contains(x) && (16..96).contains(y))
-        .count();
+    // C++ `InitMonsters` (monster.cpp:3706-3713): na = count of non-solid
+    // micro-tiles in the 16..96 region via `!IsTileSolid({s,t})`; single
+    // player numplacemonsters = na/30, capped at MaxMonsters-10. The SOL
+    // table makes this exact when real art is loaded; the synthetic layout
+    // falls back to the floor-tile count.
+    let na = if layout.sol.is_empty() {
+        layout
+            .floor_tiles
+            .iter()
+            .filter(|(x, y)| (16..96).contains(x) && (16..96).contains(y))
+            .count()
+    } else {
+        let mut count = 0usize;
+        for t in 16..96 {
+            for s in 16..96 {
+                let pn = layout.d_piece[t * layout.width + s] as usize;
+                let props = layout.sol.get(pn).copied().unwrap_or_default();
+                if !props.contains(crate::engine::dungeon::TileProperties::SOLID) {
+                    count += 1;
+                }
+            }
+        }
+        count
+    };
+    println!("[Monsters] na={na} (C++ non-solid 16..96)");
     if na == 0 {
         println!("[Monsters] no floor tiles in the 16..96 region; placing no monsters");
         return;
@@ -5172,6 +5199,7 @@ mod tests {
             height: 112,
             trans_val: vec![0; 112 * 112],
             pre_light: vec![15; 112 * 112],
+            sol: Vec::new(),
             floor_tiles: Vec::new(),
         };
 
@@ -5345,6 +5373,7 @@ mod tests {
                 trans_val: vec![0; w * h],
                 pre_light: vec![15; w * h],
                 floor_tiles: Vec::new(),
+                sol: Vec::new(),
             }
         }
         // L1 resolves the EntranceStairs TIL mega (index 12) from the art.

@@ -484,6 +484,10 @@ pub struct DungeonLayout {
     /// spawning to pick valid, open spawn positions away from walls. Each entry
     /// is `(x, y)` in the same micro-tile space as `d_piece`/the camera.
     pub floor_tiles: Vec<(i32, i32)>,
+    /// Per-micro-tile solidity/properties (C++ `SOLData`), indexed by `d_piece`
+    /// value. Populated from the level's `.sol` file by the layout builders;
+    /// empty on the synthetic headless layout (no art loaded).
+    pub sol: Vec<crate::engine::dungeon::TileProperties>,
 }
 
 impl Default for DungeonLayout {
@@ -497,6 +501,7 @@ impl Default for DungeonLayout {
             trans_val: vec![0; MAXDUNX * MAXDUNY],
             pre_light: vec![15; MAXDUNX * MAXDUNY],
             floor_tiles: Vec::new(),
+            sol: Vec::new(),
         }
     }
 }

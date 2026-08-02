@@ -533,9 +533,9 @@ fn replay_from_saved_state_reports_reference_diff() {
         PASSWORD_SPAWN_SINGLE,
     );
     let ref_header = CppGameHeader::parse(&reference).expect("reference header");
-    println!("[ReplayDiff] reference monsters={} items={} missiles={} objects={}",
+    println!("[ReplayDiff] reference monsters={} items={} missiles={} objects={} currlevel={} lvltype={}",
             ref_header.active_monster_count, ref_header.active_item_count,
-            ref_header.active_missile_count, ref_header.active_object_count);    let n = actual.len().min(reference.len());
+            ref_header.active_missile_count, ref_header.active_object_count, ref_header.currlevel, ref_header.leveltype);    let n = actual.len().min(reference.len());
     let first = (0..n).find(|&i| actual[i] != reference[i]);
     println!("[ReplayDiff] actual={}B reference={}B first_diff={:?}",
         actual.len(), reference.len(), first.map(|i| (i, actual[i], reference[i])));
