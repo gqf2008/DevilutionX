@@ -9,12 +9,10 @@
 #include <string_view>
 #include <vector>
 
-#include <fmt/format.h>
-
 #include "DiabloUI/ui_flags.hpp"
 #include "automap.h"
 #include "chatlog.h"
-#include "control.h"
+#include "control/control.hpp"
 #include "diablo_msg.hpp"
 #include "doom.h"
 #include "engine/render/text_render.hpp"
@@ -23,6 +21,7 @@
 #include "inv.h"
 #include "minitext.h"
 #include "stores.h"
+#include "utils/format.hpp"
 #include "utils/language.h"
 #include "utils/str_cat.hpp"
 
@@ -69,7 +68,7 @@ int DividerLineMarginY()
 
 int HeaderHeight()
 {
-	return PaddingTop + LineHeight() + 2 * BlankLineHeight() + DividerLineMarginY();
+	return PaddingTop + LineHeight() + (2 * BlankLineHeight()) + DividerLineMarginY();
 }
 
 int ContentPaddingY()
@@ -79,12 +78,12 @@ int ContentPaddingY()
 
 int ContentsTextHeight()
 {
-	return PanelHeight - HeaderHeight() - DividerLineMarginY() - 2 * ContentPaddingY() - BlankLineHeight();
+	return PanelHeight - HeaderHeight() - DividerLineMarginY() - (2 * ContentPaddingY()) - BlankLineHeight();
 }
 
 int NumVisibleLines()
 {
-	return (ContentsTextHeight() - 1) / LineHeight() + 1; // Ceil
+	return ((ContentsTextHeight() - 1) / LineHeight()) + 1; // Ceil
 }
 
 } // namespace
@@ -127,7 +126,7 @@ void AddMessageToChatLog(std::string_view message, Player *player, UiFlags flags
 	if (player == nullptr) {
 		ChatLogLines.emplace_back(MultiColoredText { "{0} {1}", { { timestamp, UiFlags::ColorRed }, { std::string(message), flags } } });
 	} else {
-		std::string playerInfo = fmt::format(fmt::runtime(_("{:s} (lvl {:d}): ")), player->_pName, player->getCharacterLevel());
+		std::string playerInfo = FormatRuntime(_("{:s} (lvl {:d}): "), player->_pName, player->getCharacterLevel());
 		UiFlags nameColor = player == MyPlayer ? UiFlags::ColorWhitegold : UiFlags::ColorBlue;
 		const std::string prefix = timestamp + " - " + playerInfo;
 		const std::string text = WordWrapString(prefix + std::string(message), ContentTextWidth);
@@ -167,7 +166,7 @@ void DrawChatLog(const Surface &out)
 	const int sx = uiPosition.x + PaddingLeft;
 	const int sy = uiPosition.y;
 
-	DrawString(out, fmt::format(fmt::runtime(_("Chat History (Messages: {:d})")), MessageCounter),
+	DrawString(out, FormatRuntime(_("Chat History (Messages: {:d})"), MessageCounter),
 	    { { sx, sy + PaddingTop + blankLineHeight }, { ContentTextWidth, lineHeight } },
 	    { .flags = (UnreadFlag ? UiFlags::ColorRed : UiFlags::ColorWhitegold) | UiFlags::AlignCenter });
 
@@ -193,9 +192,9 @@ void DrawChatLog(const Surface &out)
 
 		std::vector<DrawStringFormatArg> args;
 		for (auto &x : text.colors) {
-			args.emplace_back(DrawStringFormatArg { x.text, x.color });
+			args.emplace_back(x.text, x.color);
 		}
-		DrawStringWithColors(out, line, args, { { sx, contentY + i * lineHeight }, { ContentTextWidth, lineHeight } },
+		DrawStringWithColors(out, line, args, { { sx, contentY + (i * lineHeight) }, { ContentTextWidth, lineHeight } },
 		    { .flags = UiFlags::ColorWhite, .lineHeight = lineHeight });
 	}
 

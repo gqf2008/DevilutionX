@@ -1,21 +1,20 @@
 #include "panels/charpanel.hpp"
 
 #include <cstdint>
+#include <expected>
 
 #include <algorithm>
 #include <string>
 
-#include <expected.hpp>
-#include <fmt/format.h>
 #include <function_ref.hpp>
 
-#include "control.h"
+#include "control/control.hpp"
 #include "engine/load_clx.hpp"
 #include "engine/render/clx_render.hpp"
 #include "engine/render/text_render.hpp"
 #include "panels/ui_panels.hpp"
 #include "player.h"
-#include "playerdat.hpp"
+#include "tables/playerdat.hpp"
 #include "utils/algorithm/container.hpp"
 #include "utils/display.h"
 #include "utils/enum_traits.h"
@@ -95,8 +94,8 @@ std::pair<int, int> GetDamage()
 	} else {
 		damageMod += InspectPlayer->_pDamageMod;
 	}
-	const int mindam = InspectPlayer->_pIMinDam + InspectPlayer->_pIBonusDam * InspectPlayer->_pIMinDam / 100 + damageMod;
-	const int maxdam = InspectPlayer->_pIMaxDam + InspectPlayer->_pIBonusDam * InspectPlayer->_pIMaxDam / 100 + damageMod;
+	const int mindam = InspectPlayer->_pIMinDam + (InspectPlayer->_pIBonusDam * InspectPlayer->_pIMinDam / 100) + damageMod;
+	const int maxdam = InspectPlayer->_pIMaxDam + (InspectPlayer->_pIBonusDam * InspectPlayer->_pIMaxDam / 100) + damageMod;
 	return { mindam, maxdam };
 }
 
@@ -172,7 +171,7 @@ PanelEntry panelEntries[] = {
 	    []() { return StyledText { UiFlags::ColorWhite, FormatInteger(InspectPlayer->_pGold) }; } },
 
 	{ N_("Armor class"), { RightColumnLabelX, 163 }, 57, RightColumnLabelWidth,
-	    []() { return StyledText { GetValueColor(InspectPlayer->_pIBonusAC), StrCat(InspectPlayer->GetArmor() + InspectPlayer->getCharacterLevel() * 2) }; } },
+	    []() { return StyledText { GetValueColor(InspectPlayer->_pIBonusAC), StrCat(InspectPlayer->GetArmor() + (InspectPlayer->getCharacterLevel() * 2)) }; } },
 	{ N_("Chance To Hit"), { RightColumnLabelX, 191 }, 57, RightColumnLabelWidth,
 	    []() { return StyledText { GetValueColor(InspectPlayer->_pIBonusToHit), StrCat(InspectPlayer->InvBody[INVLOC_HAND_LEFT]._itype == ItemType::Bow ? InspectPlayer->GetRangedToHit() : InspectPlayer->GetMeleeToHit(), "%") }; } },
 	{ N_("Damage"), { RightColumnLabelX, 219 }, 57, RightColumnLabelWidth,
@@ -188,7 +187,7 @@ PanelEntry panelEntries[] = {
 	{ N_("Mana"), { LeftColumnLabelX, 312 }, 45, LeftColumnLabelWidth,
 	    []() { return StyledText { GetMaxManaColor(), StrCat(HasAnyOf(InspectPlayer->_pIFlags, ItemSpecialEffect::NoMana) ? 0 : InspectPlayer->_pMaxMana >> 6) }; } },
 	{ "", { 135, 312 }, 45, 0,
-	    []() { return StyledText { (InspectPlayer->_pMana != InspectPlayer->_pMaxMana ? UiFlags::ColorRed : GetMaxManaColor()), StrCat((HasAnyOf(InspectPlayer->_pIFlags, ItemSpecialEffect::NoMana) || (InspectPlayer->_pMana >> 6) <= 0) ? 0 : InspectPlayer->_pMana >> 6) }; } },
+	    []() { return StyledText { (InspectPlayer->_pMana != InspectPlayer->_pMaxMana ? UiFlags::ColorRed : GetMaxManaColor()), StrCat((HasAnyOf(InspectPlayer->_pIFlags, ItemSpecialEffect::NoMana) || InspectPlayer->hasNoMana()) ? 0 : InspectPlayer->_pMana >> 6) }; } },
 
 	{ N_("Resist magic"), { RightColumnLabelX, 256 }, 57, RightColumnLabelWidth,
 	    []() { return GetResistInfo(InspectPlayer->_pMagResist); } },
@@ -270,7 +269,7 @@ void DrawStatButtons(const Surface &out)
 
 } // namespace
 
-tl::expected<void, std::string> LoadCharPanel()
+std::expected<void, std::string> LoadCharPanel()
 {
 	ASSIGN_OR_RETURN(OptionalOwnedClxSpriteList background, LoadClxWithStatus("data\\charbg.clx"));
 	const OwnedSurface out((*background)[0].width(), (*background)[0].height());

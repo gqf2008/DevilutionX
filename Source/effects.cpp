@@ -6,9 +6,9 @@
 #include "effects.h"
 
 #include <cstdint>
+#include <expected>
 #include <string_view>
 
-#include <expected.hpp>
 #include <magic_enum/magic_enum.hpp>
 
 #include "data/file.hpp"
@@ -19,6 +19,7 @@
 #include "engine/sound_defs.hpp"
 #include "engine/sound_position.hpp"
 #include "game_mode.hpp"
+#include "options.h"
 #include "player.h"
 #include "utils/is_of.hpp"
 
@@ -92,8 +93,13 @@ void PlaySfxPriv(TSFX *pSFX, bool loc, Point position)
 	if (pSFX->pSnd == nullptr)
 		pSFX->pSnd = sound_file_load(pSFX->pszName.c_str());
 
-	if (pSFX->pSnd != nullptr && pSFX->pSnd->DSB.IsLoaded())
-		snd_play_snd(pSFX->pSnd.get(), lVolume, lPan);
+	if (pSFX->pSnd == nullptr || !pSFX->pSnd->DSB.IsLoaded())
+		return;
+
+	const auto id = static_cast<SfxID>(pSFX - sgSFX.data());
+	const bool useCuesVolume = (id >= SfxID::AccessibilityWeapon && id <= SfxID::AccessibilityInteract);
+	const int userVolume = useCuesVolume ? *GetOptions().Audio.audioCuesVolume : *GetOptions().Audio.soundVolume;
+	snd_play_snd(pSFX->pSnd.get(), lVolume, lPan, userVolume);
 }
 
 SfxID RndSFX(SfxID psfx)
@@ -120,7 +126,7 @@ SfxID RndSFX(SfxID psfx)
 	}
 }
 
-tl::expected<sfx_flag, std::string> ParseSfxFlag(std::string_view value)
+std::expected<sfx_flag, std::string> ParseSfxFlag(std::string_view value)
 {
 	if (value == "Stream") return sfx_STREAM;
 	if (value == "Misc") return sfx_MISC;
@@ -129,7 +135,7 @@ tl::expected<sfx_flag, std::string> ParseSfxFlag(std::string_view value)
 	if (value == "Rogue") return sfx_ROGUE;
 	if (value == "Warrior") return sfx_WARRIOR;
 	if (value == "Sorcerer") return sfx_SORCERER;
-	return tl::make_unexpected("Unknown enum value");
+	return std::unexpected("Unknown enum value");
 }
 
 void LoadEffectsData()
@@ -246,9 +252,14 @@ void sound_update()
 	StreamUpdate();
 }
 
-void effects_cleanup_sfx()
+void effects_cleanup_sfx(bool fullUnload)
 {
 	sound_stop();
+
+	if (fullUnload) {
+		sgSFX.clear();
+		return;
+	}
 
 	for (auto &sfx : sgSFX)
 		sfx.pSnd = nullptr;
@@ -305,7 +316,7 @@ void effects_play_sound(SfxID id)
 
 	TSFX &sfx = sgSFX[static_cast<int16_t>(id)];
 	if (sfx.pSnd != nullptr && !sfx.pSnd->isPlaying()) {
-		snd_play_snd(sfx.pSnd.get(), 0, 0);
+		snd_play_snd(sfx.pSnd.get(), 0, 0, *GetOptions().Audio.soundVolume);
 	}
 }
 
@@ -318,22 +329,22 @@ int GetSFXLength(SfxID nSFX)
 	return sfx.pSnd->DSB.GetLength();
 }
 
-tl::expected<HeroSpeech, std::string> ParseHeroSpeech(std::string_view value)
+std::expected<HeroSpeech, std::string> ParseHeroSpeech(std::string_view value)
 {
 	const std::optional<HeroSpeech> enumValueOpt = magic_enum::enum_cast<HeroSpeech>(value);
 	if (enumValueOpt.has_value()) {
 		return enumValueOpt.value();
 	}
-	return tl::make_unexpected("Unknown enum value.");
+	return std::unexpected("Unknown enum value.");
 }
 
-tl::expected<SfxID, std::string> ParseSfxId(std::string_view value)
+std::expected<SfxID, std::string> ParseSfxId(std::string_view value)
 {
 	const std::optional<SfxID> enumValueOpt = magic_enum::enum_cast<SfxID>(value);
 	if (enumValueOpt.has_value()) {
 		return enumValueOpt.value();
 	}
-	return tl::make_unexpected("Unknown enum value.");
+	return std::unexpected("Unknown enum value.");
 }
 
 } // namespace devilution

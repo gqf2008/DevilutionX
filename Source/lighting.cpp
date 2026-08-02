@@ -8,10 +8,9 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <expected>
 #include <numeric>
 #include <string>
-
-#include <expected.hpp>
 
 #include "automap.h"
 #include "engine/displacement.hpp"
@@ -221,7 +220,7 @@ void DoVision(Point position, uint8_t radius, MapExplorationType doAutomap, bool
 	DoVision(position, radius, markVisibleFn, markTransparentFn, passesLightFn, inBoundsFn);
 }
 
-tl::expected<void, std::string> LoadTrns()
+std::expected<void, std::string> LoadTrns()
 {
 	RETURN_IF_ERROR(LoadFileInMemWithStatus("plrgfx\\infra.trn", InfravisionTable));
 	RETURN_IF_ERROR(LoadFileInMemWithStatus("plrgfx\\stone.trn", StoneTable));
@@ -318,9 +317,9 @@ void MakeLightTable()
 		for (int offsetX = 0; offsetX < 8; offsetX++) {
 			for (int y = 0; y < 16; y++) {
 				for (int x = 0; x < 16; x++) {
-					const int a = (8 * x - offsetX);
-					const int b = (8 * y - offsetY);
-					LightConeInterpolations[offsetX][offsetY][x][y] = static_cast<uint8_t>(sqrt(a * a + b * b));
+					const int a = ((8 * x) - offsetX);
+					const int b = ((8 * y) - offsetY);
+					LightConeInterpolations[offsetX][offsetY][x][y] = static_cast<uint8_t>(sqrt((a * a) + (b * b)));
 				}
 			}
 		}

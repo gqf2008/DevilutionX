@@ -13,8 +13,8 @@
 #include "inv.h"
 #include "minitext.h"
 #include "stores.h"
-#include "textdat.h"
-#include "townerdat.hpp"
+#include "tables/textdat.h"
+#include "tables/townerdat.hpp"
 #include "utils/is_of.hpp"
 #include "utils/language.h"
 #include "utils/str_case.hpp"
@@ -367,8 +367,9 @@ void TalkToWitch(Player &player, Towner & /*witch*/)
 				}
 			}
 			if (Quests[Q_MUSHROOM]._qvar1 >= QS_MUSHGIVEN) {
-				if (HasInventoryItemWithId(player, IDI_BRAIN)) {
+				if (HasInventoryItemWithId(player, IDI_BRAIN) && Quests[Q_MUSHROOM]._qvar2 != TEXT_MUSH11) {
 					Quests[Q_MUSHROOM]._qmsg = TEXT_MUSH11;
+					Quests[Q_MUSHROOM]._qvar2 = TEXT_MUSH11;
 					NetSendCmdQuest(true, Quests[Q_MUSHROOM]);
 					InitQTextMsg(TEXT_MUSH11);
 					return;
@@ -703,6 +704,22 @@ const TownerData TownersData[] = {
 std::vector<Towner> Towners;
 
 std::unordered_map<_talker_id, std::string> TownerLongNames;
+
+const std::unordered_map<_talker_id, const char *> TownerShortNames = {
+	{ TOWN_SMITH, "griswold" },
+	{ TOWN_HEALER, "pepin" },
+	{ TOWN_DEADGUY, "deadguy" },
+	{ TOWN_TAVERN, "ogden" },
+	{ TOWN_STORY, "cain" },
+	{ TOWN_DRUNK, "farnham" },
+	{ TOWN_WITCH, "adria" },
+	{ TOWN_BMAID, "gillian" },
+	{ TOWN_PEGBOY, "wirt" },
+	{ TOWN_COW, "cow" },
+	{ TOWN_FARMER, "lester" },
+	{ TOWN_GIRL, "celia" },
+	{ TOWN_COWFARM, "nut" },
+};
 
 size_t GetNumTownerTypes()
 {

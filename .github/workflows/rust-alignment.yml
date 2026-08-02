@@ -43,7 +43,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y g++
       - name: Build L4 standalone repro (current Source/levels/drlg_l4.cpp)
         run: |
-          g++ -std=c++20 -O2 -I devilutionx-rs/tools/l4repro/stubs \
+          # Upstream Source/ uses std::expected (C++23) since the tl::expected -> std::expected migration.
+          g++ -std=c++23 -O2 -I devilutionx-rs/tools/l4repro/stubs \
               -I devilutionx-rs/tools/l3repro/stubs -I devilutionx-rs/tools/l2repro/stubs \
               -I Source -I 3rdParty/tl \
               devilutionx-rs/tools/l4repro/main.cpp devilutionx-rs/tools/l4repro/drlg_l4.cpp \

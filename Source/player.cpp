@@ -14,9 +14,7 @@
 #include <SDL.h>
 #endif
 
-#include <fmt/core.h>
-
-#include "control.h"
+#include "control/control.hpp"
 #include "controls/control_mode.hpp"
 #include "controls/plrctrls.h"
 #include "cursor.h"
@@ -41,6 +39,7 @@
 #include "levels/trigs.h"
 #include "lighting.h"
 #include "loadsave.h"
+#include "lua/lua_event.hpp"
 #include "minitext.h"
 #include "missiles.h"
 #include "monster.h"
@@ -49,11 +48,11 @@
 #include "options.h"
 #include "player.h"
 #include "qol/autopickup.h"
-#include "qol/floatingnumbers.h"
 #include "qol/stash.h"
 #include "spells.h"
 #include "stores.h"
 #include "towners.h"
+#include "utils/format.hpp"
 #include "utils/is_of.hpp"
 #include "utils/language.h"
 #include "utils/log.hpp"
@@ -156,7 +155,7 @@ void StartWalkAnimation(Player &player, Direction dir, bool pmWillBeCalled)
  */
 void StartWalk(Player &player, Direction dir, bool pmWillBeCalled)
 {
-	if (player._pInvincible && player._pHitPoints == 0 && &player == MyPlayer) {
+	if (player._pInvincible && player.hasNoLife() && &player == MyPlayer) {
 		SyncPlrKill(player, DeathReason::Unknown);
 		return;
 	}
@@ -174,7 +173,7 @@ void ClearStateVariables(Player &player)
 
 void StartAttack(Player &player, Direction d, bool includesFirstFrame)
 {
-	if (player._pInvincible && player._pHitPoints == 0 && &player == MyPlayer) {
+	if (player._pInvincible && player.hasNoLife() && &player == MyPlayer) {
 		SyncPlrKill(player, DeathReason::Unknown);
 		return;
 	}
@@ -206,7 +205,7 @@ void StartAttack(Player &player, Direction d, bool includesFirstFrame)
 
 void StartRangeAttack(Player &player, Direction d, WorldTileCoord cx, WorldTileCoord cy, bool includesFirstFrame)
 {
-	if (player._pInvincible && player._pHitPoints == 0 && &player == MyPlayer) {
+	if (player._pInvincible && player.hasNoLife() && &player == MyPlayer) {
 		SyncPlrKill(player, DeathReason::Unknown);
 		return;
 	}
@@ -248,7 +247,7 @@ player_graphic GetPlayerGraphicForSpell(SpellID spellId)
 
 void StartSpell(Player &player, Direction d, WorldTileCoord cx, WorldTileCoord cy)
 {
-	if (player._pInvincible && player._pHitPoints == 0 && &player == MyPlayer) {
+	if (player._pInvincible && player.hasNoLife() && &player == MyPlayer) {
 		SyncPlrKill(player, DeathReason::Unknown);
 		return;
 	}
@@ -690,7 +689,7 @@ bool PlrHitMonst(Player &player, Monster &monster, bool adjacentDamage = false)
 		}
 		RedrawComponent(PanelDrawComponent::Health);
 	}
-	if ((monster.hitPoints >> 6) <= 0) {
+	if (monster.hasNoLife()) {
 		M_StartKill(monster, player);
 	} else {
 		if (monster.mode != MonsterMode::Petrified && HasAnyOf(player._pIFlags, ItemSpecialEffect::Knockback))
@@ -795,15 +794,6 @@ bool DoAttack(Player &player)
 			}
 		}
 
-		if (!gbIsHellfire || !HasAllOf(player._pIFlags, ItemSpecialEffect::FireDamage | ItemSpecialEffect::LightningDamage)) {
-			if (HasAnyOf(player._pIFlags, ItemSpecialEffect::FireDamage)) {
-				AddMissile(position, { 1, 0 }, Direction::South, MissileID::WeaponExplosion, TARGET_MONSTERS, player, 0, 0);
-			}
-			if (HasAnyOf(player._pIFlags, ItemSpecialEffect::LightningDamage)) {
-				AddMissile(position, { 2, 0 }, Direction::South, MissileID::WeaponExplosion, TARGET_MONSTERS, player, 0, 0);
-			}
-		}
-
 		if (monster != nullptr) {
 			didhit = PlrHitMonst(player, *monster);
 		} else if (PlayerAtPosition(position) != nullptr && !player.friendlyMode) {
@@ -814,6 +804,18 @@ bool DoAttack(Player &player)
 				didhit = PlrHitObj(player, *object);
 			}
 		}
+
+		if (!gbIsHellfire || !HasAllOf(player._pIFlags, ItemSpecialEffect::FireDamage | ItemSpecialEffect::LightningDamage)) {
+			if (HasAnyOf(player._pIFlags, ItemSpecialEffect::FireDamage)) {
+				int elementalDamage = didhit ? RandomIntBetween(player._pIFMinDam, player._pIFMaxDam) : 0;
+				AddMissile(position, { 1, 0 }, Direction::South, MissileID::WeaponExplosion, TARGET_MONSTERS, player, elementalDamage, 0);
+			}
+			if (HasAnyOf(player._pIFlags, ItemSpecialEffect::LightningDamage)) {
+				int elementalDamage = didhit ? RandomIntBetween(player._pILMinDam, player._pILMaxDam) : 0;
+				AddMissile(position, { 2, 0 }, Direction::South, MissileID::WeaponExplosion, TARGET_MONSTERS, player, elementalDamage, 0);
+			}
+		}
+
 		if (player.CanCleave()) {
 			// playing as a class/weapon with cleave
 			position = player.position.tile + Right(player._pdir);
@@ -1073,7 +1075,7 @@ void TryDisarm(const Player &player, Object &object)
 	if (!object._oTrapFlag) {
 		return;
 	}
-	const int trapdisper = 2 * player._pDexterity - 5 * currlevel;
+	const int trapdisper = (2 * player._pDexterity) - (5 * currlevel);
 	if (GenerateRnd(100) > trapdisper) {
 		return;
 	}
@@ -1106,7 +1108,7 @@ void CheckNewPath(Player &player, bool pmWillBeCalled)
 	case ACTION_RATTACKMON:
 	case ACTION_SPELLMON:
 		monster = &Monsters[targetId];
-		if ((monster->hitPoints >> 6) <= 0) {
+		if (monster->hasNoLife()) {
 			player.Stop();
 			return;
 		}
@@ -1117,7 +1119,7 @@ void CheckNewPath(Player &player, bool pmWillBeCalled)
 	case ACTION_RATTACKPLR:
 	case ACTION_SPELLPLR:
 		target = &Players[targetId];
-		if ((target->_pHitPoints >> 6) <= 0) {
+		if (target->hasNoLife()) {
 			player.Stop();
 			return;
 		}
@@ -1455,7 +1457,7 @@ void ValidatePlayer()
 	}
 
 	uint64_t msk = 0;
-	for (size_t b = static_cast<size_t>(SpellID::Firebolt); b < SpellsData.size(); b++) {
+	for (auto b = static_cast<size_t>(SpellID::Firebolt); b < SpellsData.size(); b++) {
 		if (GetSpellBookLevel((SpellID)b) != -1) {
 			msk |= GetSpellBitmask(static_cast<SpellID>(b));
 			if (myPlayer._pSplLvl[b] > MaxSpellLevel)
@@ -1736,7 +1738,7 @@ bool Player::isWalking() const
 int Player::GetManaShieldDamageReduction()
 {
 	constexpr uint8_t Max = 7;
-	return 24 - std::min(_pSplLvl[static_cast<int8_t>(SpellID::ManaShield)], Max) * 3;
+	return 24 - (std::min(_pSplLvl[static_cast<int8_t>(SpellID::ManaShield)], Max) * 3);
 }
 
 void Player::RestorePartialLife()
@@ -1906,11 +1908,6 @@ void Player::UpdatePreviewCelSprite(_cmd_id cmdId, Point point, uint16_t wParam1
 		graphic = player_graphic::Attack;
 		break;
 	}
-	case _cmd_id::CMD_ATTACKXY:
-		dir = GetDirection(position.tile, point);
-		graphic = player_graphic::Attack;
-		minimalWalkDistance = 2;
-		break;
 	case _cmd_id::CMD_RATTACKXY:
 	case _cmd_id::CMD_SATTACKXY:
 		dir = GetDirection(position.tile, point);
@@ -2069,7 +2066,7 @@ ClxSprite GetPlayerPortraitSprite(Player &player)
 	std::string_view szCel = inDungeon ? "as" : "st";
 
 	player_graphic graphic = player_graphic::Stand;
-	if (player._pHitPoints <= 0) {
+	if (player.hasNoLife()) {
 		if (animWeaponId == PlayerWeaponGraphic::Unarmed) {
 			szCel = "dt";
 			graphic = player_graphic::Death;
@@ -2113,7 +2110,7 @@ void LoadPlrGFX(Player &player, player_graphic graphic)
 		return;
 
 	const HeroClass cls = GetPlayerSpriteClass(player._pClass);
-	const PlayerWeaponGraphic animWeaponId = GetPlayerWeaponGraphic(graphic, static_cast<PlayerWeaponGraphic>(player._pgfxnum & 0xF));
+	PlayerWeaponGraphic animWeaponId = GetPlayerWeaponGraphic(graphic, static_cast<PlayerWeaponGraphic>(player._pgfxnum & 0xF));
 
 	const PlayerSpriteData &spriteData = GetPlayerSpriteDataForClass(cls);
 	const char *path = spriteData.classPath.c_str();
@@ -2150,8 +2147,8 @@ void LoadPlrGFX(Player &player, player_graphic graphic)
 		szCel = "qm";
 		break;
 	case player_graphic::Death:
-		if (animWeaponId != PlayerWeaponGraphic::Unarmed)
-			return;
+		// Only one Death animation exists, for unarmed characters
+		animWeaponId = PlayerWeaponGraphic::Unarmed;
 		szCel = "dt";
 		break;
 	case player_graphic::Block:
@@ -2187,7 +2184,7 @@ void InitPlayerGFX(Player &player)
 
 	ResetPlayerGFX(player);
 
-	if (player._pHitPoints >> 6 == 0) {
+	if (player.hasNoLife()) {
 		player._pgfxnum &= ~0xFU;
 		LoadPlrGFX(player, player_graphic::Death);
 		return;
@@ -2430,7 +2427,7 @@ void NextPlrLevel(Player &player)
 
 void Player::_addExperience(uint32_t experience, int levelDelta)
 {
-	if (this != MyPlayer || _pHitPoints <= 0)
+	if (this != MyPlayer || hasNoLife())
 		return;
 
 	if (isMaxCharacterLevel()) {
@@ -2446,6 +2443,8 @@ void Player::_addExperience(uint32_t experience, int levelDelta)
 		// for high level characters experience gain is capped to 200 * current level - this is a smaller value than 1/20 of the exp needed for the next level after level 5.
 		clampedExp = std::min<uint32_t>({ clampedExp, /* level 1-5: */ getNextExperienceThreshold() / 20U, /* level 6-50: */ 200U * getCharacterLevel() });
 	}
+
+	lua::OnPlayerGainExperience(this, clampedExp);
 
 	const uint32_t maxExperience = GetNextExperienceThresholdForLevel(getMaxCharacterLevel());
 
@@ -2495,13 +2494,15 @@ void InitPlayer(Player &player, bool firstTime)
 		player.wReflections = 0;
 	}
 
+	player.lightId = NO_LIGHT;
+
 	if (player.isOnActiveLevel()) {
 
 		SetPlrAnims(player);
 
 		ClearStateVariables(player);
 
-		if (player._pHitPoints >> 6 > 0) {
+		if (!player.hasNoLife()) {
 			player._pmode = PM_STAND;
 			NewPlrAnim(player, player_graphic::Stand, Direction::South);
 			player.AnimInfo.currentFrame = GenerateRnd(player._pNFrames - 1);
@@ -2526,8 +2527,6 @@ void InitPlayer(Player &player, bool firstTime)
 		if (&player == MyPlayer) {
 			player.lightId = AddLight(player.position.tile, player._pLightRad);
 			ChangeLightXY(player.lightId, player.position.tile); // fix for a bug where old light is still visible at the entrance after reentering level
-		} else {
-			player.lightId = NO_LIGHT;
 		}
 		ActivateVision(player.position.tile, player._pLightRad, player.getId());
 	}
@@ -2590,7 +2589,7 @@ void FixPlayerLocation(Player &player, Direction bDir)
 
 void StartStand(Player &player, Direction dir)
 {
-	if (player._pInvincible && player._pHitPoints == 0 && &player == MyPlayer) {
+	if (player._pInvincible && player.hasNoLife() && &player == MyPlayer) {
 		SyncPlrKill(player, DeathReason::Unknown);
 		return;
 	}
@@ -2605,7 +2604,7 @@ void StartStand(Player &player, Direction dir)
 
 void StartPlrBlock(Player &player, Direction dir)
 {
-	if (player._pInvincible && player._pHitPoints == 0 && &player == MyPlayer) {
+	if (player._pInvincible && player.hasNoLife() && &player == MyPlayer) {
 		SyncPlrKill(player, DeathReason::Unknown);
 		return;
 	}
@@ -2639,7 +2638,7 @@ void FixPlrWalkTags(const Player &player)
 
 void StartPlrHit(Player &player, int dam, bool forcehit)
 {
-	if (player._pInvincible && player._pHitPoints == 0 && &player == MyPlayer) {
+	if (player._pInvincible && player.hasNoLife() && &player == MyPlayer) {
 		SyncPlrKill(player, DeathReason::Unknown);
 		return;
 	}
@@ -2683,7 +2682,7 @@ __attribute__((no_sanitize("shift-base")))
 void
 StartPlayerKill(Player &player, DeathReason deathReason)
 {
-	if (player._pHitPoints <= 0 && player._pmode == PM_DEATH) {
+	if (player.hasNoLife() && player._pmode == PM_DEATH) {
 		return;
 	}
 
@@ -2748,7 +2747,7 @@ StartPlayerKill(Player &player, DeathReason deathReason)
 			if (dropEar) {
 				Item ear;
 				InitializeItem(ear, IDI_EAR);
-				CopyUtf8(ear._iName, fmt::format(fmt::runtime("Ear of {:s}"), player._pName), sizeof(ear._iName));
+				CopyUtf8(ear._iName, FormatRuntime("Ear of {:s}", player._pName), sizeof(ear._iName));
 				CopyUtf8(ear._iIName, player._pName, ItemNameLength);
 				switch (player._pClass) {
 				case HeroClass::Sorcerer:
@@ -2826,8 +2825,8 @@ void StripTopGold(Player &player)
 void ApplyPlrDamage(DamageType damageType, Player &player, int dam, int minHP /*= 0*/, int frac /*= 0*/, DeathReason deathReason /*= DeathReason::MonsterOrTrap*/)
 {
 	int totalDamage = (dam << 6) + frac;
-	if (&player == MyPlayer && player._pHitPoints > 0) {
-		AddFloatingNumber(damageType, player, totalDamage);
+	if (&player == MyPlayer && !player.hasNoLife()) {
+		lua::OnPlayerTakeDamage(&player, totalDamage, static_cast<int>(damageType));
 	}
 	if (totalDamage > 0 && player.pManaShield && HasNoneOf(player._pIFlags, ItemSpecialEffect::NoMana)) {
 		const uint8_t manaShieldLevel = player._pSplLvl[static_cast<int8_t>(SpellID::ManaShield)];
@@ -2866,18 +2865,13 @@ void ApplyPlrDamage(DamageType damageType, Player &player, int dam, int minHP /*
 	if (player._pHitPoints < minHitPoints) {
 		SetPlayerHitPoints(player, minHitPoints);
 	}
-	if (player._pHitPoints >> 6 <= 0) {
+	if (player.hasNoLife()) {
 		SyncPlrKill(player, deathReason);
 	}
 }
 
 void SyncPlrKill(Player &player, DeathReason deathReason)
 {
-	if (player._pHitPoints <= 0 && leveltype == DTYPE_TOWN) {
-		SetPlayerHitPoints(player, 64);
-		return;
-	}
-
 	SetPlayerHitPoints(player, 0);
 	StartPlayerKill(player, deathReason);
 }
@@ -3024,7 +3018,7 @@ void ProcessPlayers()
 	for (size_t pnum = 0; pnum < Players.size(); pnum++) {
 		Player &player = Players[pnum];
 		if (player.plractive && player.isOnActiveLevel() && (&player == MyPlayer || !player._pLvlChanging)) {
-			if (!PlrDeathModeOK(player) && (player._pHitPoints >> 6) <= 0) {
+			if (!PlrDeathModeOK(player) && player.hasNoLife()) {
 				SyncPlrKill(player, DeathReason::Unknown);
 			}
 
@@ -3100,7 +3094,7 @@ bool PosOkPlayer(const Player &player, Point position)
 	if (!IsTileWalkable(position))
 		return false;
 	Player *otherPlayer = PlayerAtPosition(position);
-	if (otherPlayer != nullptr && otherPlayer != &player && otherPlayer->_pHitPoints != 0)
+	if (otherPlayer != nullptr && otherPlayer != &player && !otherPlayer->hasNoLife())
 		return false;
 
 	if (dMonster[position.x][position.y] != 0) {
@@ -3110,7 +3104,7 @@ bool PosOkPlayer(const Player &player, Point position)
 		if (dMonster[position.x][position.y] <= 0) {
 			return false;
 		}
-		if ((Monsters[dMonster[position.x][position.y] - 1].hitPoints >> 6) > 0) {
+		if (!Monsters[dMonster[position.x][position.y] - 1].hasNoLife()) {
 			return false;
 		}
 	}
@@ -3216,7 +3210,7 @@ void CheckPlrSpell(bool isShiftHeld, SpellID spellID, SpellType spellType)
 	} else if (pcursmonst != -1 && !isShiftHeld) {
 		LastPlayerAction = PlayerActionType::SpellMonsterTarget;
 		NetSendCmdParam4(true, CMD_SPELLID, pcursmonst, static_cast<int8_t>(spellID), static_cast<uint8_t>(spellType), spellFrom);
-	} else if (PlayerUnderCursor != nullptr && !isShiftHeld && !myPlayer.friendlyMode) {
+	} else if (PlayerUnderCursor != nullptr && !PlayerUnderCursor->hasNoLife() && !isShiftHeld && !myPlayer.friendlyMode) {
 		LastPlayerAction = PlayerActionType::SpellPlayerTarget;
 		NetSendCmdParam4(true, CMD_SPELLPID, PlayerUnderCursor->getId(), static_cast<int8_t>(spellID), static_cast<uint8_t>(spellType), spellFrom);
 	} else {

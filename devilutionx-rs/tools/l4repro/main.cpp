@@ -271,7 +271,7 @@ void Make_SetPC(WorldTileRectangle) {}
 void DoLighting(Point, int, Point) {}
 void AddL3Objs(int, int, int, int) {}
 void InitLevels() {}
-void LoadDungeonBase(const char *, Point, int, int) {}
+std::expected<void, std::string> LoadDungeonBase(const char *, Point, int, int) { return {}; }
 
 void DRLG_PlaceThemeRooms(int minSize, int maxSize, int floor, int freq, bool rndSize)
 {

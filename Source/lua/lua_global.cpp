@@ -1,17 +1,33 @@
 #include "lua/lua_global.hpp"
 
+#include <algorithm>
+#include <expected>
 #include <optional>
+#include <string>
 #include <string_view>
+#include <vector>
 
 #include <ankerl/unordered_dense.h>
+#include <function_ref.hpp>
+#include <sol/bytecode.hpp>
 #include <sol/debug.hpp>
-#include <sol/sol.hpp>
+#include <sol/environment.hpp>
+#include <sol/forward.hpp>
+#include <sol/function_types_templated.hpp>
+#include <sol/protected_function.hpp>
+#include <sol/stack_push.hpp>
+#include <sol/state.hpp>
+#include <sol/table.hpp>
+#include <sol/types.hpp>
 
 #include <config.h>
 
 #include "appfat.h"
+#include "effects.h"
 #include "engine/assets.hpp"
+#include "lua/lua_event.hpp"
 #include "lua/modules/audio.hpp"
+#include "lua/modules/floatingnumbers.hpp"
 #include "lua/modules/hellfire.hpp"
 #include "lua/modules/i18n.hpp"
 #include "lua/modules/items.hpp"
@@ -19,9 +35,11 @@
 #include "lua/modules/monsters.hpp"
 #include "lua/modules/player.hpp"
 #include "lua/modules/render.hpp"
+#include "lua/modules/system.hpp"
 #include "lua/modules/towners.hpp"
 #include "options.h"
 #include "plrmsg.h"
+#include "stores.h"
 #include "utils/console.h"
 #include "utils/log.hpp"
 #include "utils/str_cat.hpp"
@@ -35,12 +53,23 @@ namespace devilution {
 
 namespace {
 
+void LuaPanic(const std::optional<std::string> &message)
+{
+	LogError("Lua is in a panic state and will now abort() the application:\n{}",
+	    message.value_or("unknown error"));
+}
+
 struct LuaState {
-	sol::state sol = {};
-	sol::table commonPackages = {};
-	ankerl::unordered_dense::segmented_map<std::string, sol::bytecode> compiledScripts = {};
-	sol::environment sandbox = {};
-	sol::table events = {};
+	sol::state sol;
+	sol::table commonPackages;
+	ankerl::unordered_dense::segmented_map<std::string, sol::bytecode> compiledScripts;
+	sol::environment sandbox;
+	sol::table events;
+
+	LuaState()
+	    : sol(sol::c_call<decltype(&LuaPanic), &LuaPanic>)
+	{
+	}
 };
 
 std::optional<LuaState> CurrentLuaState;
@@ -68,6 +97,9 @@ end
 
 sol::object LuaLoadScriptFromAssets(std::string_view packageName)
 {
+	if (!CurrentLuaState.has_value()) {
+		app_fatal("Lua state is not initialized");
+	}
 	LuaState &luaState = *CurrentLuaState;
 	constexpr std::string_view PathPrefix = "lua\\";
 	constexpr std::string_view PathSuffix = ".lua";
@@ -81,7 +113,7 @@ sol::object LuaLoadScriptFromAssets(std::string_view packageName)
 		return luaState.sol.load(iter->second.as_string_view(), path, sol::load_mode::binary);
 	}
 
-	tl::expected<AssetData, std::string> assetData = LoadAsset(path);
+	std::expected<AssetData, std::string> assetData = LoadIntegralAsset(path);
 	if (!assetData.has_value()) {
 		sol::stack::push(luaState.sol.lua_state(), assetData.error());
 		return sol::stack_object(luaState.sol.lua_state(), -1);
@@ -112,7 +144,7 @@ int LuaPrint(lua_State *state)
 	return 0;
 }
 
-void LuaWarn(void *userData, const char *message, int continued)
+void LuaWarn(void * /*userData*/, const char *message, int continued)
 {
 	static std::string warnBuffer;
 	warnBuffer.append(message);
@@ -139,12 +171,6 @@ sol::object RunScript(std::optional<sol::environment> env, std::string_view pack
 	return SafeCallResult(fn(), optional);
 }
 
-void LuaPanic(sol::optional<std::string> message)
-{
-	LogError("Lua is in a panic state and will now abort() the application:\n{}",
-	    message.value_or("unknown error"));
-}
-
 } // namespace
 
 void Sol2DebugPrintStack(lua_State *state)
@@ -160,7 +186,7 @@ void Sol2DebugPrintSection(const std::string &message, lua_State *state)
 sol::environment CreateLuaSandbox()
 {
 	sol::state &lua = CurrentLuaState->sol;
-	sol::environment sandbox(CurrentLuaState->sol, sol::create);
+	sol::environment sandbox(lua, sol::create);
 
 	// Registering globals
 	sandbox.set(
@@ -200,6 +226,9 @@ sol::environment CreateLuaSandbox()
 
 	sandbox["require"] = lua["requireGen"](sandbox, CurrentLuaState->commonPackages, LuaLoadScriptFromAssets);
 
+	// Expose commonly used enums globally for mods
+	sandbox["SfxID"] = lua["SfxID"];
+
 	return sandbox;
 }
 
@@ -213,6 +242,8 @@ void LuaReloadActiveMods()
 	// Loaded without a sandbox.
 	CurrentLuaState->events = RunScript(/*env=*/std::nullopt, "devilutionx.events", /*optional=*/false);
 	CurrentLuaState->commonPackages["devilutionx.events"] = CurrentLuaState->events;
+
+	ClearTownerDialogOptions();
 
 	gbIsHellfire = false;
 	UnloadModArchives();
@@ -229,6 +260,13 @@ void LuaReloadActiveMods()
 		handler();
 	}
 
+	// Reload sound effects in case a mod archive overrides effects.tsv
+	effects_cleanup_sfx();
+	if (gbRunGame)
+		sound_init();
+	else
+		ui_sound_init();
+
 	// Reload game data (this can probably be done later in the process to avoid having to reload it)
 	LoadTextData();
 	LoadPlayerDataFiles();
@@ -239,12 +277,12 @@ void LuaReloadActiveMods()
 	LoadObjectData();
 	LoadQuestData();
 
-	LuaEvent("LoadModsComplete");
+	lua::LoadModsComplete();
 }
 
 void LuaInitialize()
 {
-	CurrentLuaState.emplace(LuaState { .sol = { sol::c_call<decltype(&LuaPanic), &LuaPanic> } });
+	CurrentLuaState.emplace();
 	sol::state &lua = CurrentLuaState->sol;
 	lua_setwarnf(lua.lua_state(), LuaWarn, /*ud=*/nullptr);
 	lua.open_libraries(
@@ -275,6 +313,8 @@ void LuaInitialize()
 	    "devilutionx.render", LuaRenderModule(lua),
 	    "devilutionx.towners", LuaTownersModule(lua),
 	    "devilutionx.hellfire", LuaHellfireModule(lua),
+	    "devilutionx.system", LuaSystemModule(lua),
+	    "devilutionx.floatingnumbers", LuaFloatingNumbersModule(lua),
 	    "devilutionx.message", [](std::string_view text) { EventPlrMsg(text, UiFlags::ColorRed); },
 	    // This package is loaded without a sandbox:
 	    "inspect", RunScript(/*env=*/std::nullopt, "inspect", /*optional=*/false));
@@ -294,22 +334,15 @@ void LuaShutdown()
 #ifdef _DEBUG
 	LuaReplShutdown();
 #endif
+	// Must clear before destroying the Lua state: registered callbacks
+	// capture sol::function handles that reference CurrentLuaState.
+	ClearTownerDialogOptions();
 	CurrentLuaState = std::nullopt;
 }
 
-void LuaEvent(std::string_view name)
+sol::table *GetLuaEvents()
 {
-	if (!CurrentLuaState.has_value()) {
-		return;
-	}
-
-	const auto trigger = CurrentLuaState->events.traverse_get<std::optional<sol::object>>(name, "trigger");
-	if (!trigger.has_value() || !trigger->is<sol::protected_function>()) {
-		LogError("events.{}.trigger is not a function", name);
-		return;
-	}
-	const sol::protected_function fn = trigger->as<sol::protected_function>();
-	SafeCallResult(fn(), /*optional=*/true);
+	return CurrentLuaState ? &CurrentLuaState->events : nullptr;
 }
 
 sol::state &GetLuaState()

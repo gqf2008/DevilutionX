@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <expected>
 #include <memory>
 
 #ifdef USE_SDL3
@@ -11,8 +12,6 @@
 #include <SDL.h>
 #endif
 
-#include <expected.hpp>
-
 #include "player.h"
 
 namespace devilution {
@@ -20,7 +19,7 @@ namespace net {
 
 void base::process_network_packets()
 {
-	tl::expected<void, PacketError> result = poll();
+	std::expected<void, PacketError> result = poll();
 	if (!result.has_value()) {
 		LogVerbose("Error polling network: {}", result.error().what());
 	}
@@ -61,7 +60,7 @@ void base::DisconnectNet(plr_t plr)
 {
 }
 
-tl::expected<void, PacketError> base::SendEchoRequest(plr_t player)
+std::expected<void, PacketError> base::SendEchoRequest(plr_t player)
 {
 	if (plr_self == PLR_BROADCAST)
 		return {};
@@ -69,29 +68,29 @@ tl::expected<void, PacketError> base::SendEchoRequest(plr_t player)
 		return {};
 
 	const timestamp_t now = SDL_GetTicks();
-	tl::expected<std::unique_ptr<packet>, PacketError> pkt
+	std::expected<std::unique_ptr<packet>, PacketError> pkt
 	    = pktfty->make_packet<PT_ECHO_REQUEST>(plr_self, player, now);
 	if (!pkt.has_value()) {
-		return tl::make_unexpected(pkt.error());
+		return std::unexpected(pkt.error());
 	}
 	return send(**pkt);
 }
 
-tl::expected<void, PacketError> base::HandleAccept(packet &pkt)
+std::expected<void, PacketError> base::HandleAccept(packet &pkt)
 {
 	if (plr_self != PLR_BROADCAST) {
 		return {}; // already have player id
 	}
 	if (pkt.Cookie() == cookie_self) {
-		tl::expected<plr_t, PacketError> newPlayerPkt = pkt.NewPlayer();
+		std::expected<plr_t, PacketError> newPlayerPkt = pkt.NewPlayer();
 		if (!newPlayerPkt.has_value())
-			return tl::make_unexpected(newPlayerPkt.error());
+			return std::unexpected(newPlayerPkt.error());
 		plr_self = *std::move(newPlayerPkt);
 		Connect(plr_self);
 	}
-	tl::expected<const buffer_t *, PacketError> infoPkt = pkt.Info();
+	std::expected<const buffer_t *, PacketError> infoPkt = pkt.Info();
 	if (!infoPkt.has_value())
-		return tl::make_unexpected(infoPkt.error());
+		return std::unexpected(infoPkt.error());
 	const buffer_t &info = **infoPkt;
 	if (game_init_info != info) {
 		if (info.size() != sizeof(GameData)) {
@@ -109,14 +108,14 @@ tl::expected<void, PacketError> base::HandleAccept(packet &pkt)
 	return {};
 }
 
-tl::expected<void, PacketError> base::HandleConnect(packet &pkt)
+std::expected<void, PacketError> base::HandleConnect(packet &pkt)
 {
 	return pkt.NewPlayer().transform([this](plr_t &&newPlayer) {
 		Connect(newPlayer);
 	});
 }
 
-tl::expected<void, PacketError> base::HandleTurn(packet &pkt)
+std::expected<void, PacketError> base::HandleTurn(packet &pkt)
 {
 	const plr_t src = pkt.Source();
 	PlayerState &playerState = playerStateTable_[src];
@@ -127,17 +126,17 @@ tl::expected<void, PacketError> base::HandleTurn(packet &pkt)
 	});
 }
 
-tl::expected<void, PacketError> base::HandleDisconnect(packet &pkt)
+std::expected<void, PacketError> base::HandleDisconnect(packet &pkt)
 {
-	tl::expected<plr_t, PacketError> newPlayer = pkt.NewPlayer();
+	std::expected<plr_t, PacketError> newPlayer = pkt.NewPlayer();
 	if (!newPlayer.has_value())
-		return tl::make_unexpected(newPlayer.error());
+		return std::unexpected(newPlayer.error());
 	if (*newPlayer == plr_self)
-		return tl::make_unexpected("We were dropped by the owner?");
+		return std::unexpected("We were dropped by the owner?");
 	if (IsConnected(*newPlayer)) {
-		tl::expected<leaveinfo_t, PacketError> leaveinfo = pkt.LeaveInfo();
+		std::expected<leaveinfo_t, PacketError> leaveinfo = pkt.LeaveInfo();
 		if (!leaveinfo.has_value())
-			return tl::make_unexpected(leaveinfo.error());
+			return std::unexpected(leaveinfo.error());
 		_SNETEVENT ev;
 		ev.eventid = EVENT_TYPE_PLAYER_LEAVE_GAME;
 		ev.playerid = *newPlayer;
@@ -153,8 +152,12 @@ tl::expected<void, PacketError> base::HandleDisconnect(packet &pkt)
 	return {};
 }
 
-tl::expected<void, PacketError> base::HandleEchoRequest(packet &pkt)
+std::expected<void, PacketError> base::HandleEchoRequest(packet &pkt)
 {
+	// If we have already left the game,
+	// there is no need to respond to echoes
+	if (plr_self == PLR_BROADCAST) return {};
+
 	return pkt.Time()
 	    .and_then([&](cookie_t &&pktTime) {
 		    return pktfty->make_packet<PT_ECHO_REPLY>(plr_self, pkt.Source(), pktTime);
@@ -164,10 +167,11 @@ tl::expected<void, PacketError> base::HandleEchoRequest(packet &pkt)
 	    });
 }
 
-tl::expected<void, PacketError> base::HandleEchoReply(packet &pkt)
+std::expected<void, PacketError> base::HandleEchoReply(packet &pkt)
 {
 	const uint32_t now = SDL_GetTicks();
 	plr_t src = pkt.Source();
+	if (src >= MAX_PLRS) return {};
 	return pkt.Time().transform([&](cookie_t &&pktTime) {
 		PlayerState &playerState = playerStateTable_[src];
 		playerState.roundTripLatency = now - pktTime;
@@ -184,7 +188,7 @@ void base::ClearMsg(plr_t plr)
 	    message_queue.end());
 }
 
-tl::expected<void, PacketError> base::Connect(plr_t player)
+std::expected<void, PacketError> base::Connect(plr_t player)
 {
 	PlayerState &playerState = playerStateTable_[player];
 	const bool wasConnected = playerState.isConnected;
@@ -201,10 +205,10 @@ bool base::IsConnected(plr_t player) const
 	return playerState.isConnected;
 }
 
-tl::expected<void, PacketError> base::RecvLocal(packet &pkt)
+std::expected<void, PacketError> base::RecvLocal(packet &pkt)
 {
 	if (pkt.Source() < MAX_PLRS) {
-		if (tl::expected<void, PacketError> result = Connect(pkt.Source());
+		if (std::expected<void, PacketError> result = Connect(pkt.Source());
 		    !result.has_value()) {
 			return result;
 		}
@@ -266,13 +270,13 @@ bool base::SNetSendMessage(uint8_t playerId, void *data, size_t size)
 	else
 		dest = playerId;
 	if (dest != plr_self) {
-		tl::expected<std::unique_ptr<packet>, PacketError> pkt
+		std::expected<std::unique_ptr<packet>, PacketError> pkt
 		    = pktfty->make_packet<PT_MESSAGE>(plr_self, dest, message);
 		if (!pkt.has_value()) {
 			LogError("make_packet: {}", pkt.error().what());
 			return false;
 		}
-		tl::expected<void, PacketError> result = send(**pkt);
+		std::expected<void, PacketError> result = send(**pkt);
 		if (!result.has_value()) {
 			LogError("send: {}", result.error().what());
 			return false;
@@ -289,10 +293,8 @@ bool base::AllTurnsArrived()
 			continue;
 
 		const std::deque<turn_t> &turnQueue = playerState.turnQueue;
-		if (turnQueue.empty()) {
-			LogDebug("Turn missing from player {}", i);
+		if (turnQueue.empty())
 			return false;
-		}
 	}
 
 	return true;
@@ -381,23 +383,23 @@ bool base::SNetSendTurn(char *data, size_t size)
 	return true;
 }
 
-tl::expected<void, PacketError> base::SendTurnIfReady(turn_t turn)
+std::expected<void, PacketError> base::SendTurnIfReady(turn_t turn)
 {
 	if (awaitingSequenceNumber_)
 		awaitingSequenceNumber_ = !IsGameHost();
 
 	if (!awaitingSequenceNumber_) {
-		tl::expected<std::unique_ptr<packet>, PacketError> pkt
+		std::expected<std::unique_ptr<packet>, PacketError> pkt
 		    = pktfty->make_packet<PT_TURN>(plr_self, PLR_BROADCAST, turn);
 		if (!pkt.has_value()) {
-			return tl::make_unexpected(pkt.error());
+			return std::unexpected(pkt.error());
 		}
 		return send(**pkt);
 	}
 	return {};
 }
 
-tl::expected<void, PacketError> base::SendFirstTurnIfReady(plr_t player)
+std::expected<void, PacketError> base::SendFirstTurnIfReady(plr_t player)
 {
 	if (awaitingSequenceNumber_)
 		return {};
@@ -408,12 +410,12 @@ tl::expected<void, PacketError> base::SendFirstTurnIfReady(plr_t player)
 		return {};
 
 	for (const turn_t turn : turnQueue) {
-		tl::expected<std::unique_ptr<packet>, PacketError> pkt
+		std::expected<std::unique_ptr<packet>, PacketError> pkt
 		    = pktfty->make_packet<PT_TURN>(plr_self, player, turn);
 		if (!pkt.has_value()) {
-			return tl::make_unexpected(pkt.error());
+			return std::unexpected(pkt.error());
 		}
-		tl::expected<void, PacketError> result = send(**pkt);
+		std::expected<void, PacketError> result = send(**pkt);
 		if (!result.has_value()) {
 			return result;
 		}
@@ -421,7 +423,7 @@ tl::expected<void, PacketError> base::SendFirstTurnIfReady(plr_t player)
 	return {};
 }
 
-tl::expected<void, PacketError> base::MakeReady(seq_t sequenceNumber)
+std::expected<void, PacketError> base::MakeReady(seq_t sequenceNumber)
 {
 	if (!awaitingSequenceNumber_)
 		return {};
@@ -435,7 +437,7 @@ tl::expected<void, PacketError> base::MakeReady(seq_t sequenceNumber)
 	for (turn_t &turn : turnQueue) {
 		turn.SequenceNumber = next_turn;
 		next_turn++;
-		if (tl::expected<void, PacketError> result = SendTurnIfReady(turn);
+		if (std::expected<void, PacketError> result = SendTurnIfReady(turn);
 		    !result.has_value()) {
 			return result;
 		}
@@ -479,14 +481,14 @@ bool base::SNetRegisterEventHandler(event_type evtype, SEVTHANDLER func)
 
 bool base::SNetLeaveGame(net::leaveinfo_t type)
 {
-	tl::expected<std::unique_ptr<packet>, PacketError> pkt
+	std::expected<std::unique_ptr<packet>, PacketError> pkt
 	    = pktfty->make_packet<PT_DISCONNECT>(
 	        plr_self, PLR_BROADCAST, plr_self, type);
 	if (!pkt.has_value()) {
 		LogError("make_packet: {}", pkt.error().what());
 		return false;
 	}
-	tl::expected<void, PacketError> result = send(**pkt);
+	std::expected<void, PacketError> result = send(**pkt);
 	if (!result.has_value()) {
 		LogError("send: {}", result.error().what());
 		return false;
@@ -497,8 +499,8 @@ bool base::SNetLeaveGame(net::leaveinfo_t type)
 
 bool base::SNetDropPlayer(int playerid, net::leaveinfo_t flags)
 {
-	const plr_t plr = static_cast<plr_t>(playerid);
-	tl::expected<std::unique_ptr<packet>, PacketError> pkt
+	const auto plr = static_cast<plr_t>(playerid);
+	std::expected<std::unique_ptr<packet>, PacketError> pkt
 	    = pktfty->make_packet<PT_DISCONNECT>(
 	        plr_self,
 	        PLR_BROADCAST,
@@ -511,12 +513,12 @@ bool base::SNetDropPlayer(int playerid, net::leaveinfo_t flags)
 	// Disconnect at the network layer first so we
 	// don't send players their own disconnect packet
 	DisconnectNet(plr);
-	tl::expected<void, PacketError> sendResult = send(**pkt);
+	std::expected<void, PacketError> sendResult = send(**pkt);
 	if (!sendResult.has_value()) {
 		LogError("send: {}", sendResult.error().what());
 		return false;
 	}
-	tl::expected<void, PacketError> receiveResult = RecvLocal(**pkt);
+	std::expected<void, PacketError> receiveResult = RecvLocal(**pkt);
 	if (!receiveResult.has_value()) {
 		LogError("SNetDropPlayer: {}", receiveResult.error().what());
 		return false;

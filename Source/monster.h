@@ -7,12 +7,12 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 
 #include <array>
 #include <functional>
 #include <string>
 
-#include <expected.hpp>
 #include <function_ref.hpp>
 
 #include "engine/actor_position.hpp"
@@ -23,10 +23,10 @@
 #include "engine/world_tile.hpp"
 #include "game_mode.hpp"
 #include "levels/dun_tile.hpp"
-#include "misdat.h"
-#include "monstdat.h"
-#include "spelldat.h"
-#include "textdat.h"
+#include "tables/misdat.h"
+#include "tables/monstdat.h"
+#include "tables/spelldat.h"
+#include "tables/textdat.h"
 #include "utils/language.h"
 
 namespace devilution {
@@ -278,6 +278,12 @@ struct Monster { // note: missing field _mAFNum
 	uint8_t minDamageSpecial;
 	uint8_t maxDamageSpecial;
 	uint8_t armorClass;
+	uint8_t reducePlayerStrength;
+	uint8_t reducePlayerMagic;
+	uint8_t reducePlayerDexterity;
+	uint8_t reducePlayerVitality;
+	uint8_t reducePlayerMaxHP;
+	uint8_t reducePlayerMaxMana;
 	uint8_t leader;
 	LeaderRelation leaderRelation;
 	uint8_t packSize;
@@ -476,6 +482,11 @@ struct Monster { // note: missing field _mAFNum
 	 * @param isMoving specifies whether the monster is moving or not (true/moving results in a negative index in dMonster)
 	 */
 	void occupyTile(Point tile, bool isMoving) const;
+
+	bool hasNoLife() const
+	{
+		return hitPoints >> 6 <= 0;
+	}
 };
 
 extern size_t LevelMonsterTypeCount;
@@ -485,21 +496,21 @@ extern size_t ActiveMonsterCount;
 extern int MonsterKillCounts[NUM_MAX_MTYPES];
 extern bool sgbSaveSoundOn;
 
-tl::expected<void, std::string> PrepareUniqueMonst(Monster &monster, UniqueMonsterType monsterType, size_t miniontype, int bosspacksize, const UniqueMonsterData &uniqueMonsterData);
+std::expected<void, std::string> PrepareUniqueMonst(Monster &monster, UniqueMonsterType monsterType, size_t miniontype, int bosspacksize, const UniqueMonsterData &uniqueMonsterData);
 void InitLevelMonsters();
-tl::expected<void, std::string> GetLevelMTypes();
-tl::expected<size_t, std::string> AddMonsterType(_monster_id type, placeflag placeflag);
-inline tl::expected<size_t, std::string> AddMonsterType(UniqueMonsterType uniqueType, placeflag placeflag)
+std::expected<void, std::string> GetLevelMTypes();
+std::expected<size_t, std::string> AddMonsterType(_monster_id type, placeflag placeflag);
+inline std::expected<size_t, std::string> AddMonsterType(UniqueMonsterType uniqueType, placeflag placeflag)
 {
 	return AddMonsterType(UniqueMonstersData[static_cast<size_t>(uniqueType)].mtype, placeflag);
 }
-tl::expected<void, std::string> InitMonsterSND(CMonster &monsterType);
-tl::expected<void, std::string> InitMonsterGFX(CMonster &monsterType, MonsterSpritesData &&spritesData = {});
-tl::expected<void, std::string> InitAllMonsterGFX();
+std::expected<void, std::string> InitMonsterSND(CMonster &monsterType);
+std::expected<void, std::string> InitMonsterGFX(CMonster &monsterType, MonsterSpritesData &&spritesData = {});
+std::expected<void, std::string> InitAllMonsterGFX();
 void WeakenNaKrul();
 void InitGolems();
-tl::expected<void, std::string> InitMonsters();
-tl::expected<void, std::string> SetMapMonsters(const uint16_t *dunData, Point startPosition);
+std::expected<void, std::string> InitMonsters();
+std::expected<void, std::string> SetMapMonsters(const uint16_t *dunData, Point startPosition);
 Monster *AddMonster(Point position, Direction dir, size_t typeIndex, bool inMap);
 /**
  * @brief Spawns a new monsters (dynamically/not on level load).
@@ -517,6 +528,7 @@ void LoadDeltaSpawnedMonster(size_t typeIndex, size_t monsterId, uint32_t seed, 
 void InitializeSpawnedMonster(Point position, Direction dir, size_t typeIndex, size_t monsterId, uint32_t seed, uint8_t golemOwnerPlayerId, int16_t golemSpellLevel);
 void AddDoppelganger(Monster &monster);
 void ApplyMonsterDamage(DamageType damageType, Monster &monster, int damage);
+void MonsterReducePlayerAttribute(Monster &monster, Player &player);
 bool M_Talker(const Monster &monster);
 void M_StartStand(Monster &monster, Direction md);
 void M_ClearSquares(const Monster &monster);
@@ -538,10 +550,12 @@ void RemoveEnemyReferences(const Player &player);
 void ProcessMonsters();
 void FreeMonsters();
 bool DirOK(const Monster &monster, Direction mdir);
-bool PosOkMissile(Point position);
 bool LineClearMissile(Point startPoint, Point endPoint);
-bool LineClear(tl::function_ref<bool(Point)> clear, Point startPoint, Point endPoint);
-tl::expected<void, std::string> SyncMonsterAnim(Monster &monster);
+/**
+ * @brief Checks for same missile obstructions as CheckMissileCol() for missiles that move along a path between two points
+ */
+bool LineClearMovingMissile(Point startPoint, Point endPoint);
+std::expected<void, std::string> SyncMonsterAnim(Monster &monster);
 void M_FallenFear(Point position);
 void PrintMonstHistory(int mt);
 void PrintUniqueHistory();

@@ -10,10 +10,8 @@
 #include <SDL.h>
 #endif
 
-#include <fmt/format.h>
-
 #include "DiabloUI/text_input.hpp"
-#include "control.h"
+#include "control/control.hpp"
 #include "controls/plrctrls.h"
 #include "cursor.h"
 #include "engine/clx_sprite.hpp"
@@ -402,10 +400,11 @@ void DrawStash(const Surface &out)
 
 	const Point position = GetPanelPosition(UiPanels::Stash);
 	const UiFlags style = UiFlags::VerticalCenter | UiFlags::ColorWhite;
+	const int textboxHeight = 13;
 
-	DrawString(out, StrCat(Stash.GetPage() + 1), { position + Displacement { 132, 0 }, { 57, 11 } },
+	DrawString(out, StrCat(Stash.GetPage() + 1), { position + Displacement { 132, 0 }, { 57, textboxHeight } },
 	    { .flags = UiFlags::AlignCenter | style });
-	DrawString(out, FormatInteger(Stash.gold), { position + Displacement { 122, 19 }, { 107, 13 } },
+	DrawString(out, FormatInteger(Stash.gold), { position + Displacement { 122, 19 }, { 107, textboxHeight } },
 	    { .flags = UiFlags::AlignRight | style });
 }
 
@@ -464,7 +463,7 @@ uint16_t CheckStashHLight(Point mousePosition)
 
 bool UseStashItem(uint16_t c)
 {
-	if (MyPlayer->_pInvincible && MyPlayer->_pHitPoints == 0)
+	if (MyPlayer->_pInvincible && MyPlayer->hasNoLife())
 		return true;
 	if (pcurs != CURSOR_HAND)
 		return true;
@@ -537,7 +536,7 @@ void StashStruct::RemoveStashItem(StashStruct::StashCell iv)
 	}
 
 	// If the item at the end of stash array isn't the one we removed, we need to swap its position in the array with the removed item
-	const StashStruct::StashCell lastItemIndex = static_cast<StashStruct::StashCell>(stashList.size() - 1);
+	const auto lastItemIndex = static_cast<StashStruct::StashCell>(stashList.size() - 1);
 	if (lastItemIndex != iv) {
 		stashList[iv] = stashList[lastItemIndex];
 
@@ -617,7 +616,7 @@ void WithdrawGoldKeyPress(SDL_Keycode vkey)
 {
 	Player &myPlayer = *MyPlayer;
 
-	if (myPlayer._pHitPoints >> 6 <= 0) {
+	if (myPlayer.hasNoLife()) {
 		CloseGoldWithdraw();
 		return;
 	}
@@ -685,7 +684,7 @@ bool HandleGoldWithdrawTextInputEvent(const SDL_Event &event)
 	return HandleNumberInputEvent(event, *GoldWithdrawInputState);
 }
 
-bool AutoPlaceItemInStash(Player &player, const Item &item, bool persistItem)
+bool AutoPlaceItemInStash(const Item &item, bool persistItem)
 {
 	if (!IsItemAllowedInStash(item))
 		return false;
@@ -723,7 +722,7 @@ bool AutoPlaceItemInStash(Player &player, const Item &item, bool persistItem)
 				continue;
 			if (persistItem) {
 				Stash.stashList.push_back(item);
-				const uint16_t stashIndex = static_cast<uint16_t>(Stash.stashList.size() - 1);
+				const auto stashIndex = static_cast<uint16_t>(Stash.stashList.size() - 1);
 				Stash.stashList[stashIndex].position = stashPosition + Displacement { 0, itemSize.height - 1 };
 				AddItemToStashGrid(pageIndex, stashPosition, stashIndex, itemSize);
 				Stash.dirty = true;

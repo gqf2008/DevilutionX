@@ -1240,11 +1240,12 @@ void LoadPreL4Dungeon(const char *path)
 	memcpy(pdungeon, dungeon, sizeof(pdungeon));
 }
 
-void LoadL4Dungeon(const char *path, Point spawn)
+std::expected<void, std::string> LoadL4Dungeon(const char *path, Point spawn)
 {
 	LoadDungeonBase(path, spawn, 6, 30);
 
 	Pass3();
+	return {};
 }
 
 } // namespace devilution

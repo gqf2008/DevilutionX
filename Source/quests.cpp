@@ -7,10 +7,8 @@
 
 #include <cstdint>
 
-#include <fmt/format.h>
-
 #include "DiabloUI/ui_flags.hpp"
-#include "control.h"
+#include "control/control.hpp"
 #include "cursor.h"
 #include "data/file.hpp"
 #include "data/record_reader.hpp"
@@ -29,9 +27,10 @@
 #include "options.h"
 #include "panels/ui_panels.hpp"
 #include "stores.h"
-#include "townerdat.hpp"
+#include "tables/townerdat.hpp"
 #include "towners.h"
 #include "utils/endian_swap.hpp"
+#include "utils/format.hpp"
 #include "utils/is_of.hpp"
 #include "utils/language.h"
 #include "utils/utf8.hpp"
@@ -128,7 +127,7 @@ void DrawLTBanner(Point position)
 
 	for (WorldTileCoord j = 0; j < size.height; j++) {
 		for (WorldTileCoord i = 0; i < size.width; i++) {
-			auto tileId = static_cast<uint8_t>(Swap16LE(tileLayer[j * size.width + i]));
+			auto tileId = static_cast<uint8_t>(Swap16LE(tileLayer[(j * size.width) + i]));
 			if (tileId != 0) {
 				pdungeon[position.x + i][position.y + j] = tileId;
 			}
@@ -354,7 +353,7 @@ bool ForceQuests()
 			const int ql = quest._qslvl - 1;
 
 			if (EntranceBoundaryContains(quest.position, cursPosition)) {
-				InfoString = fmt::format(fmt::runtime(_(/* TRANSLATORS: Used for Quest Portals. {:s} is a Map Name */ "To {:s}")), _(QuestTriggerNames[ql]));
+				InfoString = FormatRuntime(_(/* TRANSLATORS: Used for Quest Portals. {:s} is a Map Name */ "To {:s}"), _(QuestTriggerNames[ql]));
 				cursPosition = quest.position;
 				return true;
 			}
@@ -594,7 +593,7 @@ void ResyncQuests()
 				SyncObjectAnim(Objects[ActiveObjects[i]]);
 			auto tren = TransVal;
 			TransVal = 9;
-			DRLG_MRectTrans({ SetPiece.position, WorldTileSize(SetPiece.size.width / 2 + 4, SetPiece.size.height / 2) });
+			DRLG_MRectTrans({ SetPiece.position, WorldTileSize((SetPiece.size.width / 2) + 4, SetPiece.size.height / 2) });
 			TransVal = tren;
 			if (gbIsMultiplayer && snotSpill != nullptr && snotSpill->talkMsg != TEXT_BANNER12) {
 				snotSpill->goal = MonsterGoal::Inquiring;
@@ -608,7 +607,7 @@ void ResyncQuests()
 				SyncObjectAnim(Objects[ActiveObjects[i]]);
 			auto tren = TransVal;
 			TransVal = 9;
-			DRLG_MRectTrans({ SetPiece.position, WorldTileSize(SetPiece.size.width / 2 + 4, SetPiece.size.height / 2) });
+			DRLG_MRectTrans({ SetPiece.position, WorldTileSize((SetPiece.size.width / 2) + 4, SetPiece.size.height / 2) });
 			TransVal = tren;
 			if (gbIsMultiplayer && snotSpill != nullptr) {
 				snotSpill->goal = MonsterGoal::Normal;
@@ -809,7 +808,7 @@ void StartQuestlog()
 	ListYOffset = 0;
 	FinishedQuestOffset = !twoBlocks ? 0 : LineHeight / 2;
 
-	const int overallMinHeight = EncounteredQuestCount * LineHeight + FinishedQuestOffset;
+	const int overallMinHeight = (EncounteredQuestCount * LineHeight) + FinishedQuestOffset;
 	const int space = InnerPanel.size.height;
 
 	if (EncounteredQuestCount > 0) {
@@ -823,7 +822,7 @@ void StartQuestlog()
 			FinishedQuestOffset = std::max(4, additionalSepSpace);
 		}
 
-		const int overallHeight = EncounteredQuestCount * LineSpacing + FinishedQuestOffset;
+		const int overallHeight = (EncounteredQuestCount * LineSpacing) + FinishedQuestOffset;
 		ListYOffset += (space - overallHeight) / 2;
 	}
 
