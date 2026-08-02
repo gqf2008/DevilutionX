@@ -365,6 +365,10 @@ pub struct Player {
     pub inv_list: [Item; INVENTORY_GRID_CELLS],
     /// Belt items (8 slots)
     pub spd_list: [Item; MAX_BELT_ITEMS],
+    /// Inventory grid cells (C++ `InvGrid[40]`, inv.h): each cell holds the
+    /// InvList slot + 1 of the occupying item (negative for non-top-left
+    /// cells of multi-cell items), 0 = empty. Serialised by SavePlayer.
+    pub inv_grid: [i8; INVENTORY_GRID_CELLS],
     /// Held item (cursor)
     pub hold_item: Item,
 
@@ -580,6 +584,7 @@ impl Player {
             ],
             inv_list: std::array::from_fn(|_| Item::empty()),
             spd_list: std::array::from_fn(|_| Item::empty()),
+            inv_grid: [0; INVENTORY_GRID_CELLS],
             hold_item: Item::empty(),
             light_id: 0,
             _p_num_inv: 0,

@@ -2511,8 +2511,11 @@ pub fn save_player(helper: &mut SaveHelper, player: &crate::game::player_exact::
         player_item_to_binary(item).to_binary(helper, is_hellfire);
     }
     helper.write_le_i32(player._p_num_inv);
-    for _ in 0..40 {
-        helper.write_i8(0); // InvGrid (engine does not track cells)
+    // C++ SavePlayer writes InvGrid[40]: each cell is the InvList slot + 1
+    // of the occupying item (negative for non-top-left cells of multi-cell
+    // items), 0 = empty (inv.cpp AddItemToInvGrid).
+    for &cell in player.inv_grid.iter() {
+        helper.write_i8(cell);
     }
     for item in player.spd_list.iter() {
         player_item_to_binary(item).to_binary(helper, is_hellfire);

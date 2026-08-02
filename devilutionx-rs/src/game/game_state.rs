@@ -1679,31 +1679,45 @@ impl GameState {
                         ),
                         None => true, // demo potions
                     };
-                    let stored = if is_potion {
+                    let stored: Option<(usize, &str)> = if is_potion {
                         self.player
                             .spd_list
-                            .iter_mut()
-                            .find(|s| s.is_empty())
-                            .map(|s| (s, "belt"))
+                            .iter()
+                            .position(|s| s.is_empty())
+                            .map(|i| (i, "belt"))
                     } else {
                         self.player
                             .inv_list
-                            .iter_mut()
-                            .find(|s| s.is_empty())
-                            .map(|s| (s, "inventory"))
+                            .iter()
+                            .position(|s| s.is_empty())
+                            .map(|i| (i, "inventory"))
                     };
                     match stored {
-                        Some((slot, where_)) => {
+                        Some((idx, where_)) => {
                             let itype = crate::game::item_dat::get_item_data(item_id as usize)
                                 .map(|d| d.item_type)
                                 .unwrap_or(crate::game::item_dat::ItemType::Misc);
-                            *slot = crate::game::player_exact::PlayerItem {
+                            let pi = crate::game::player_exact::PlayerItem {
                                 item_id,
                                 equipped: false,
                                 _itype: itype,
                                 full: g.item.clone(),
                             };
-                            if where_ == "inventory" {
+                            if where_ == "belt" {
+                                self.player.spd_list[idx] = pi;
+                            } else {
+                                self.player.inv_list[idx] = pi;
+                                // C++ AddItemToInvGrid: the top-left grid cell
+                                // holds (InvList slot + 1). The engine places
+                                // inventory items as 1x1 cells.
+                                if let Some(cell) = self
+                                    .player
+                                    .inv_grid
+                                    .iter_mut()
+                                    .find(|c| **c == 0)
+                                {
+                                    *cell = (idx + 1) as i8;
+                                }
                                 self.player._p_num_inv += 1;
                             }
                             println!("[Pickup] picked up {} into {}", name, where_);
@@ -4706,6 +4720,8 @@ mod tests {
         assert_eq!(gs.ground_items.len(), 0, "sword consumed");
         assert_eq!(gs.player.inv_list[0].item_id, 119, "sword in inventory");
         assert_eq!(gs.player._p_num_inv, 1, "_pNumInv incremented");
+        // C++ AddItemToInvGrid: cell 0 holds InvList slot + 1 = 1.
+        assert_eq!(gs.player.inv_grid[0], 1, "InvGrid cell 0 = slot+1");
         assert!(gs.player.spd_list.iter().all(|s| s.is_empty()), "belt untouched");
     }
 
