@@ -604,6 +604,7 @@ fn dungeon_body_writer_matches_cpp_layout() {
         &mut h,
         &[(7u32, m)],
         1, 0, 0, 0,
+        &[],
         &[0i8, 5i8],
         &[1i8],
         &[o],
@@ -645,6 +646,109 @@ fn dropped_items_writer_matches_cpp_layout() {
     let mut h = SaveHelper::new(8);
     write_dropped_item_locations(&mut h, 3);
     assert_eq!(h.into_data(), vec![1, 2, 3], "locations are 1-based");
+}
+
+/// BinaryMissileData must round-trip the C++ SaveMissile layout
+/// (loadsave.cpp:1614-1662).
+#[test]
+fn missile_data_round_trip() {
+    use devilutionx_rs::game::loadsave::{BinaryMissileData, LoadHelper, SaveHelper};
+
+    let mut m = BinaryMissileData::default();
+    m.mitype = 10;
+    m.position_x = 30;
+    m.position_y = 31;
+    m.offset_x = 2;
+    m.offset_y = 3;
+    m.velocity_x = 1;
+    m.velocity_y = -1;
+    m.start_x = 20;
+    m.start_y = 21;
+    m.traveled_x = 5;
+    m.traveled_y = 6;
+    m.frame_group = 4;
+    m.spllvl = 2;
+    m.del_flag = false;
+    m.anim_type = 7;
+    m.anim_flags = 3;
+    m.anim_delay = 4;
+    m.anim_len = 16;
+    m.anim_width = 96;
+    m.anim_width2 = 48;
+    m.anim_cnt = 1;
+    m.anim_add = 0;
+    m.anim_frame = 2;
+    m.draw_flag = true;
+    m.light_flag = true;
+    m.pre_flag = false;
+    m.uniq_trans = 0;
+    m.duration = 100;
+    m.source = 0;
+    m.caster = 0;
+    m.dam = 64;
+    m.hit_flag = true;
+    m.dist = 12;
+    m.light_id = 3;
+    m.rnd = 42;
+    m.var1 = 1;
+    m.var2 = 2;
+    m.var3 = 3;
+    m.var4 = 4;
+    m.var5 = 5;
+    m.var6 = 6;
+    m.var7 = 7;
+    m.limit_reached = false;
+
+    let mut h = SaveHelper::new(512);
+    m.to_binary(&mut h);
+    let data = h.into_data();
+    assert!(data.len() > 100, "SaveMissile body is substantial");
+
+    let mut lh = LoadHelper::new(data);
+    let p = BinaryMissileData::from_binary(&mut lh);
+    assert_eq!(p.mitype, m.mitype);
+    assert_eq!(p.position_x, m.position_x);
+    assert_eq!(p.position_y, m.position_y);
+    assert_eq!(p.offset_x, m.offset_x);
+    assert_eq!(p.offset_y, m.offset_y);
+    assert_eq!(p.velocity_x, m.velocity_x);
+    assert_eq!(p.velocity_y, m.velocity_y);
+    assert_eq!(p.start_x, m.start_x);
+    assert_eq!(p.start_y, m.start_y);
+    assert_eq!(p.traveled_x, m.traveled_x);
+    assert_eq!(p.traveled_y, m.traveled_y);
+    assert_eq!(p.frame_group, m.frame_group);
+    assert_eq!(p.spllvl, m.spllvl);
+    assert_eq!(p.del_flag, m.del_flag);
+    assert_eq!(p.anim_type, m.anim_type);
+    assert_eq!(p.anim_flags, m.anim_flags);
+    assert_eq!(p.anim_delay, m.anim_delay);
+    assert_eq!(p.anim_len, m.anim_len);
+    assert_eq!(p.anim_width, m.anim_width);
+    assert_eq!(p.anim_width2, m.anim_width2);
+    assert_eq!(p.anim_cnt, m.anim_cnt);
+    assert_eq!(p.anim_add, m.anim_add);
+    assert_eq!(p.anim_frame, m.anim_frame);
+    assert_eq!(p.draw_flag, m.draw_flag);
+    assert_eq!(p.light_flag, m.light_flag);
+    assert_eq!(p.pre_flag, m.pre_flag);
+    assert_eq!(p.uniq_trans, m.uniq_trans);
+    assert_eq!(p.duration, m.duration);
+    assert_eq!(p.source, m.source);
+    assert_eq!(p.caster, m.caster);
+    assert_eq!(p.dam, m.dam);
+    assert_eq!(p.hit_flag, m.hit_flag);
+    assert_eq!(p.dist, m.dist);
+    assert_eq!(p.light_id, m.light_id);
+    assert_eq!(p.rnd, m.rnd);
+    assert_eq!(p.var1, m.var1);
+    assert_eq!(p.var2, m.var2);
+    assert_eq!(p.var3, m.var3);
+    assert_eq!(p.var4, m.var4);
+    assert_eq!(p.var5, m.var5);
+    assert_eq!(p.var6, m.var6);
+    assert_eq!(p.var7, m.var7);
+    assert_eq!(p.limit_reached, m.limit_reached);
 }
 
 /// Tier 3 foundation: the Rust `CppGameHeader` writer must reproduce the

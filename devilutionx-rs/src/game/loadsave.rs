@@ -1945,6 +1945,160 @@ pub fn write_dropped_item_locations(helper: &mut SaveHelper, count: usize) {
 }
 
 // ============================================================================
+// Binary Missile Data - matches C++ SaveMissile (loadsave.cpp:1614-1662)
+// ============================================================================
+
+/// Engine-independent missile state matching the C++ `SaveMissile` layout.
+#[derive(Debug, Clone, Default)]
+pub struct BinaryMissileData {
+    pub mitype: i32,
+    pub position_x: i32,
+    pub position_y: i32,
+    pub offset_x: i32,
+    pub offset_y: i32,
+    pub velocity_x: i32,
+    pub velocity_y: i32,
+    pub start_x: i32,
+    pub start_y: i32,
+    pub traveled_x: i32,
+    pub traveled_y: i32,
+    pub frame_group: i32,
+    pub spllvl: i32,
+    pub del_flag: bool,
+    pub anim_type: u8,
+    pub anim_flags: i32,
+    pub anim_delay: i32,
+    pub anim_len: i32,
+    pub anim_width: i32,
+    pub anim_width2: i32,
+    pub anim_cnt: i32,
+    pub anim_add: i32,
+    pub anim_frame: i32,
+    pub draw_flag: bool,
+    pub light_flag: bool,
+    pub pre_flag: bool,
+    pub uniq_trans: u32,
+    pub duration: i32,
+    pub source: i32,
+    pub caster: i32,
+    pub dam: i32,
+    pub hit_flag: bool,
+    pub dist: i32,
+    pub light_id: i32,
+    pub rnd: i32,
+    pub var1: i32,
+    pub var2: i32,
+    pub var3: i32,
+    pub var4: i32,
+    pub var5: i32,
+    pub var6: i32,
+    pub var7: i32,
+    pub limit_reached: bool,
+}
+
+impl BinaryMissileData {
+    /// Load from binary helper (matches C++ LoadMissile).
+    pub fn from_binary(helper: &mut LoadHelper) -> Self {
+        let mut m = Self::default();
+        m.mitype = helper.next_le_i32();
+        m.position_x = helper.next_le_i32();
+        m.position_y = helper.next_le_i32();
+        m.offset_x = helper.next_le_i32();
+        m.offset_y = helper.next_le_i32();
+        m.velocity_x = helper.next_le_i32();
+        m.velocity_y = helper.next_le_i32();
+        m.start_x = helper.next_le_i32();
+        m.start_y = helper.next_le_i32();
+        m.traveled_x = helper.next_le_i32();
+        m.traveled_y = helper.next_le_i32();
+        m.frame_group = helper.next_le_i32();
+        m.spllvl = helper.next_le_i32();
+        m.del_flag = helper.next_bool32();
+        m.anim_type = helper.next_u8();
+        helper.skip(3);
+        m.anim_flags = helper.next_le_i32();
+        helper.skip(4); // _miAnimData pointer
+        m.anim_delay = helper.next_le_i32();
+        m.anim_len = helper.next_le_i32();
+        m.anim_width = helper.next_le_i32();
+        m.anim_width2 = helper.next_le_i32();
+        m.anim_cnt = helper.next_le_i32();
+        m.anim_add = helper.next_le_i32();
+        m.anim_frame = helper.next_le_i32();
+        m.draw_flag = helper.next_bool32();
+        m.light_flag = helper.next_bool32();
+        m.pre_flag = helper.next_bool32();
+        m.uniq_trans = helper.next_le_u32();
+        m.duration = helper.next_le_i32();
+        m.source = helper.next_le_i32();
+        m.caster = helper.next_le_i32();
+        m.dam = helper.next_le_i32();
+        m.hit_flag = helper.next_bool32();
+        m.dist = helper.next_le_i32();
+        m.light_id = helper.next_le_i32();
+        m.rnd = helper.next_le_i32();
+        m.var1 = helper.next_le_i32();
+        m.var2 = helper.next_le_i32();
+        m.var3 = helper.next_le_i32();
+        m.var4 = helper.next_le_i32();
+        m.var5 = helper.next_le_i32();
+        m.var6 = helper.next_le_i32();
+        m.var7 = helper.next_le_i32();
+        m.limit_reached = helper.next_bool32();
+        m
+    }
+
+    /// Write to binary helper (matches C++ SaveMissile, loadsave.cpp:1614-1662).
+    pub fn to_binary(&self, helper: &mut SaveHelper) {
+        helper.write_le_i32(self.mitype);
+        helper.write_le_i32(self.position_x);
+        helper.write_le_i32(self.position_y);
+        helper.write_le_i32(self.offset_x);
+        helper.write_le_i32(self.offset_y);
+        helper.write_le_i32(self.velocity_x);
+        helper.write_le_i32(self.velocity_y);
+        helper.write_le_i32(self.start_x);
+        helper.write_le_i32(self.start_y);
+        helper.write_le_i32(self.traveled_x);
+        helper.write_le_i32(self.traveled_y);
+        helper.write_le_i32(self.frame_group);
+        helper.write_le_i32(self.spllvl);
+        helper.write_le_u32(if self.del_flag { 1 } else { 0 });
+        helper.write_u8(self.anim_type);
+        helper.skip(3);
+        helper.write_le_i32(self.anim_flags);
+        helper.skip(4); // _miAnimData pointer
+        helper.write_le_i32(self.anim_delay);
+        helper.write_le_i32(self.anim_len);
+        helper.write_le_i32(self.anim_width);
+        helper.write_le_i32(self.anim_width2);
+        helper.write_le_i32(self.anim_cnt);
+        helper.write_le_i32(self.anim_add);
+        helper.write_le_i32(self.anim_frame);
+        helper.write_le_u32(if self.draw_flag { 1 } else { 0 });
+        helper.write_le_u32(if self.light_flag { 1 } else { 0 });
+        helper.write_le_u32(if self.pre_flag { 1 } else { 0 });
+        helper.write_le_u32(self.uniq_trans);
+        helper.write_le_i32(self.duration);
+        helper.write_le_i32(self.source);
+        helper.write_le_i32(self.caster);
+        helper.write_le_i32(self.dam);
+        helper.write_le_u32(if self.hit_flag { 1 } else { 0 });
+        helper.write_le_i32(self.dist);
+        helper.write_le_i32(self.light_id);
+        helper.write_le_i32(self.rnd);
+        helper.write_le_i32(self.var1);
+        helper.write_le_i32(self.var2);
+        helper.write_le_i32(self.var3);
+        helper.write_le_i32(self.var4);
+        helper.write_le_i32(self.var5);
+        helper.write_le_i32(self.var6);
+        helper.write_le_i32(self.var7);
+        helper.write_le_u32(if self.limit_reached { 1 } else { 0 });
+    }
+}
+
+// ============================================================================
 // SaveGameData dungeon body (C++ loadsave.cpp:2808-2844)
 // ============================================================================
 
@@ -1962,6 +2116,7 @@ pub fn write_dungeon_body(
     experience: u16,
     to_hit: u8,
     to_hit_special: u8,
+    missiles: &[BinaryMissileData],
     active_object_ids: &[i8],
     available_object_ids: &[i8],
     objects: &[BinaryObjectData],
@@ -1975,12 +2130,20 @@ pub fn write_dungeon_body(
     for (_, m) in active_monsters {
         m.to_binary(helper, monster_level, experience, to_hit, to_hit_special);
     }
-    // Missile index arrays (C++ writes 0..125 as ActiveMissiles then the
-    // AvailableMissiles tail; bodies are not yet mapped).
+    // Missile index arrays + bodies (C++ loadsave.cpp:2822-2837): the active
+    // array is 0..125, the available tail runs from the saved count to 125,
+    // then a Skip of the saved count and one SaveMissile body per missile.
+    let saved = missiles.len().min(MAX_MISSILES_FOR_SAVE);
     for i in 0..MAX_MISSILES_FOR_SAVE {
         helper.write_u8(i as u8);
     }
-    helper.skip(MAX_MISSILES_FOR_SAVE); // AvailableMissiles tail
+    for i in saved..MAX_MISSILES_FOR_SAVE {
+        helper.write_u8(i as u8);
+    }
+    helper.skip(saved);
+    for m in missiles.iter().take(saved) {
+        m.to_binary(helper);
+    }
     // Object id arrays (active then available, 127 total).
     for id in active_object_ids {
         helper.write_i8(*id);
