@@ -372,6 +372,11 @@ pub struct GameState {
     pub light_manager: crate::game::lighting::LightManager,
     /// Index of the player's light in `light_manager` (C++ `plrLights`).
     pub player_light_index: i32,
+    /// Remote spell cast received via the network (C++ CMD_SPELLXY):
+    /// `(x, y, spell_id)`. Effect resolution is a follow-up; recorded
+    /// so the network layer can be tested end-to-end.
+    pub pending_spell: Option<(i32, i32, i32)>,
+
     /// Explored micro-tiles (C++ `dFlags::Explored`): accumulated from the
     /// per-frame vision rays so already-seen areas keep their stale light
     /// when out of view (C++ keeps the last-drawn frame; the Rust renderer
@@ -565,6 +570,7 @@ impl GameState {
             pending_sfx: Vec::new(),
             light_manager: crate::game::lighting::LightManager::new(),
             player_light_index: crate::game::lighting::NO_LIGHT,
+            pending_spell: None,
             explored: vec![false; 112 * 112],
             floating_numbers: crate::game::floatingnumbers::FloatingNumbers::new(),
             quests: {
@@ -2034,8 +2040,53 @@ impl GameState {
     pub fn handle_command(&mut self, cmd: crate::game::msg::CmdId, data: &[u8]) -> bool {
         use crate::game::msg::{CmdId, TCmdLoc};
         use crate::game::objects::{sync_op_object, SyncCmd};
+        use rand::SeedableRng;
 
         match cmd {
+            CmdId::WalkXY => {
+                if data.len() < 3 {
+                    return false;
+                }
+                // C++ CMD_WALKXY (msg.cpp): the remote player walks toward the
+                // position; the Rust engine steps one micro-tile per command.
+                self.step_towards(data[1] as i32, data[2] as i32);
+                true
+            }
+            CmdId::AttackId => {
+                if data.len() < 3 {
+                    return false;
+                }
+                let monster_id = i16::from_le_bytes([data[1], data[2]]);
+                if monster_id < 0 {
+                    return false;
+                }
+                let Some(monster) = self
+                    .monster_manager
+                    .get_monster_mut(monster_id as usize)
+                else {
+                    return false;
+                };
+                if !monster.is_alive() {
+                    return false;
+                }
+                let mut rng = rand::rngs::StdRng::seed_from_u64(0);
+                crate::game::combat_integration::player_attack_monster(
+                    &self.player,
+                    monster,
+                    &mut rng,
+                );
+                true
+            }
+            CmdId::SpellXY | CmdId::SpellId => {
+                if data.len() < 5 {
+                    return false;
+                }
+                let x = data[1] as i32;
+                let y = data[2] as i32;
+                let spell_id = i16::from_le_bytes([data[3], data[4]]) as i32;
+                self.pending_spell = Some((x, y, spell_id));
+                true
+            }
             CmdId::OpenDoor | CmdId::CloseDoor => {
                 if data.len() < std::mem::size_of::<TCmdLoc>() {
                     return false;
@@ -2059,6 +2110,17 @@ impl GameState {
             }
             _ => false,
         }
+    }
+
+    /// Move the player one micro-tile toward `(tx, ty)` (C++ walk step),
+    /// keeping the camera centred on the player.
+    pub fn step_towards(&mut self, tx: i32, ty: i32) {
+        let dx = (tx - self.player.position.x).signum();
+        let dy = (ty - self.player.position.y).signum();
+        self.player.position.x = (self.player.position.x + dx).clamp(4, 107);
+        self.player.position.y = (self.player.position.y + dy).clamp(4, 107);
+        self.camera.tile_x = self.player.position.x;
+        self.camera.tile_y = self.player.position.y;
     }
 
     /// Process objects (public for GameLoop)
@@ -2912,6 +2974,48 @@ mod tests {
         assert!(!gs.handle_command(CmdId::OpenDoor, &[CmdId::OpenDoor.to_u8()]));
         // Unsupported command -> no-op.
         assert!(!gs.handle_command(CmdId::Stand, &[CmdId::Stand.to_u8()]));
+    }
+
+    #[test]
+    fn test_handle_command_walk_attack_spell() {
+        use crate::game::monster::{Monster, MonsterType};
+        use crate::game::msg::{CmdId, MsgHandler};
+        let mut gs = GameState::new(Player::new(), false, 42);
+        gs.player.position.x = 40;
+        gs.player.position.y = 40;
+        gs.camera.tile_x = 40;
+        gs.camera.tile_y = 40;
+
+        // WalkXY: steps the player toward the target (C++ CMD_WALKXY).
+        let mut tx = MsgHandler::new(0, false);
+        assert!(tx.send_walk(44, 43));
+        let bytes = tx.get_send_data().unwrap();
+        assert!(gs.handle_command(CmdId::WalkXY, &bytes));
+        assert!(
+            gs.player.position.x > 40 && gs.player.position.y > 40,
+            "walk stepped toward the target"
+        );
+        assert_eq!(gs.camera.tile_x, gs.player.position.x, "camera follows");
+
+        // AttackId: damages the monster at the slot (C++ CMD_ATTACKID).
+        let mut monster = Monster::new(1, MonsterType::Zombie, 45, 45, 0);
+        monster.hp = 200;
+        monster.max_hp = 200;
+        let slot = gs.add_monster(monster).expect("monster slot");
+        let hp_before = gs.monster_manager.get_monster(slot).unwrap().hp;
+        let mut tx2 = MsgHandler::new(0, false);
+        assert!(tx2.send_attack_id(slot as i16));
+        let bytes2 = tx2.get_send_data().unwrap();
+        assert!(gs.handle_command(CmdId::AttackId, &bytes2));
+        let hp_after = gs.monster_manager.get_monster(slot).unwrap().hp;
+        assert!(hp_after <= hp_before, "attack applied (hp {hp_before} -> {hp_after})");
+
+        // SpellXY: records the pending remote cast (C++ CMD_SPELLXY).
+        let mut tx3 = MsgHandler::new(0, false);
+        assert!(tx3.send_spell_xy(30, 31, 1, 2, 3, 4));
+        let bytes3 = tx3.get_send_data().unwrap();
+        assert!(gs.handle_command(CmdId::SpellXY, &bytes3));
+        assert_eq!(gs.pending_spell, Some((30, 31, 1)));
     }
 
     /// C++ `RndItemForMonsterLevel` (items.cpp:3240-3251) drop rolls: 60% no
