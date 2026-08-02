@@ -237,6 +237,10 @@ pub struct GameState {
     /// Player state
     pub player: Player,
 
+    /// C++ `gbIsSpawn`: the save/archive is shareware (spawn.mpq). Gates
+    /// retail-only content (monster availability in `GetLevelMTypes`, etc.).
+    pub is_spawn: bool,
+
     /// Monster manager
     pub monster_manager: MonsterManager,
 
@@ -572,6 +576,7 @@ impl GameState {
         dungeon_seeds[0] = crate::engine::generate_seed();
         Self {
             player,
+            is_spawn: false,
             monster_manager: MonsterManager::new(200), // Max 200 monsters
             missile_manager: MissileManager::new(125), // Max 125 missiles
             simple_missiles: Vec::new(),
@@ -1045,7 +1050,9 @@ impl GameState {
                 p.spd_list[i] = item_from_pack(ip);
             }
         }
-        // Game state: level + seeds.
+        // Game state: spawn flag (C++ gbIsSpawn from the save magic) + level
+        // + seeds.
+        self.is_spawn = &header.magic == b"SHAR" || &header.magic == b"SHLF";
         self.current_dungeon_level = header.currlevel as u8;
         self.is_town = header.currlevel == 0 || header.leveltype == 0;
         self.in_dungeon = !self.is_town;

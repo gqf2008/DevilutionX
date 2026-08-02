@@ -1085,6 +1085,60 @@ pub fn monster_id_from_index(index: i16) -> Option<MonsterId> {
     }
 }
 
+/// C++ `MonsterAvailability` (monstdat.h): data-driven availability of a
+/// monster type. `Retail` monsters are excluded from spawn (shareware) games;
+/// `Never` monsters are never available.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MonsterAvailability {
+    Never,
+    Always,
+    Retail,
+}
+
+/// Per-type availability, in `MONSTERS_DATA` index order, from
+/// `tools/table_data/monstdat_hf.tsv` (identical to the classic table on all
+/// shared rows; the 26 hellfire-only rows are `Retail`).
+pub const MONSTER_AVAILABILITY: [MonsterAvailability; NUM_DEFAULT_MTYPES] = [
+    MonsterAvailability::Always, MonsterAvailability::Always, MonsterAvailability::Always, MonsterAvailability::Always, MonsterAvailability::Always, MonsterAvailability::Always,
+    MonsterAvailability::Always, MonsterAvailability::Always, MonsterAvailability::Always, MonsterAvailability::Always, MonsterAvailability::Always, MonsterAvailability::Always,
+    MonsterAvailability::Always, MonsterAvailability::Always, MonsterAvailability::Always, MonsterAvailability::Always, MonsterAvailability::Always, MonsterAvailability::Always,
+    MonsterAvailability::Always, MonsterAvailability::Always, MonsterAvailability::Always, MonsterAvailability::Always, MonsterAvailability::Always, MonsterAvailability::Always,
+    MonsterAvailability::Always, MonsterAvailability::Always, MonsterAvailability::Always, MonsterAvailability::Always, MonsterAvailability::Never, MonsterAvailability::Retail,
+    MonsterAvailability::Retail, MonsterAvailability::Retail, MonsterAvailability::Retail, MonsterAvailability::Never, MonsterAvailability::Retail, MonsterAvailability::Retail,
+    MonsterAvailability::Retail, MonsterAvailability::Retail, MonsterAvailability::Always, MonsterAvailability::Always, MonsterAvailability::Always, MonsterAvailability::Always,
+    MonsterAvailability::Retail, MonsterAvailability::Retail, MonsterAvailability::Retail, MonsterAvailability::Retail, MonsterAvailability::Retail, MonsterAvailability::Retail,
+    MonsterAvailability::Retail, MonsterAvailability::Retail, MonsterAvailability::Never, MonsterAvailability::Never, MonsterAvailability::Retail, MonsterAvailability::Retail,
+    MonsterAvailability::Retail, MonsterAvailability::Retail, MonsterAvailability::Never, MonsterAvailability::Never, MonsterAvailability::Never, MonsterAvailability::Never,
+    MonsterAvailability::Retail, MonsterAvailability::Retail, MonsterAvailability::Retail, MonsterAvailability::Retail, MonsterAvailability::Retail, MonsterAvailability::Retail,
+    MonsterAvailability::Retail, MonsterAvailability::Retail, MonsterAvailability::Never, MonsterAvailability::Never, MonsterAvailability::Never, MonsterAvailability::Never,
+    MonsterAvailability::Never, MonsterAvailability::Never, MonsterAvailability::Never, MonsterAvailability::Never, MonsterAvailability::Retail, MonsterAvailability::Retail,
+    MonsterAvailability::Retail, MonsterAvailability::Retail, MonsterAvailability::Never, MonsterAvailability::Retail, MonsterAvailability::Retail, MonsterAvailability::Retail,
+    MonsterAvailability::Retail, MonsterAvailability::Retail, MonsterAvailability::Retail, MonsterAvailability::Retail, MonsterAvailability::Retail, MonsterAvailability::Retail,
+    MonsterAvailability::Retail, MonsterAvailability::Retail, MonsterAvailability::Retail, MonsterAvailability::Retail, MonsterAvailability::Retail, MonsterAvailability::Retail,
+    MonsterAvailability::Retail, MonsterAvailability::Never, MonsterAvailability::Never, MonsterAvailability::Never, MonsterAvailability::Never, MonsterAvailability::Retail,
+    MonsterAvailability::Retail, MonsterAvailability::Retail, MonsterAvailability::Retail, MonsterAvailability::Retail, MonsterAvailability::Retail, MonsterAvailability::Retail,
+    MonsterAvailability::Retail, MonsterAvailability::Never, MonsterAvailability::Never, MonsterAvailability::Never, MonsterAvailability::Retail, MonsterAvailability::Retail,
+    MonsterAvailability::Retail, MonsterAvailability::Retail, MonsterAvailability::Retail, MonsterAvailability::Retail, MonsterAvailability::Retail, MonsterAvailability::Retail,
+    MonsterAvailability::Retail, MonsterAvailability::Retail, MonsterAvailability::Retail, MonsterAvailability::Never, MonsterAvailability::Never, MonsterAvailability::Retail,
+    MonsterAvailability::Retail, MonsterAvailability::Retail, MonsterAvailability::Retail, MonsterAvailability::Retail, MonsterAvailability::Retail, MonsterAvailability::Retail,
+    MonsterAvailability::Retail, MonsterAvailability::Retail, MonsterAvailability::Retail, MonsterAvailability::Retail, MonsterAvailability::Retail, MonsterAvailability::Never,
+];
+
+/// C++ `IsMonsterAvailable` (monster.cpp): a type is available when its
+/// data-driven availability is not `Never`, it is not a retail-only type in a
+/// spawn (shareware) game, and `currlevel` is within its dungeon-level range.
+pub fn is_monster_available(id: MonsterId, level: u8, is_spawn: bool) -> bool {
+    let index = id as i16 as usize;
+    let availability = MONSTER_AVAILABILITY.get(index).copied().unwrap_or(MonsterAvailability::Always);
+    match availability {
+        MonsterAvailability::Never => return false,
+        MonsterAvailability::Retail if is_spawn => return false,
+        _ => {}
+    }
+    let d = get_monster_data(id);
+    d.min_dungeon_level <= level as i8 && d.max_dungeon_level >= level as i8
+}
+
 pub fn get_monster_data(id: MonsterId) -> &'static MonsterData {
     let index = id as i16;
     if index >= 0 && (index as usize) < MONSTERS_DATA.len() {

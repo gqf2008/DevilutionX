@@ -781,16 +781,20 @@ impl LevelMonsterTypes {
 /// gate), capped by the 4000-byte sprite-image budget (`MonsterData::image`),
 /// with each pick coming from the gameplay RNG. Hellfire endgame special
 /// levels (16/18/19/20/24) and quest uniques are not modelled.
-pub fn get_level_m_types(level: u8) -> LevelMonsterTypes {
+/// C++ `GetLevelMTypes` (monster.cpp:3432-3531): build the per-level monster
+/// type table. `Golem` is always added as `PLACE_SPECIAL`; the scatter
+/// candidates are drawn from every `IsMonsterAvailable` type under the image
+/// budget. `is_spawn` mirrors C++ `gbIsSpawn` (retail-only types excluded).
+pub fn get_level_m_types(level: u8, is_spawn: bool) -> LevelMonsterTypes {
     let mut table = LevelMonsterTypes::new();
     table.add(MonsterId::Golem, PLACE_SPECIAL);
 
-    // Availability filter (C++ IsMonsterAvailable): level range only.
+    // Availability filter (C++ IsMonsterAvailable): data availability + level
+    // range (+ retail exclusion in spawn).
     let mut typelist: Vec<MonsterId> = Vec::new();
     for i in 0..crate::game::monstdat::NUM_DEFAULT_MTYPES {
         if let Some(id) = crate::game::monstdat::monster_id_from_index(i as i16) {
-            let d = crate::game::monstdat::get_monster_data(id);
-            if d.min_dungeon_level <= level as i8 && d.max_dungeon_level >= level as i8 {
+            if crate::game::monstdat::is_monster_available(id, level, is_spawn) {
                 typelist.push(id);
             }
         }
@@ -4718,7 +4722,7 @@ mod tests {
     #[test]
     fn test_get_level_m_types_l1_table_shape() {
         crate::engine::random::seed_gameplay_rng(12345);
-        let table = get_level_m_types(1);
+        let table = get_level_m_types(1, false);
         // Golem always occupies slot 0 (C++ AddMonsterType(MT_GOLEM,
         // PLACE_SPECIAL) runs first); the random scatter pass may also
         // pick Golem, OR-ing PLACE_SCATTER onto the same slot.
@@ -4741,7 +4745,7 @@ mod tests {
         assert!(total_image >= 4000 || table.count() == MAX_LVL_MTYPES || true);
         // Deterministic for a fixed gameplay seed.
         crate::engine::random::seed_gameplay_rng(12345);
-        let again = get_level_m_types(1);
+        let again = get_level_m_types(1, false);
         let a: Vec<_> = (0..table.count()).map(|i| table.get(i).unwrap().monster_type).collect();
         let b: Vec<_> = (0..again.count()).map(|i| again.get(i).unwrap().monster_type).collect();
         assert_eq!(a, b, "same seed -> same level type table");

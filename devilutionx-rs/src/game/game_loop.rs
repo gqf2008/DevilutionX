@@ -909,7 +909,7 @@ pub fn descend_to_level(game_state: &mut GameState, level: u8) -> Result<(), Str
     // DungeonLevel`) so `InitObjects` + `InitMonsters` placement draws start
     // from the clean seed, then place objects (sarcophagi + doors/lights +
     // barrels) and finally the scatter monster packs.
-    let level_types = crate::game::monster::get_level_m_types(level);
+    let level_types = crate::game::monster::get_level_m_types(level, game_state.is_spawn);
     crate::engine::random::seed_gameplay_rng(seed);
     place_dungeon_objects(game_state);
     // C++ AddDoor: doors start closed (closed micros baked into dPiece).
@@ -1478,7 +1478,7 @@ pub fn prepare_dungeon_for_replay(game_state: &mut GameState, level: u8) -> bool
     //   3. InitMonsters()               (scatter placement)
     // We mirror that: build the roster, re-seed, place objects, then place
     // monsters from the precomputed roster.
-    let level_types = crate::game::monster::get_level_m_types(level);
+    let level_types = crate::game::monster::get_level_m_types(level, game_state.is_spawn);
     crate::engine::random::seed_gameplay_rng(seed);
     place_dungeon_objects(game_state);
     game_state.init_doors_closed();
