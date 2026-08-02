@@ -236,6 +236,11 @@ pub struct Monster {
     pub home_x: i32,
     pub home_y: i32,
 
+    // === Animation (C++ `animInfo`) ===
+    pub anim_ticks_per_frame: i32,
+    pub anim_tick_counter: i32,
+    pub anim_num_frames: i32,
+    pub anim_current_frame: i32,
     // === AI State (C++ alignment) ===
     pub ai_state: MonsterAIState,
     pub goal: MonsterGoal,
@@ -347,6 +352,13 @@ impl Monster {
             goal: MonsterGoal::Normal,
             mode: MonsterMode::Stand,
             ai: monster_type.monster_ai(),
+            // C++ InitMonster: animInfo from the Stand animation
+            // (MonsterData frames[0]/rate[0]); the no-rng path uses the
+            // first frame / zero counters deterministically.
+            anim_ticks_per_frame: crate::game::monstdat::get_monster_data(monster_type).rate[0] as i32,
+            anim_tick_counter: 0,
+            anim_num_frames: crate::game::monstdat::get_monster_data(monster_type).frames[0] as i32,
+            anim_current_frame: 0,
             goal_var1: 0,
             goal_var2: 0,
             goal_var3: 0,
@@ -399,14 +411,27 @@ impl Monster {
         x: i32,
         y: i32,
         level_modifier: u8,
-        rng: &mut impl rand::Rng,
+        _rng: &mut impl rand::Rng,
     ) -> Self {
         let mut m = Self::new(id, monster_type, x, y, level_modifier);
+        // C++ InitMonster (monster.cpp:200-238) RNG draw order:
+        //   1. animInfo.tickCounter = GenerateRnd(ticksPerFrame - 1)
+        //   2. animInfo.currentFrame = GenerateRnd(numberOfFrames - 1)
+        //   3. maxHitPoints = max(RandomIntBetween(hpMin, hpMax) << 6 / 2, 64)
+        //   4. rndItemSeed / aiSeed = AdvanceRndSeed()
+        let data = crate::game::monstdat::get_monster_data(monster_type);
+        let ticks = data.rate[0] as i32;
+        let frames = data.frames[0] as i32;
+        m.anim_tick_counter = crate::engine::random::gameplay_rnd(0, ticks - 1);
+        m.anim_current_frame = crate::engine::random::gameplay_rnd(0, frames - 1);
         let base = monster_type.base_stats();
         let rolled = crate::engine::random::gameplay_rnd(base.hp_min, base.hp);
         let max_hp = std::cmp::max(rolled << 5, 64);
         m.hp = max_hp;
         m.max_hp = max_hp;
+        m.rnd_item_seed = crate::engine::random::gameplay_advance_rnd_seed() as u32;
+        m.ai_seed = crate::engine::random::gameplay_advance_rnd_seed() as u32;
+        m.who_hit = 0; // C++ InitMonster sets whoHit = 0
         m
     }
 
@@ -4739,6 +4764,40 @@ mod tests {
         // Low-hp monster (Golem 1-1): 1 << 5 = 32 -> clamped to 64 (C++ floor).
         let g = Monster::new(2, MonsterType::Golem, 10, 10, 1);
         assert_eq!(g.max_hp, 64, "Golem hp 1 << 5 clamped to min 64");
+    }
+
+    /// C++ InitMonster (monster.cpp:200-238) consumes the gameplay RNG in a
+    /// fixed order: anim tickCounter (GenerateRnd(rate0-1)), currentFrame
+    /// (GenerateRnd(frames0-1)), the HP roll (RandomIntBetween), then two
+    /// AdvanceRndSeed() for rndItemSeed/aiSeed. Replay that exact sequence
+    /// with an independent DiabloGenerator and compare each field.
+    #[test]
+    fn test_init_monster_rng_draw_order_matches_cpp() {
+        use rand::SeedableRng;
+        crate::engine::random::seed_gameplay_rng(12345);
+        let m = Monster::new_with_rng(
+            0,
+            MonsterType::Zombie,
+            10,
+            10,
+            1,
+            &mut rand::rngs::StdRng::seed_from_u64(0),
+        );
+
+        // Independent generator replicating the C++ draw order.
+        let mut gen = crate::engine::random::DiabloGenerator::new(12345);
+        let expect_tick = gen.generate_rnd(4); // rate[0]=4 -> GenerateRnd(3)
+        let expect_frame = gen.generate_rnd(11); // frames[0]=11 -> GenerateRnd(10)
+        let expect_roll = gen.generate_rnd(4) + 4; // RandomIntBetween(4,7)
+        let expect_item_seed = gen.advance_rnd_seed() as u32;
+        let expect_ai_seed = gen.advance_rnd_seed() as u32;
+
+        assert_eq!(m.anim_tick_counter, expect_tick, "tickCounter draw");
+        assert_eq!(m.anim_current_frame, expect_frame, "currentFrame draw");
+        assert_eq!(m.max_hp, std::cmp::max(expect_roll << 5, 64), "HP roll");
+        assert_eq!(m.rnd_item_seed, expect_item_seed, "rndItemSeed");
+        assert_eq!(m.ai_seed, expect_ai_seed, "aiSeed");
+        assert_eq!(m.who_hit, 0, "whoHit");
     }
 
     /// `base_stats()` must match the authoritative monstdat.tsv rows.

@@ -10,6 +10,27 @@ def tsv_rows(name):
 def rust_source(name):
     return io.open(os.path.join(RS, name), encoding='utf-8').read()
 
+def _split_top_level(s):
+    parts = []
+    depth = 0
+    cur = []
+    for ch in s:
+        if ch in '([':
+            depth += 1
+            cur.append(ch)
+        elif ch in ')]':
+            depth -= 1
+            cur.append(ch)
+        elif ch == ',' and depth == 0:
+            parts.append(''.join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+    if cur:
+        parts.append(''.join(cur))
+    return parts
+
+
 def check_monstdat():
     global failures
     rs = rust_source('monstdat.rs'); tsv = tsv_rows('monstdat_hf.tsv')
@@ -51,19 +72,25 @@ def check_monstdat():
     CLS = {'Undead':0,'Demon':1,'Animal':2}
     diffs = 0
     for entry, row in zip(entries, tsv):
-        args = [a.strip() for a in entry.split(',')]
+        # Split on top-level commas so the [frames]/[rate] array args stay
+        # whole (a naive split would break them into per-element args).
+        args = [a.strip() for a in _split_top_level(entry)]
         def iv(a):
             return int(a) if a.lstrip('-').isdigit() else None
         got = (args[0].strip('"'), iv(args[1]), iv(args[2]), iv(args[3]), iv(args[4]), iv(args[5]),
                AI[args[6].split('::')[1]], iv(args[7]), iv(args[8]), iv(args[9]), iv(args[10]),
                iv(args[11]), iv(args[12]), iv(args[13]), iv(args[14]), CLS[args[15].split('::')[1]],
-               res_mask(args[16]), res_mask(args[17]), iv(args[18]), iv(args[19]))
+               res_mask(args[16]), res_mask(args[17]), iv(args[18]), iv(args[19]),
+               [int(x) for x in re.findall(r'-?\d+', args[20])],
+               [int(x) for x in re.findall(r'-?\d+', args[21])])
         exp = (row['name'], int(row['minDunLvl']), int(row['maxDunLvl']), int(row['level']),
                int(row['hitPointsMinimum']), int(row['hitPointsMaximum']), AI[row['ai']],
                int(row['intelligence']), int(row['toHit']), int(row['minDamage']), int(row['maxDamage']),
                int(row['toHitSpecial']), int(row['minDamageSpecial']), int(row['maxDamageSpecial']),
                int(row['armorClass']), CLS[row['monsterClass']], res_mask(row['resistance']),
-               res_mask(row['resistanceHell']), int(row['exp']), int(row['image']))
+               res_mask(row['resistanceHell']), int(row['exp']), int(row['image']),
+               [int(x) for x in row['frames[6]'].split(',')],
+               [int(x) for x in row['rate[6]'].split(',')])
         if got != exp:
             diffs += 1
     print('monstdat: %d/%d rows, %d diffs' % (len(entries), len(tsv), diffs))

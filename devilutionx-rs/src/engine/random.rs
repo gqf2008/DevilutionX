@@ -391,6 +391,14 @@ pub fn gameplay_rnd(min: i32, max: i32) -> i32 {
     GAMEPLAY_RNG.with(|r| r.borrow_mut().generate_rnd(max - min + 1) + min)
 }
 
+/// C++ `AdvanceRndSeed()` on the gameplay RNG — the same engine `gameplay_rnd`
+/// draws from. C++ `InitMonster` stores `rndItemSeed`/`aiSeed` this way
+/// (monster.cpp:220-221); the separate `advance_rnd_seed()` here operates on
+/// the item-generation global RNG instead.
+pub fn gameplay_advance_rnd_seed() -> i32 {
+    GAMEPLAY_RNG.with(|r| r.borrow_mut().advance_rnd_seed())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
