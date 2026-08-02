@@ -2267,8 +2267,17 @@ impl GameState {
         // Dungeon-only grids: dMonster/dCorpse are zeros (no per-tile monster
         // or corpse grid in the engine), dPreLight comes from the generated
         // layout, AutomapView and the missile-occupancy grid are zeros.
+        // dMonster: per-tile monster index+1 (C++ Monsters[abs(dMonster)-1]).
+        let mut dmonster = vec![0i32; 112 * 112];
+        for (slot, m) in self.monster_manager.iter() {
+            if m.is_alive() && m.x >= 0 && m.x < 112 && m.y >= 0 && m.y < 112 {
+                dmonster[m.y as usize * 112 + m.x as usize] = slot as i32 + 1;
+            }
+        }
         let mut dungeon_only = Vec::new();
-        dungeon_only.extend(std::iter::repeat(0u8).take(112 * 112 * 4)); // dMonster (BE i32 area)
+        for &v in &dmonster {
+            dungeon_only.extend_from_slice(&v.to_be_bytes()); // dMonster (BE i32)
+        }
         dungeon_only.extend(std::iter::repeat(0u8).take(112 * 112)); // dCorpse
         match &self.dungeon_layout {
             Some(layout) => dungeon_only.extend_from_slice(&layout.pre_light),
