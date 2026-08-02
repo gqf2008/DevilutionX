@@ -1,9 +1,8 @@
 //! Ground item labels QoL (C++ `Source/qol/itemlabels.cpp`).
 //!
-//! Ports the label-building core: the on-ground label text (gold amounts are
-//! formatted "{value} gold", everything else uses the item name) and the
-//! highlight-toggle predicate. The label queue, layout/collision handling and
-//! rendering are follow-ups.
+//! Ports the on-ground label text (gold amounts are formatted "{value} gold",
+//! everything else uses the item name), the highlight-toggle predicate, and the
+//! label queue with row-based overlap avoidance (C++ `DrawItemNameLabels`).
 
 use crate::game::items::{Item, ItemType};
 
@@ -44,6 +43,44 @@ pub fn format_integer(value: i32) -> String {
     } else {
         out
     }
+}
+
+/// A positioned ground-item label (C++ `ItemLabel`).
+pub struct ItemLabel {
+    pub id: i32,
+    /// Text width in pixels (C++ `GetLineWidth` + margins).
+    pub width: i32,
+    pub x: i32,
+    pub y: i32,
+    pub text: String,
+}
+
+/// C++ `DrawItemNameLabels` overlap avoidance (itemlabels.cpp:147+): labels
+/// are drawn in Y order; within a horizontal band (one label height) labels
+/// whose X interval collides with an already-placed label are skipped
+/// (C++ `UsedX` + `BorderX` spacing).
+pub fn layout_non_overlapping(mut labels: Vec<ItemLabel>, band_height: i32) -> Vec<ItemLabel> {
+    // C++ `BorderX = 4`: minimal horizontal space between labels.
+    const BORDER_X: i32 = 4;
+    labels.sort_by_key(|l| l.y);
+    let mut visible: Vec<ItemLabel> = Vec::new();
+    let mut used_x: Vec<i32> = Vec::new();
+    let mut band_top = i32::MIN;
+    for label in labels {
+        if label.y >= band_top + band_height {
+            used_x.clear();
+            band_top = label.y;
+        }
+        let overlaps = used_x
+            .iter()
+            .any(|&ux| (label.x - ux).abs() < label.width / 2 + BORDER_X);
+        if overlaps {
+            continue;
+        }
+        used_x.push(label.x);
+        visible.push(label);
+    }
+    visible
 }
 
 #[cfg(test)]
@@ -95,4 +132,40 @@ mod tests {
         // Not when the key matches the option state.
         assert!(!is_highlighting_enabled(false, true, true));
     }
+
+
+    #[test]
+    fn test_layout_keeps_non_overlapping_labels() {
+        // Two labels on the same row, far apart: both kept.
+        let labels = vec![
+            ItemLabel { id: 1, width: 60, x: 100, y: 100, text: "Short Sword".to_string() },
+            ItemLabel { id: 2, width: 40, x: 300, y: 100, text: "Gold".to_string() },
+        ];
+        let visible = layout_non_overlapping(labels, 12);
+        assert_eq!(visible.len(), 2);
+    }
+
+    #[test]
+    fn test_layout_skips_overlapping_labels() {
+        // Overlapping X on the same row: the second is skipped.
+        let labels = vec![
+            ItemLabel { id: 1, width: 60, x: 100, y: 100, text: "Short Sword".to_string() },
+            ItemLabel { id: 2, width: 60, x: 110, y: 100, text: "Long Sword".to_string() },
+        ];
+        let visible = layout_non_overlapping(labels, 12);
+        assert_eq!(visible.len(), 1);
+        assert_eq!(visible[0].id, 1, "the first (leftmost) label wins");
+    }
+
+    #[test]
+    fn test_layout_allows_different_rows() {
+        // Different bands do not collide.
+        let labels = vec![
+            ItemLabel { id: 1, width: 60, x: 100, y: 100, text: "A".to_string() },
+            ItemLabel { id: 2, width: 60, x: 110, y: 130, text: "B".to_string() },
+        ];
+        let visible = layout_non_overlapping(labels, 12);
+        assert_eq!(visible.len(), 2);
+    }
+
 }

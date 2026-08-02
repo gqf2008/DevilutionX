@@ -1597,6 +1597,9 @@ fn draw_and_blit(
     // Floating damage numbers (C++ qol/floatingnumbers.cpp DrawFloatingNumbers).
     draw_floating_numbers(window, game_state, cam_tile_x, cam_tile_y, screen_center_x, screen_center_y);
 
+    // Ground item name labels (C++ qol/itemlabels.cpp DrawItemNameLabels).
+    draw_item_labels(window, game_state, cam_tile_x, cam_tile_y, screen_center_x, screen_center_y);
+
     // Draw the player at its tile (camera == player position). Anchored via
     // tile_to_screen so it lands on the pipeline's floor tile for the camera.
     // Prefer the real Warrior town-walk sprite; fall back to the yellow
@@ -2926,6 +2929,70 @@ fn draw_floating_numbers(
             cx - text_w / 2,
             cy - TILE_HEIGHT - rise,
             sdl2::pixels::Color::RGB(color.0, color.1, color.2),
+        );
+    }
+}
+
+/// Draw ground-item name labels (C++ `qol/itemlabels.cpp`
+/// `DrawItemNameLabels`): each visible item gets a label above its tile, with
+/// row-based overlap avoidance. Gated by the "Show Item Labels" option
+/// (C++ `IsHighlightingLabelsEnabled` with no highlight key held).
+fn draw_item_labels(
+    window: &mut GameWindow,
+    game_state: &GameState,
+    cam_tile_x: i32,
+    cam_tile_y: i32,
+    screen_center_x: i32,
+    screen_center_y: i32,
+) {
+    use crate::game::itemlabels::{item_label_text, layout_non_overlapping, ItemLabel};
+    use crate::game::game_state::GroundItemType;
+
+    // C++ IsHighlightingLabelsEnabled(in store=false, highlight key=false).
+    let show = crate::game::itemlabels::is_highlighting_enabled(
+        false,
+        false,
+        crate::utils::options::options().gameplay.show_item_labels,
+    );
+    if !show || game_state.ground_items.is_empty() {
+        return;
+    }
+
+    let font = crate::engine::font::PixelFont::new(1);
+    let mut labels = Vec::new();
+    for (i, g) in game_state.ground_items.iter().enumerate() {
+        let (cx, cy) = tile_to_screen(g.x, g.y, cam_tile_x, cam_tile_y);
+        let text = match (&g.item, g.item_type) {
+            (Some(item), _) => item_label_text(item),
+            (None, GroundItemType::Gold) => {
+                format!("{} gold", crate::game::game_state::GroundItemType::GOLD_AMOUNT)
+            }
+            (None, other) => other.display_name().to_string(),
+        };
+        let width = font.text_width(&text);
+        // Label sits above the tile (C++ position.y -= TILE_HEIGHT - LabelHeight).
+        labels.push(ItemLabel {
+            id: i as i32,
+            width: width + 4,
+            x: cx,
+            y: cy - TILE_HEIGHT,
+            text,
+        });
+    }
+
+    let visible = layout_non_overlapping(labels, 12);
+    if visible.is_empty() {
+        return;
+    }
+    let canvas = window.canvas_mut();
+    for label in visible {
+        let text_w = font.text_width(&label.text);
+        font.render_text(
+            canvas,
+            &label.text,
+            label.x - text_w / 2,
+            label.y,
+            sdl2::pixels::Color::RGB(230, 230, 200),
         );
     }
 }
