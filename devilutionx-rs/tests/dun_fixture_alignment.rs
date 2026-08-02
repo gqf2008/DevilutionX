@@ -188,3 +188,27 @@ fn dun_fixture_generation_alignment() {
     assert!(all_passed, "every level type must match at least one gold cell");
 }
 
+/// Print the first differing cells between the Rust L1 generator and the
+/// C++ fixture for seed 2588 (28% match), to guide generator alignment.
+#[test]
+fn l1_seed_2588_diff_cells() {
+    let Some(dir) = fixture_dir() else { return };
+    let path = dir.join("1-2588.dun");
+    let Some(tiles) = parse_dun_tiles(&path) else { return };
+    let mut gen = CathedralGenerator::new();
+    gen.generate(DungeonType::Cathedral, 2588);
+    let mut diffs = 0usize;
+    for y in 0..40usize {
+        for x in 0..40usize {
+            let got = gen.dungeon[y][x] as u16;
+            let want = tiles[y * 40 + x];
+            if got != want {
+                if diffs < 12 {
+                    println!("[L1-2588] cell ({},{}) rust={} cpp={}", x, y, got, want);
+                }
+                diffs += 1;
+            }
+        }
+    }
+    println!("[L1-2588] total differing cells: {}", diffs);
+}
