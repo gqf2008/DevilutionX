@@ -990,11 +990,8 @@ fn net_init_single_player() -> bool {
 /// C++ Reference: Source/multi.cpp::NetClose()
 fn net_close() {
     // C++: nthread_cleanup, tmsg_cleanup, SNetLeaveGame, Players.clear
-    // For single player this is minimal; for multiplayer it would:
-    // 1. Cleanup network thread
-    // 2. Cleanup turn messages
-    // 3. Unregister event handlers
-    // 4. Leave the game session
+    // Leave the session so a later game can create a fresh one.
+    crate::net::storm::snet_leave_game();
     println!("[NetClose] Network shutdown complete");
 }
 
@@ -2220,7 +2217,6 @@ fn init_multiplayer_menu(ctx: &mut DiabloContext, event_pump: &mut sdl2::EventPu
         return Ok(true);
     };
     println!("[InitMultiPlayerMenu] Connection: {:?}", conn);
-    // TODO: SNetInitializeProvider(provider, gameData) + NetInit + hosting/joining.
 
     // 2b. UiSelGameDialog: pick create/join + difficulty (selgame.cpp).
     let Some(form) = ui_sel_game_dialog(ctx, event_pump, conn)? else {
@@ -2231,7 +2227,27 @@ fn init_multiplayer_menu(ctx: &mut DiabloContext, event_pump: &mut sdl2::EventPu
         "[InitMultiPlayerMenu] Game setup: action={:?} difficulty={:?}",
         form.action, form.difficulty
     );
-    // TODO: CreateGame/JoinGame via the network layer (multi.cpp).
+
+    // 4. SNetInitializeProvider + CreateGame/JoinGame (multi.cpp).
+    crate::net::storm::snet_initialize(conn as u8);
+    match form.action {
+        ui::diabloui::selgame::SelGameAction::CreateGame
+        | ui::diabloui::selgame::SelGameAction::CreatePublicGame => {
+            if let Some(pid) = crate::net::storm::snet_create_game("Timedemo", "") {
+                println!("[InitMultiPlayerMenu] Hosted game as player {}", pid);
+            } else {
+                println!("[InitMultiPlayerMenu] Failed to host game");
+            }
+        }
+        ui::diabloui::selgame::SelGameAction::JoinGame => {
+            if let Some(pid) = crate::net::storm::snet_join_game("Timedemo", "") {
+                println!("[InitMultiPlayerMenu] Joined game as player {}", pid);
+            } else {
+                println!("[InitMultiPlayerMenu] Join not supported on this provider");
+            }
+        }
+    }
+    // TODO: start the multiplayer game loop (send/recv player state, turns).
 
     // 3. Reuse the single-player hero select as a placeholder until the
     // multiplayer hero menu is ported.

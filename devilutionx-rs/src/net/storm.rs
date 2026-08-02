@@ -134,6 +134,56 @@ impl StormNet {
     }
 }
 
+/// Process-wide Storm network state (C++ `SNetInitializeProvider` global).
+///
+/// The game runs on the main thread, so a thread-local slot matches the Lua
+/// engine pattern and avoids Send/Sync requirements on the transport.
+use std::cell::RefCell;
+
+thread_local! {
+    static GLOBAL_STORM_NET: RefCell<Option<StormNet>> = const { RefCell::new(None) };
+}
+
+/// C++ `SNetInitializeProvider(provider, gameData)` (loopback path).
+pub fn snet_initialize(provider: u8) -> bool {
+    GLOBAL_STORM_NET.with(|slot| {
+        let mut net = StormNet::new();
+        net.provider = provider;
+        *slot.borrow_mut() = Some(net);
+        true
+    })
+}
+
+/// C++ `SNetCreateGame(...)`: host a game through the global provider.
+pub fn snet_create_game(game_name: &str, password: &str) -> Option<u8> {
+    GLOBAL_STORM_NET.with(|slot| {
+        let mut borrow = slot.borrow_mut();
+        borrow.as_mut()?.create_game(game_name, password, &[])
+    })
+}
+
+/// C++ `SNetJoinGame(...)` — the loopback transport cannot join.
+pub fn snet_join_game(game_name: &str, password: &str) -> Option<u8> {
+    GLOBAL_STORM_NET.with(|slot| {
+        let mut borrow = slot.borrow_mut();
+        borrow.as_mut()?.join_game(game_name, password)
+    })
+}
+
+/// C++ `SNetLeaveGame(...)` / `NetClose` cleanup.
+pub fn snet_leave_game() {
+    GLOBAL_STORM_NET.with(|slot| *slot.borrow_mut() = None);
+}
+
+/// C++ `IsGameHost()` on the global provider.
+pub fn snet_is_game_host() -> bool {
+    GLOBAL_STORM_NET.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .map_or(false, |net| net.is_game_host())
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -186,5 +236,19 @@ mod tests {
         assert_eq!(connection_name(ConnType::Tcp), "Client-Server (TCP)");
         assert_eq!(connection_name(ConnType::Loopback), "Offline");
     }
-}
 
+
+    #[test]
+    fn test_global_snet_create_game_loopback() {
+        assert!(snet_initialize(SELCONN_LOOPBACK));
+        let pid = snet_create_game("loopback", "").expect("loopback host via global");
+        assert_eq!(pid, 0);
+        assert!(snet_is_game_host());
+        // A second create replaces the session (host restarts the game).
+        let pid2 = snet_create_game("game2", "").expect("recreate");
+        assert_eq!(pid2, 0);
+        snet_leave_game();
+        assert!(!snet_is_game_host());
+    }
+
+}
