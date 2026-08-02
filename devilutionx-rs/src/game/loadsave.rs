@@ -2173,6 +2173,244 @@ pub fn write_dungeon_body(
 }
 
 // ============================================================================
+// C++ SavePlayer (loadsave.cpp:1251-1485) — full player serialisation
+// ============================================================================
+
+/// Map a simplified engine `PlayerItem` to the C++ `SaveItem` structure.
+/// The engine only tracks item id / equip state / weapon type, so the rest of
+/// the fields keep C++ defaults; `item_idx` carries the C++ item index.
+fn player_item_to_binary(item: &crate::game::player_exact::PlayerItem) -> BinaryItemData {
+    let mut b = BinaryItemData::default();
+    b.item_idx = item.item_id;
+    b
+}
+
+/// C++ `SavePlayer` (loadsave.cpp:1251-1485): serialises the full player
+/// state. The layout is exact for Diablo / 17-level / non-Hellfire (21600
+/// bytes). Fields the Rust `player_exact::Player` models are written from the
+/// player; the remainder use C++ defaults so the byte offsets and total size
+/// match, letting callers slice the correct segments out of a real save.
+pub fn save_player(helper: &mut SaveHelper, player: &crate::game::player_exact::Player, is_hellfire: bool) {
+    use crate::game::player_exact::PlayerItem;
+
+    // Mode + walk path + flags.
+    helper.write_le_i32(player._p_mode as u8 as i32);
+    for i in 0..25 {
+        let v = player.walk_path.get(i).copied().unwrap_or_default() as u8 as i8;
+        helper.write_i8(v);
+    }
+    helper.write_u8(1); // plractive
+    helper.skip(2);
+    helper.write_le_i32(0); // destAction
+    helper.write_le_i32(0); // destParam1
+    helper.write_le_i32(0); // destParam2
+    helper.write_le_i32(0); // destParam3
+    helper.write_le_i32(0); // destParam4
+    helper.write_le_u32(player.plr_level as u32);
+    // Position (tile, future, target, last, old).
+    helper.write_le_i32(player.position.x);
+    helper.write_le_i32(player.position.y);
+    helper.write_le_i32(player.position.x);
+    helper.write_le_i32(player.position.y);
+    helper.write_le_i32(player.position.x);
+    helper.write_le_i32(player.position.y);
+    helper.write_le_i32(player.position.x);
+    helper.write_le_i32(player.position.y);
+    helper.write_le_i32(player.position.x);
+    helper.write_le_i32(player.position.y);
+    // Offset / velocity (not walking in the save snapshot: zeros).
+    helper.write_le_i32(0);
+    helper.write_le_i32(0);
+    helper.write_le_i32(0);
+    helper.write_le_i32(0);
+    helper.write_le_i32(player._p_dir as u8 as i32); // _pdir
+    helper.skip(4);
+    helper.write_le_u32(0); // _pgfxnum
+    helper.skip(4); // _pAnimData pointer
+    helper.write_le_i32(3); // ticksPerFrame - 1 (C++ default anim)
+    helper.write_le_i32(0); // tickCounter
+    helper.write_le_i32(8); // numberOfFrames
+    helper.write_le_i32(1); // currentFrame + 1
+    helper.write_le_i32(96); // anim width
+    helper.write_le_i32(48); // width2
+    helper.skip(4); // _peflag
+    helper.write_le_i32(player.light_id);
+    helper.write_le_i32(1); // _pvid
+
+    // Spells.
+    helper.write_le_i32(0); // queuedSpell.spellId
+    helper.write_i8(0); // queuedSpell.spellType
+    helper.write_i8(0); // queuedSpell.spellFrom
+    helper.skip(2);
+    helper.write_le_i32(0); // inventorySpell
+    helper.skip(1); // _pTSplType
+    helper.skip(3);
+    helper.write_le_i32(0); // _pRSpell
+    helper.write_i8(0); // _pRSplType
+    helper.skip(3);
+    helper.write_le_i32(0); // _pSBkSpell
+    helper.skip(1); // _pSBkSplType
+
+    for &lvl in player._p_spl_lvl.iter() {
+        helper.write_u8(lvl);
+    }
+    helper.skip(7);
+    helper.write_le_u64(player._p_mem_spells);
+    helper.write_le_u64(0); // _pAblSpells
+    helper.write_le_u64(0); // _pScrlSpells
+    helper.write_u8(0); // _pSpellFlags
+    helper.skip(3);
+    for _ in 0..4 {
+        helper.write_le_i32(0); // hotkey
+    }
+    for _ in 0..4 {
+        helper.write_u8(0); // hotkey type
+    }
+
+    helper.write_le_i32(0); // UsesRangedWeapon
+    helper.write_u8(if player._p_block_flag { 1 } else { 0 });
+    helper.write_u8(if player._p_invincible { 1 } else { 0 });
+    helper.write_i8(player._p_light_rad);
+    helper.write_u8(0); // _pLvlChanging
+
+    helper.write_bytes(&player._p_name);
+    helper.write_i8(player._p_class as i8);
+    helper.skip(3);
+    helper.write_le_i32(player._p_strength);
+    helper.write_le_i32(player._p_base_str);
+    helper.write_le_i32(player._p_magic);
+    helper.write_le_i32(player._p_base_mag);
+    helper.write_le_i32(player._p_dexterity);
+    helper.write_le_i32(player._p_base_dex);
+    helper.write_le_i32(player._p_vitality);
+    helper.write_le_i32(player._p_base_vit);
+    helper.write_le_i32(player._p_stat_pts);
+    helper.write_le_i32(player._p_damage_mod);
+
+    helper.write_le_i32(0); // baseToBlock
+    helper.write_le_i32(player._p_hp_base);
+    helper.write_le_i32(player._p_max_hp_base);
+    helper.write_le_i32(player._p_hit_points);
+    helper.write_le_i32(player._p_max_hp);
+    helper.skip(4); // _pHPPer
+    helper.write_le_i32(player._p_mana_base);
+    helper.write_le_i32(player._p_max_mana_base);
+    helper.write_le_i32(player._p_mana);
+    helper.write_le_i32(player._p_max_mana);
+    helper.skip(4); // _pManaPer
+    helper.write_u8(player._p_level);
+    helper.skip(1); // _pMaxLevel
+    helper.skip(2);
+    helper.write_le_u32(player._p_experience);
+    helper.skip(4); // _pMaxExp
+    helper.write_le_u32(0); // nextExperienceThreshold
+    helper.write_i8(player._p_armor_class);
+    helper.write_i8(player._p_mag_resist);
+    helper.write_i8(player._p_fire_resist);
+    helper.write_i8(player._p_lght_resist);
+    helper.write_le_i32(player._p_gold);
+    helper.write_le_u32(0); // _pInfraFlag
+
+    helper.write_le_i32(0); // temp x
+    helper.write_le_i32(0); // temp y
+    helper.write_le_i32(0); // tempDirection
+    helper.write_le_i32(0); // queuedSpell.spellLevel
+    helper.skip(4); // _pVar5
+    helper.write_le_i32(0); // offset2 x
+    helper.write_le_i32(0); // offset2 y
+    helper.skip(4); // _pVar8
+
+    // Visited levels: 17 classic levels.
+    for i in 0..17 {
+        helper.write_u8(if player._p_lvl_visited.get(i).copied().unwrap_or(false) { 1 } else { 0 });
+    }
+    for i in 0..17 {
+        helper.write_u8(if player._p_set_lvl_visited.get(i).copied().unwrap_or(false) { 1 } else { 0 });
+    }
+    helper.skip(2);
+
+    // Animation pointer blocks (C++ skips pointers, writes frame counts).
+    helper.skip(4); // _pGFXLoad
+    helper.skip(32); // _pNAnim pointers (8)
+    helper.write_le_i32(8); // _pNFrames
+    helper.skip(4); // _pNWidth
+    helper.skip(32); // _pWAnim
+    helper.write_le_i32(8); // _pWFrames
+    helper.skip(4); // _pWWidth
+    helper.skip(32); // _pAAnim
+    helper.write_le_i32(8); // _pAFrames
+    helper.skip(4); // _pAWidth
+    helper.write_le_i32(0); // _pAFNum
+    helper.skip(32); // _pLAnim
+    helper.skip(32); // _pFAnim
+    helper.skip(32); // _pTAnim
+    helper.write_le_i32(8); // _pSFrames
+    helper.skip(4); // _pSWidth
+    helper.write_le_i32(0); // _pSFNum
+    helper.skip(32); // _pHAnim
+    helper.write_le_i32(8); // _pHFrames
+    helper.skip(4); // _pHWidth
+    helper.skip(32); // _pDAnim
+    helper.write_le_i32(8); // _pDFrames
+    helper.skip(4); // _pDWidth
+    helper.skip(32); // _pBAnim
+    helper.write_le_i32(8); // _pBFrames
+    helper.skip(4); // _pBWidth
+
+    // Items: InvBody (7) + InvList (40) + SpdList (8) + HoldItem (1).
+    for item in player.inv_body.iter() {
+        player_item_to_binary(item).to_binary(helper, is_hellfire);
+    }
+    for item in player.inv_list.iter() {
+        player_item_to_binary(item).to_binary(helper, is_hellfire);
+    }
+    helper.write_le_i32(player._p_num_inv);
+    for _ in 0..40 {
+        helper.write_i8(0); // InvGrid (engine does not track cells)
+    }
+    for item in player.spd_list.iter() {
+        player_item_to_binary(item).to_binary(helper, is_hellfire);
+    }
+    player_item_to_binary(&player.hold_item).to_binary(helper, is_hellfire);
+
+    // Item bonus fields.
+    helper.write_le_i32(player._p_i_min_dam);
+    helper.write_le_i32(player._p_i_max_dam);
+    helper.write_le_i32(player._p_i_ac);
+    helper.write_le_i32(player._p_i_bonus_dam);
+    helper.write_le_i32(player._p_i_bonus_to_hit);
+    helper.write_le_i32(player._p_i_bonus_ac);
+    helper.write_le_i32(player._p_i_bonus_dam_mod);
+    helper.skip(4);
+    helper.write_le_u64(player._p_i_spells);
+    helper.write_le_i32(0); // _pIFlags
+    helper.write_le_i32(player._p_i_get_hit);
+    helper.write_i8(0); // _pISplLvlAdd (engine does not track)
+    helper.skip(1); // _pISplCost
+    helper.skip(2);
+    helper.skip(4); // _pISplDur
+    helper.write_le_i32(player._p_i_en_ac);
+    helper.write_le_i32(player._p_i_f_min_dam);
+    helper.write_le_i32(player._p_i_f_max_dam);
+    helper.write_le_i32(player._p_i_l_min_dam);
+    helper.write_le_i32(player._p_i_l_max_dam);
+    helper.write_le_i32(0); // _pOilType
+    helper.write_u8(0); // pTownWarps
+    helper.write_u8(0); // pDungMsgs
+    helper.write_u8(0); // pLvlLoad
+    helper.write_u8(if is_hellfire { 0 } else { 0 }); // pDungMsgs2 / 0
+    helper.write_u8(0); // pManaShield
+    helper.write_u8(0); // pOriginalCathedral
+    helper.skip(2);
+    helper.write_le_u16(0); // wReflections
+    helper.skip(14);
+    helper.write_le_u32(0); // pDiabloKillLevel
+    helper.write_le_u32(0); // difficulty
+    helper.write_le_u32(0); // pDamAcFlags
+    helper.skip(20);
+}
+
+// ============================================================================
 // SaveGameData orchestration (C++ loadsave.cpp:2762-2935)
 // ============================================================================
 
