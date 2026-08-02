@@ -853,6 +853,9 @@ fn engine_state_serialises_cpp_game_entry() {
     gs.current_dungeon_level = 1;
     gs.is_town = false;
 
+    // Kill counts land in the entry: set one and verify the segment (after
+    // quests + portals) carries it as BE i32.
+    gs.kill_counts[0] = 7;
     let entry = gs.write_save_game_v3();
     assert_eq!(&entry[..4], b"SHAR", "spawn magic");
     let header = CppGameHeader::parse(&entry).expect("header parses");
@@ -868,6 +871,14 @@ fn engine_state_serialises_cpp_game_entry() {
     assert!(
         entry[name_off..name_off + 32].iter().all(|&b| b == 0),
         "fresh player has an empty name field"
+    );
+
+    // Kill-count segment: quests (704) + portals (96) after the SavePlayer.
+    let kill_off = 43 + 17 * 8 + 21680 + 704 + 96;
+    assert_eq!(
+        &entry[kill_off..kill_off + 4],
+        &7i32.to_be_bytes(),
+        "live kill count serialised as BE i32"
     );
 
     // Quests segment follows the 21680-byte SavePlayer (current C++ layout):

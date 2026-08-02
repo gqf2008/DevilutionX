@@ -383,6 +383,10 @@ pub struct GameState {
     /// approximates it by retaining dLight instead of blacking it out).
     /// Reset on every descend.
     pub explored: Vec<bool>,
+    /// Per-monster-type kill counts (C++ MonsterKillCounts[138]); the Rust
+    /// monster set is a 20-type simplification, so counts land in the first
+    /// slots.
+    pub kill_counts: [i32; 138],
     /// Active floating damage numbers (C++ `qol/floatingnumbers.cpp`).
     pub floating_numbers: crate::game::floatingnumbers::FloatingNumbers,
 
@@ -572,6 +576,7 @@ impl GameState {
             player_light_index: crate::game::lighting::NO_LIGHT,
             pending_spell: None,
             explored: vec![false; 112 * 112],
+            kill_counts: [0; 138],
             floating_numbers: crate::game::floatingnumbers::FloatingNumbers::new(),
             quests: {
                 let mut q = crate::game::quest_new::QuestManager::new();
@@ -1367,6 +1372,7 @@ impl GameState {
                     match player_attack_monster(&self.player, monster, rng) {
                         crate::game::combat_integration::AttackResult::Kill { damage } => {
                             // Award monster XP on kill (monster_dat xp reward).
+                            self.kill_counts[monster.monster_type as usize % 138] += 1;
                             xp_gained += monster.experience as i32;
                             // Record the death tile for loot drop.
                             let mp = monster.position();
@@ -2163,7 +2169,7 @@ impl GameState {
         let quests: Vec<crate::game::quest_new::Quest> =
             self.quests.quests.iter().take(16).cloned().collect();
         let portals = vec![(false, (0, 0), 0, 0, false); 4];
-        let kill = vec![0i32; 138];
+        let kill = self.kill_counts.to_vec();
 
         // Dungeon body (monsters, missiles, objects, lights, vision).
         let (monsters, params) = self.capture_monsters();
