@@ -940,6 +940,11 @@ impl GameState {
             self.logic_step = GameLogicStep::ProcessMonsters;
             self.process_monsters(rng);
 
+            // C++ ProcessLightList runs after ProcessMonsters; give glowing
+            // monsters dynamic lights and apply all light changes.
+            self.update_monster_lights();
+            self.light_manager.process_light_list();
+
             // Process objects (C++ line 1525)
             self.logic_step = GameLogicStep::ProcessObjects;
             self.process_objects();
@@ -969,6 +974,48 @@ impl GameState {
         self.check_player_death();
 
         self.logic_step = GameLogicStep::None;
+    }
+
+    /// C++ `UpdateMonsterLights` (diablo.cpp:1496-1519) + the AddLight sites
+    /// in `monster.cpp` (Diablo 898, unique monsters 3351): glowing monsters
+    /// (berserk / uniques) own a dynamic light that follows them every tick;
+    /// dead monsters release their light.
+    fn update_monster_lights(&mut self) {
+        use crate::game::monster::{MonsterFlags, UniqueMonsterType};
+        let is_nest = self.current_dungeon_level == 5; // C++ DTYPE_NEST
+        let light_manager = &mut self.light_manager;
+        let monsters = &mut self.monster_manager;
+        for (_, m) in monsters.iter_mut() {
+            if !m.is_alive() {
+                if m.light_id >= 0 {
+                    light_manager.remove_light(m.light_id as i32);
+                    m.light_id = -1;
+                }
+                continue;
+            }
+            // C++ radius rules: berserk = Nest 9 else 3 (diablo.cpp:1501);
+            // Diablo unique = 8 (monster.cpp:898); other uniques (except
+            // HorkDemon) = 3 (monster.cpp:3351).
+            let radius = if m.flags.contains(MonsterFlags::BERSERK) {
+                Some(if is_nest { 9 } else { 3 })
+            } else if m.unique_type != UniqueMonsterType::None {
+                if m.monster_type == crate::game::monster::MonsterType::Diablo {
+                    Some(8)
+                } else if matches!(m.unique_type, UniqueMonsterType::Hork1 | UniqueMonsterType::Hork2) {
+                    None // HorkDemon keeps NO_LIGHT (monster.cpp:3350)
+                } else {
+                    Some(3)
+                }
+            } else {
+                None
+            };
+            let pos = m.position();
+            if m.light_id >= 0 {
+                light_manager.change_light_position(m.light_id as i32, pos);
+            } else if let Some(r) = radius {
+                m.light_id = light_manager.add_light(pos, r) as i8;
+            }
+        }
     }
 
     /// Check whether the player just died (HP ≤ 0) and latch [`player_dead`]
@@ -4014,6 +4061,94 @@ mod tests {
                 "neighbouring tile lit by falloff"
             );
         }
+    }
+
+    #[test]
+    fn test_update_monster_lights_glow_follow_release() {
+        use crate::game::monster::{Monster, MonsterType, UniqueMonsterType};
+
+        let mut gs = GameState::new(Player::new(), false, 42);
+        gs.current_dungeon_level = 1;
+        gs.light_manager.init();
+        gs.light_manager
+            .make_light_table(crate::game::lighting::DungeonLevelType::Cathedral);
+
+        // Glowing unique monster (C++ monster.cpp:3351, radius 3) and a
+        // plain monster that must not gain a light.
+        let mut unique = Monster::new(1, MonsterType::Zombie, 30, 30, 0);
+        unique.hp = 50;
+        unique.max_hp = 50;
+        unique.unique_type = UniqueMonsterType::SkeletonKing;
+        let mut plain = Monster::new(2, MonsterType::Zombie, 40, 40, 0);
+        plain.hp = 50;
+        plain.max_hp = 50;
+        gs.add_monster(unique);
+        gs.add_monster(plain);
+
+        gs.update_monster_lights();
+        let li = gs
+            .monster_manager
+            .iter()
+            .find(|(_, m)| m.x == 30 && m.y == 30)
+            .unwrap()
+            .1
+            .light_id;
+        assert!(li >= 0, "unique monster gained a light");
+        assert_eq!(gs.light_manager.lights[li as usize].radius, 3);
+        assert_eq!(
+            gs.light_manager.lights[li as usize].position.tile,
+            crate::game::types::Point::new(30, 30)
+        );
+        let pi = gs
+            .monster_manager
+            .iter()
+            .find(|(_, m)| m.x == 40 && m.y == 40)
+            .unwrap()
+            .1
+            .light_id;
+        assert_eq!(pi, -1, "plain monster has no light");
+
+        // Monster moves -> light follows (C++ ChangeLightXY).
+        {
+            let m = gs
+                .monster_manager
+                .iter_mut()
+                .find(|(_, m)| m.x == 30 && m.y == 30)
+                .unwrap()
+                .1;
+            m.x = 31;
+            m.y = 31;
+        }
+        gs.update_monster_lights();
+        assert_eq!(
+            gs.light_manager.lights[li as usize].position.tile,
+            crate::game::types::Point::new(31, 31),
+            "light follows the monster"
+        );
+
+        // Monster dies -> light released (C++ AddUnLight on death).
+        {
+            let m = gs
+                .monster_manager
+                .iter_mut()
+                .find(|(_, m)| m.x == 31 && m.y == 31)
+                .unwrap()
+                .1;
+            m.hp = 0;
+        }
+        gs.update_monster_lights();
+        assert!(
+            gs.light_manager.lights[li as usize].is_invalid,
+            "dead monster light removed"
+        );
+        let li2 = gs
+            .monster_manager
+            .iter()
+            .find(|(_, m)| m.x == 31 && m.y == 31)
+            .unwrap()
+            .1
+            .light_id;
+        assert_eq!(li2, -1, "light id reset to NO_LIGHT");
     }
 
 }
