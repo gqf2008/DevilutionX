@@ -626,6 +626,64 @@ fn toggle_debug_flag(flag: &std::sync::atomic::AtomicBool, on: Option<bool>) -> 
     }
 }
 
+// ============================================================================
+// Global engine state (C++ `Source/lua/lua_global.cpp`)
+// ============================================================================
+
+use std::cell::RefCell;
+
+thread_local! {
+    /// The process-wide Lua engine, created by `LuaInitialize` (main thread).
+    /// Kept thread-local because `mlua::Lua` is not `Sync`; the game loop and
+    /// startup/shutdown all run on the main thread.
+    static GLOBAL_LUA: RefCell<Option<LuaEngine>> = const { RefCell::new(None) };
+}
+
+/// C++ `LuaInitialize` (lua_global.cpp): create the global Lua state, open the
+/// standard libraries, and register the `devilutionx.*` modules.
+pub fn lua_initialize() -> mlua::Result<()> {
+    let engine = LuaEngine::new()?;
+    engine.register_default_modules()?;
+    GLOBAL_LUA.with(|slot| *slot.borrow_mut() = Some(engine));
+    Ok(())
+}
+
+/// C++ `LuaShutdown` (lua_global.cpp): release the global Lua state.
+pub fn lua_shutdown() {
+    GLOBAL_LUA.with(|slot| *slot.borrow_mut() = None);
+}
+
+/// Run `f` with the global engine when it has been initialized.
+pub fn with_lua<T>(f: impl FnOnce(&LuaEngine) -> T) -> Option<T> {
+    GLOBAL_LUA.with(|slot| slot.borrow().as_ref().map(f))
+}
+
+/// C++ `LuaEvent(name).trigger()` dispatch. Called by the game loop for the
+/// events the C++ engine forwards to mods.
+pub fn call_event(name: &str) {
+    with_lua(|engine| {
+        let _ = engine.call_event(name);
+    });
+}
+
+/// Push the live player's name/level into the Lua registry so
+/// `devilutionx.player.self()` reports the real character (C++ keeps the
+/// player info in the game globals and the Lua module reads it live).
+pub fn sync_player(player: &crate::game::player_exact::Player) {
+    with_lua(|engine| {
+        let name = decode_player_name(&player._p_name);
+        let _ = engine.state().set_named_registry_value("player_name", name);
+        let _ = engine.state().set_named_registry_value("player_level", player._p_level as i32);
+    });
+}
+
+/// Decode a C++ fixed-size player-name byte array (NUL-terminated) to `String`.
+fn decode_player_name(raw: &[u8]) -> String {
+    let end = raw.iter().position(|&b| b == 0).unwrap_or(raw.len());
+    String::from_utf8_lossy(&raw[..end]).to_string()
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -906,4 +964,47 @@ mod tests {
         assert!(state.contains("On"));
         assert!(crate::game::debug::DEBUG_GRID.load(Ordering::SeqCst));
     }
+
+    #[test]
+    fn test_global_engine_sync_player_updates_registry() {
+        use crate::game::player_exact::Player;
+
+        // Thread-local global: independent per test thread.
+        crate::game::lua::lua_initialize().unwrap();
+        assert!(crate::game::lua::with_lua(|_| ()).is_some());
+
+        let mut player = Player::new();
+        player._p_name[..9].copy_from_slice(b"TestHero\0");
+        player._p_level = 3;
+        crate::game::lua::sync_player(&player);
+
+        crate::game::lua::with_lua(|engine| {
+            engine
+                .load_script(
+                    "sync_player.lua",
+                    r#"
+                    p = devilutionx.player.self()
+                    lua_name = p.name
+                    lua_level = p.characterLevel
+                    "#,
+                )
+                .unwrap();
+            let lua_name: String = engine.state().globals().get("lua_name").unwrap();
+            assert_eq!(lua_name, "TestHero");
+            let lua_level: i64 = engine.state().globals().get("lua_level").unwrap();
+            assert_eq!(lua_level, 3);
+        });
+
+        // The registry keeps a default even before sync (module default Hero/1).
+        crate::game::lua::lua_shutdown();
+        assert!(crate::game::lua::with_lua(|_| ()).is_none());
+    }
+
+    #[test]
+    fn test_call_event_dispatch_noop_without_engine() {
+        // with_lua/call_event are safe when the engine is not initialized.
+        crate::game::lua::call_event("on_update");
+        assert!(crate::game::lua::with_lua(|_| ()).is_none());
+    }
+
 }

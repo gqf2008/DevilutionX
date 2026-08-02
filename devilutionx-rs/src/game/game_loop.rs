@@ -440,6 +440,9 @@ fn game_logic(game_state: &mut GameState) -> Result<()> {
     let mut rng = rand::rngs::StdRng::seed_from_u64(rng_seed);
     game_state.update(&mut rng);
 
+    // Push the live player info into the Lua registry (devilutionx.player.self()).
+    crate::game::lua::sync_player(&game_state.player);
+
     if level_type.is_town() {
         // TOWN LOGIC
         // C++: ProcessTowners(), ProcessItems(), ProcessMissiles()

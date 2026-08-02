@@ -387,9 +387,8 @@ fn free_item_gfx() {
 /// C++ Reference: Source/lua/lua_global.cpp::LuaShutdown()
 fn lua_shutdown() {
     // C++: CurrentLuaState = std::nullopt;
-    // Lua modding support is optional; when implemented, this would
-    // destroy the Lua state and free mod resources
-    println!("[LuaShutdown] Lua state released (modding disabled)");
+    crate::game::lua::lua_shutdown();
+    println!("[LuaShutdown] Lua state released");
 }
 
 /// Shutdown screen reader accessibility support
@@ -480,13 +479,11 @@ fn unload_fonts() {
 /// Initialize Lua scripting engine for mod support
 /// C++ Reference: Source/lua/lua_global.cpp::LuaInitialize()
 fn lua_initialize() {
-    // C++: Creates sol::state, opens libraries, registers devilutionx modules
-    // Lua modding is optional; when enabled this would:
-    // 1. Create Lua state with panic handler
-    // 2. Open standard libraries (base, coroutine, math, string, table, etc.)
-    // 3. Register DevilutionX API modules (items, player, render, audio, etc.)
-    // 4. Load active mods from options
-    println!("[LuaInitialize] Lua scripting engine ready (modding disabled)");
+    // C++: Creates Lua state, opens libraries, registers devilutionx modules.
+    match crate::game::lua::lua_initialize() {
+        Ok(()) => println!("[LuaInitialize] Lua scripting engine ready"),
+        Err(e) => println!("[LuaInitialize] Lua engine failed to start: {e}"),
+    }
 }
 
 /// Resolve diablo.ini path using the configured preferences directory
