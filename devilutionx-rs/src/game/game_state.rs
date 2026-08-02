@@ -1235,14 +1235,23 @@ impl GameState {
     /// This mirrors the high-level shape of C++ `MonstDeath`/`SpawnItem`
     /// (`Source/items.cpp`) while staying intentionally simple for the demo.
     pub fn roll_monster_drop(&mut self, x: i32, y: i32, rng: &mut impl Rng) {
-        // 40% chance to drop anything at all.
-        if rng.random_range(0..100) >= 40 {
+        // C++ `RndItemForMonsterLevel` (items.cpp:3240-3251):
+        //   if (GenerateRnd(100) > 40) return IDI_NONE;
+        //   if (GenerateRnd(100) > 25) return IDI_GOLD;
+        //   return GetItemIndexForDroppableItem(...);
+        // `random_range(0..100)` yields [0,99] exactly like `GenerateRnd(100)`.
+        if rng.random_range(0..100) > 40 {
             return;
         }
-        let roll = rng.random_range(0..100);
-        let item_type = if roll < 70 {
-            GroundItemType::Gold
-        } else if roll < 90 {
+        if rng.random_range(0..100) > 25 {
+            let item_type = GroundItemType::Gold;
+            self.ground_items.push(GroundItem { x, y, item_type });
+            println!("[Drop] spawned {:?} '{}' at ({}, {})", item_type, item_type.display_name(), x, y);
+            return;
+        }
+        // Non-gold droppable item. Full `SetupAllItems` spawning is not ported;
+        // keep the two demo potion types as the placeholder roll (50/50).
+        let item_type = if rng.random_range(0..2) == 0 {
             GroundItemType::HealingPotion
         } else {
             GroundItemType::ManaPotion
@@ -2526,6 +2535,38 @@ mod tests {
             12,
             "blocked door keeps the open arch micro"
         );
+    }
+
+    /// C++ `RndItemForMonsterLevel` (items.cpp:3240-3251) drop rolls: 60% no
+    /// drop (GenerateRnd(100) > 40), then ~74% gold (GenerateRnd(100) > 25),
+    /// else an item. Over many rolls the observed rates must track those.
+    #[test]
+    fn test_drop_rolls_match_cpp_probabilities() {
+        use rand::SeedableRng;
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let mut gs = GameState::new(Player::new(), false, 1);
+        let mut drops = 0usize;
+        let mut gold = 0usize;
+        let mut potions = 0usize;
+        for i in 0..2000 {
+            gs.ground_items.clear();
+            gs.roll_monster_drop(i % 40, i % 40, &mut rng);
+            if let Some(g) = gs.ground_items.first() {
+                drops += 1;
+                match g.item_type {
+                    GroundItemType::Gold => gold += 1,
+                    GroundItemType::HealingPotion | GroundItemType::ManaPotion => potions += 1,
+                }
+            }
+        }
+        // 40% drop rate (allow +/- 4% sampling noise).
+        let drop_rate = drops as f64 / 2000.0;
+        assert!((0.36..=0.44).contains(&drop_rate), "drop rate {drop_rate}");
+        // Of drops, ~74% gold and ~26% potion.
+        let gold_rate = gold as f64 / drops as f64;
+        let potion_rate = potions as f64 / drops as f64;
+        assert!((0.68..=0.80).contains(&gold_rate), "gold rate {gold_rate}");
+        assert!((0.20..=0.32).contains(&potion_rate), "potion rate {potion_rate}");
     }
 
     // ========================================================================
