@@ -9,6 +9,7 @@ use sdl2::rect::Rect;
 use sdl2::render::{BlendMode, Texture, TextureCreator};
 use sdl2::video::WindowContext;
 
+mod controls;
 mod data;
 mod engine;
 mod game;

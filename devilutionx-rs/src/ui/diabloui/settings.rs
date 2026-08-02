@@ -9,6 +9,8 @@
 //! the C++ `settingsmenu.cpp` state machine (Categories -> Settings ->
 //! ListOption -> KeyInput/PadInput) is a follow-up.
 
+use crate::controls::controller::{ControllerButton, ControllerButtonCombo};
+use crate::controls::keymapper;
 use crate::utils::options as opt;
 
 /// C++ `OptionEntryType`.
@@ -16,14 +18,18 @@ use crate::utils::options as opt;
 pub enum SettingsEntryType {
     Boolean,
     List,
+    /// C++ `OptionEntryType::Key` (KeymapperOptions::Action).
+    Key,
+    /// C++ `OptionEntryType::PadButton` (PadmapperOptions::Action).
+    PadButton,
 }
 
 /// A single settings entry (C++ `OptionEntryBase`).
 pub struct SettingsEntry {
     /// C++ `GetName()` (display name, e.g. "Auto Gold Pickup").
-    pub name: &'static str,
+    pub name: String,
     /// C++ `GetDescription()`.
-    pub description: &'static str,
+    pub description: String,
     pub kind: SettingsEntryType,
     value: Box<dyn Fn() -> String>,
     /// C++ `ChangeOptionValue`: advance/cycle the value. Returns `true` when
@@ -33,6 +39,19 @@ pub struct SettingsEntry {
     list_values: Option<&'static [i32]>,
     list_get: Option<fn(&opt::Options) -> i32>,
     list_set: Option<fn(&mut opt::Options, i32)>,
+    /// C++ `KeymapperOptions::Action` / `PadmapperOptions::Action` reference
+    /// for `OptionEntryType::Key` / `PadButton` entries (index into the live
+    /// `SettingsMenu` action tables).
+    binding: Option<BindingAction>,
+}
+
+/// Which live action a `Key` / `PadButton` entry refers to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BindingAction {
+    /// Index into `SettingsMenu.key_actions`.
+    Key(usize),
+    /// Index into `SettingsMenu.pad_actions`.
+    Pad(usize),
 }
 
 impl SettingsEntry {
@@ -94,8 +113,8 @@ fn boolean(
     set: fn(&mut opt::Options, bool),
 ) -> SettingsEntry {
     SettingsEntry {
-        name,
-        description,
+        name: name.to_string(),
+        description: description.to_string(),
         kind: SettingsEntryType::Boolean,
         value: Box::new(move || if get(&opt::options()) { "On".to_string() } else { "Off".to_string() }),
         cycle: Box::new(move || {
@@ -107,6 +126,7 @@ fn boolean(
         list_values: None,
         list_get: None,
         list_set: None,
+        binding: None,
     }
 }
 
@@ -121,8 +141,8 @@ fn list(
     set: fn(&mut opt::Options, i32),
 ) -> SettingsEntry {
     SettingsEntry {
-        name,
-        description,
+        name: name.to_string(),
+        description: description.to_string(),
         kind: SettingsEntryType::List,
         value: Box::new(move || {
             let current = get(&opt::options());
@@ -148,6 +168,38 @@ fn list(
         list_values: Some(values),
         list_get: Some(get),
         list_set: Some(set),
+        binding: None,
+    }
+}
+
+/// Build a key-binding entry (C++ `OptionEntryType::Key`): the row shows the
+/// action name and the currently bound key; Enter opens the KeyInput screen.
+fn key(name: &str, description: &str, index: usize) -> SettingsEntry {
+    SettingsEntry {
+        name: name.to_string(),
+        description: description.to_string(),
+        kind: SettingsEntryType::Key,
+        value: Box::new(move || String::new()),
+        cycle: Box::new(move || false),
+        list_values: None,
+        list_get: None,
+        list_set: None,
+        binding: Some(BindingAction::Key(index)),
+    }
+}
+
+/// Build a pad-binding entry (C++ `OptionEntryType::PadButton`).
+fn pad(name: &str, description: &str, index: usize) -> SettingsEntry {
+    SettingsEntry {
+        name: name.to_string(),
+        description: description.to_string(),
+        kind: SettingsEntryType::PadButton,
+        value: Box::new(move || String::new()),
+        cycle: Box::new(move || false),
+        list_values: None,
+        list_get: None,
+        list_set: None,
+        binding: Some(BindingAction::Pad(index)),
     }
 }
 
@@ -157,7 +209,10 @@ fn list(
 /// Graphics, Audio, Diablo, Hellfire, Gameplay, Controller, Network, Chat,
 /// Keymapper, Padmapper. Only the categories with a live Rust `Options`
 /// mapping are ported; their relative order matches C++.
-pub fn settings_categories() -> Vec<SettingsCategory> {
+pub fn settings_categories(
+    key_actions: &[keymapper::KeyAction],
+    pad_actions: &[keymapper::PadAction],
+) -> Vec<SettingsCategory> {
     vec![
         SettingsCategory {
             key: "Language",
@@ -237,39 +292,76 @@ pub fn settings_categories() -> Vec<SettingsCategory> {
                 boolean("Rumble", "Enable controller rumble.", |o| o.controller.rumble, |o, v| o.controller.rumble = v),
             ],
         },
+        SettingsCategory {
+            key: "Keymapping",
+            name: "Keymapping",
+            description: "Keymapping Settings",
+            entries: key_actions
+                .iter()
+                .enumerate()
+                .map(|(i, a)| key(&a.name, &a.description, i))
+                .collect(),
+        },
+        SettingsCategory {
+            key: "Padmapping",
+            name: "Padmapping",
+            description: "Padmapping Settings",
+            entries: pad_actions
+                .iter()
+                .enumerate()
+                .map(|(i, a)| pad(&a.name, &a.description, i))
+                .collect(),
+        },
     ]
 }
 
-/// Two-level settings navigation (C++ `ShownMenuType::Categories` /
-/// `ShownMenuType::Settings`). The deeper ListOption / KeyInput / PadInput
-/// levels are follow-ups.
+/// Three-level settings navigation (C++ `ShownMenuType::Categories` /
+/// `Settings` / `ListOption` / `KeyInput` / `PadInput`).
 pub struct SettingsMenu {
     categories: Vec<SettingsCategory>,
     active_category: Option<usize>,
     /// C++ `ShownMenuType::ListOption`: the entry index whose value list is
     /// currently shown.
     list_entry: Option<usize>,
+    /// C++ `ShownMenuType::KeyInput` / `PadInput`: the action being rebound.
+    binding_entry: Option<BindingAction>,
     selected: usize,
+    /// Live keymapper actions (C++ `GetOptions().Keymapper.actions`).
+    key_actions: Vec<keymapper::KeyAction>,
+    /// Live padmapper actions (C++ `GetOptions().Padmapper.actions`).
+    pad_actions: Vec<keymapper::PadAction>,
 }
 
 impl SettingsMenu {
     pub fn new() -> Self {
+        let key_actions = keymapper::default_key_actions();
+        let pad_actions = keymapper::default_pad_actions();
+        let categories = settings_categories(&key_actions, &pad_actions);
         Self {
-            categories: settings_categories(),
+            categories,
             active_category: None,
             list_entry: None,
+            binding_entry: None,
             selected: 0,
+            key_actions,
+            pad_actions,
         }
     }
 
     /// Number of rows in the current level: categories, a category's entries,
-    /// or a list entry's values (C++ `ShownMenuType`).
+    /// a list entry's values, or the KeyInput/PadInput screen's rows.
     pub fn item_count(&self) -> usize {
         let Some(ci) = self.active_category else {
             return self.categories.len();
         };
         if let Some(ei) = self.list_entry {
             return self.categories[ci].entries[ei].list_size();
+        }
+        if self.binding_entry.is_some() {
+            // C++ KeyInput screen: "Bound key:", value, spacer, "Unbind key".
+            // The model exposes 3 actionable rows (value / unbind) plus the
+            // capture row is driven by key events, so count 3 for navigation.
+            return 3;
         }
         self.categories[ci].entries.len()
     }
@@ -301,6 +393,77 @@ impl SettingsMenu {
         self.list_entry.is_some()
     }
 
+    /// True when the KeyInput / PadInput screen is shown (C++ `shownMenu`).
+    pub fn in_binding_screen(&self) -> bool {
+        self.binding_entry.is_some()
+    }
+
+    /// C++ `ShownMenuType::KeyInput` vs `PadInput` for the active screen.
+    pub fn binding_kind(&self) -> Option<SettingsEntryType> {
+        match self.binding_entry {
+            Some(BindingAction::Key(_)) => Some(SettingsEntryType::Key),
+            Some(BindingAction::Pad(_)) => Some(SettingsEntryType::PadButton),
+            None => None,
+        }
+    }
+
+    /// The action currently being rebound (C++ `selectedOption`).
+    pub fn binding_action(&self) -> Option<keymapper::KeyAction> {
+        match self.binding_entry {
+            Some(BindingAction::Key(i)) => self.key_actions.get(i).cloned(),
+            _ => None,
+        }
+    }
+
+    /// The pad action currently being rebound.
+    pub fn binding_pad_action(&self) -> Option<keymapper::PadAction> {
+        match self.binding_entry {
+            Some(BindingAction::Pad(i)) => self.pad_actions.get(i).cloned(),
+            _ => None,
+        }
+    }
+
+    /// C++ `selectedOption->GetValueDescription()` for the binding screen.
+    pub fn binding_value(&self) -> String {
+        match self.binding_entry {
+            Some(BindingAction::Key(i)) => self
+                .key_actions
+                .get(i)
+                .map(|a| a.value_description().to_string())
+                .unwrap_or_default(),
+            Some(BindingAction::Pad(i)) => self
+                .pad_actions
+                .get(i)
+                .map(|a| a.value_description(false))
+                .unwrap_or_default(),
+            None => String::new(),
+        }
+    }
+
+    /// C++ `KeymapperOptions::Action::SetValue(keyName)` from the KeyInput
+    /// capture screen. Empty string unbinds (C++ `UnbindKey`).
+    pub fn set_key_binding(&mut self, key_name: &str) -> bool {
+        let Some(BindingAction::Key(i)) = self.binding_entry else {
+            return false;
+        };
+        let Some(action) = self.key_actions.get_mut(i) else {
+            return false;
+        };
+        let names = keymapper::key_id_to_name();
+        action.set_value(key_name, &names)
+    }
+
+    /// C++ `PadmapperOptions::Action::SetValue(combo)` from PadInput capture.
+    pub fn set_pad_binding(&mut self, combo: ControllerButtonCombo) -> bool {
+        let Some(BindingAction::Pad(i)) = self.binding_entry else {
+            return false;
+        };
+        let Some(action) = self.pad_actions.get_mut(i) else {
+            return false;
+        };
+        action.set_value(combo)
+    }
+
     /// Screen title (C++ shows the category / option name in the sub-levels).
     pub fn title(&self) -> String {
         let Some(ci) = self.active_category else {
@@ -309,10 +472,25 @@ impl SettingsMenu {
         if let Some(ei) = self.list_entry {
             return self.categories[ci].entries[ei].name.to_string();
         }
+        if let Some(ba) = self.binding_entry {
+            return match ba {
+                BindingAction::Key(i) => self
+                    .key_actions
+                    .get(i)
+                    .map(|a| a.name.clone())
+                    .unwrap_or_default(),
+                BindingAction::Pad(i) => self
+                    .pad_actions
+                    .get(i)
+                    .map(|a| a.name.clone())
+                    .unwrap_or_default(),
+            };
+        }
         self.categories[ci].name.to_string()
     }
 
-    /// Row label: category name, "Entry: current value", or a list value.
+    /// Row label: category name, "Entry: current value", a list value, or a
+    /// binding-screen row.
     pub fn row_label(&self, idx: usize) -> String {
         let Some(ci) = self.active_category else {
             return self.categories[idx].name.to_string();
@@ -322,12 +500,35 @@ impl SettingsMenu {
                 .list_value(idx)
                 .unwrap_or_default();
         }
+        if self.binding_entry.is_some() {
+            return match idx {
+                0 => format!("Bound: {}", self.binding_value()),
+                1 => "Press new key/button".to_string(),
+                _ => "Unbind".to_string(),
+            };
+        }
         let entry = &self.categories[ci].entries[idx];
-        format!("{}: {}", entry.name, entry.value_description())
+        // Key/PadButton entries show the live bound value (C++ row
+        // `"Name: value"` from CreateDrawStringFormatArgForEntry).
+        let value = match entry.binding {
+            Some(BindingAction::Key(i)) => self
+                .key_actions
+                .get(i)
+                .map(|a| a.value_description().to_string())
+                .unwrap_or_default(),
+            Some(BindingAction::Pad(i)) => self
+                .pad_actions
+                .get(i)
+                .map(|a| a.value_description(false))
+                .unwrap_or_default(),
+            None => entry.value_description(),
+        };
+        format!("{}: {}", entry.name, value)
     }
 
-    /// Enter: drill into a category / value list, or apply the selected value
-    /// (C++ `ItemSelected`). Returns `true` when a value changed.
+    /// Enter: drill into a category / value list / binding screen, or apply
+    /// the selected value (C++ `ItemSelected`). Returns `true` when a value
+    /// changed.
     pub fn activate(&mut self) -> bool {
         let Some(ci) = self.active_category else {
             if self.selected < self.categories.len() {
@@ -343,24 +544,61 @@ impl SettingsMenu {
             self.selected = ei; // keep the entry highlighted (C++ returns to Settings)
             return changed;
         }
+        if self.binding_entry.is_some() {
+            // KeyInput/PadInput: row 2 = Unbind key/button (C++ `UnbindKey` /
+            // `UnbindPadButton`); row 1 = keep capture mode.
+            if self.selected == 2 {
+                match self.binding_entry {
+                    Some(BindingAction::Key(_)) => {
+                        self.set_key_binding("");
+                    }
+                    Some(BindingAction::Pad(_)) => {
+                        self.set_pad_binding(ControllerButtonCombo::new(
+                            ControllerButton::None,
+                        ));
+                    }
+                    None => {}
+                }
+            }
+            self.binding_entry = None;
+            self.selected = 0;
+            return true;
+        }
         if self.selected >= self.categories[ci].entries.len() {
             return false;
         }
         let entry = &self.categories[ci].entries[self.selected];
-        if entry.kind == SettingsEntryType::List && entry.list_size() > 2 {
-            // Open the ListOption submenu (C++ settingsmenu.cpp:285-290).
-            self.list_entry = Some(self.selected);
-            self.selected = entry.active_index();
-            false
-        } else {
-            // Booleans and 2-value lists change immediately (C++:292-296).
-            entry.change()
+        match entry.kind {
+            SettingsEntryType::List => {
+                if entry.list_size() > 2 {
+                    // Open the ListOption submenu (C++ settingsmenu.cpp:285-290).
+                    self.list_entry = Some(self.selected);
+                    self.selected = entry.active_index();
+                    false
+                } else {
+                    // Booleans and 2-value lists change immediately (C++:292-296).
+                    entry.change()
+                }
+            }
+            SettingsEntryType::Key | SettingsEntryType::PadButton => {
+                // Open the KeyInput / PadInput screen (C++ settingsmenu.cpp:
+                // 298-307). The screen itself is captured by the UI loop; the
+                // model just records which action is being rebound.
+                self.binding_entry = entry.binding;
+                self.selected = 0;
+                false
+            }
+            SettingsEntryType::Boolean => entry.change(),
         }
     }
 
     /// Esc: back one level; at the top level, `true` exits the settings
     /// screen (C++ `GoBackOneMenuLevel` -> `backToMain`).
     pub fn escape(&mut self) -> bool {
+        if self.binding_entry.take().is_some() {
+            self.selected = 0;
+            return false;
+        }
         if self.list_entry.take().is_some() {
             self.selected = 0;
             return false;
@@ -375,6 +613,7 @@ impl SettingsMenu {
 
 
 
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -382,10 +621,14 @@ mod tests {
     #[test]
     fn test_categories_match_cpp_order_for_ported_subset() {
         // C++ GetCategories (options.h:893-911) relative order, restricted to
-        // the categories with a live Rust Options mapping.
-        let categories = settings_categories();
+        // the categories with a live Rust Options mapping. Keymapping and
+        // Padmapping are built from the keymapper/padmapper action tables.
+        let categories = settings_categories(&[], &[]);
         let names: Vec<&str> = categories.iter().map(|c| c.name).collect();
-        assert_eq!(names, vec!["Language", "Graphics", "Audio", "Gameplay", "Controller"]);
+        assert_eq!(
+            names,
+            vec!["Language", "Graphics", "Audio", "Gameplay", "Controller", "Keymapping", "Padmapping"]
+        );
         // C++ keys: Gameplay category uses INI section "Game".
         let gameplay = categories.iter().find(|c| c.name == "Gameplay").unwrap();
         assert_eq!(gameplay.key, "Game");
@@ -394,9 +637,9 @@ mod tests {
 
     #[test]
     fn test_gameplay_entries_match_cpp_names() {
-        let categories = settings_categories();
+        let categories = settings_categories(&[], &[]);
         let gameplay = categories.iter().find(|c| c.name == "Gameplay").unwrap();
-        let names: Vec<&str> = gameplay.entries.iter().map(|e| e.name).collect();
+        let names: Vec<&str> = gameplay.entries.iter().map(|e| e.name.as_str()).collect();
         for expected in [
             "Run in Town",
             "Grab Input",
@@ -426,7 +669,7 @@ mod tests {
             let mut o = opt::options_mut();
             o.gameplay.run_in_town = false;
         }
-        let categories = settings_categories();
+        let categories = settings_categories(&[], &[]);
         let entry = categories
             .iter()
             .find(|c| c.name == "Gameplay")
@@ -451,7 +694,7 @@ mod tests {
     fn test_settings_menu_navigation() {
         let mut menu = SettingsMenu::new();
         assert!(menu.in_categories());
-        assert_eq!(menu.item_count(), 5);
+        assert_eq!(menu.item_count(), 7);
         assert_eq!(menu.title(), "Settings");
         assert_eq!(menu.row_label(0), "Language");
 
@@ -490,7 +733,7 @@ mod tests {
         let mut menu = SettingsMenu::new();
         // Audio list entries reflect the live value (checked in the same
         // test to avoid racing the shared options global).
-        let categories = settings_categories();
+        let categories = settings_categories(&[], &[]);
         let audio = categories.iter().find(|c| c.name == "Audio").unwrap();
         let sample = audio.entries.iter().find(|e| e.name == "Sample Rate").unwrap();
         assert_eq!(sample.kind, SettingsEntryType::List);
@@ -531,6 +774,57 @@ mod tests {
         assert!(!menu.escape(), "settings level goes back to categories");
         assert!(menu.in_categories());
         assert!(menu.escape(), "category level exits the settings screen");
+    }
+
+    #[test]
+    fn test_key_input_binding_screen() {
+        let mut menu = SettingsMenu::new();
+        // Categories: Language(0) Graphics(1) Audio(2) Gameplay(3)
+        // Controller(4) Keymapping(5) Padmapping(6).
+        menu.set_selection(5);
+        menu.activate();
+        assert_eq!(menu.title(), "Keymapping");
+        // First key entry: "Belt item 1".
+        menu.set_selection(0);
+        menu.activate();
+        assert!(menu.in_binding_screen(), "Key entry opens the KeyInput screen");
+        assert_eq!(menu.binding_kind(), Some(SettingsEntryType::Key));
+        assert_eq!(menu.title(), "Belt item 1");
+        assert_eq!(menu.binding_value(), "", "unbound by default");
+        assert_eq!(menu.row_label(0), "Bound: ");
+        // Rebind to a key name (C++ SetValue via the key-name map).
+        assert!(menu.set_key_binding("I"));
+        assert_eq!(menu.binding_value(), "I");
+        assert_eq!(menu.row_label(0), "Bound: I");
+        // Unbind via the screen's row 2 (C++ UnbindKey).
+        menu.set_selection(2);
+        assert!(menu.activate(), "unbind reports a change");
+        assert!(!menu.in_binding_screen());
+        let categories = settings_categories(&menu.key_actions, &menu.pad_actions);
+        let km = categories.iter().find(|c| c.name == "Keymapping").unwrap();
+        assert!(km.entries[0].binding.is_some());
+    }
+
+    #[test]
+    fn test_pad_input_binding_screen() {
+        let mut menu = SettingsMenu::new();
+        menu.set_selection(6);
+        menu.activate();
+        assert_eq!(menu.title(), "Padmapping");
+        // Pad actions: 8 belt + 8 quick spells, then PrimaryAction (index 16).
+        menu.set_selection(16);
+        menu.activate();
+        assert!(menu.in_binding_screen());
+        assert_eq!(menu.binding_kind(), Some(SettingsEntryType::PadButton));
+        assert_eq!(menu.title(), "Primary action");
+        assert_eq!(menu.binding_value(), "B", "C++ default ControllerButton_BUTTON_B");
+        // Rebind to a different combo (C++ PadmapperOptions::Action::SetValue).
+        assert!(menu.set_pad_binding(ControllerButtonCombo::new(ControllerButton::A)));
+        assert_eq!(menu.binding_value(), "A");
+        // Escape returns to the Padmapping settings level.
+        assert!(!menu.escape());
+        assert!(!menu.in_binding_screen());
+        assert_eq!(menu.title(), "Padmapping");
     }
 
 }

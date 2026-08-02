@@ -21,6 +21,7 @@ pub mod controller;
 pub mod player_controls;
 pub mod game_controls;
 pub mod menu_controls;
+pub mod keymapper;
 
 // Re-export main types
 pub use controller::{
@@ -45,4 +46,13 @@ pub use game_controls::{
 pub use menu_controls::{
     MenuAction,
     MenuControls,
+};
+
+pub use keymapper::{
+    KeyAction,
+    PadAction,
+    default_key_actions,
+    default_pad_actions,
+    key_id_to_name,
+    combo_description,
 };
