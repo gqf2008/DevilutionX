@@ -1140,9 +1140,8 @@ fn apply_shrine_effect(shrine_type: ShrineType, shrine: &mut Object, player: &mu
         // === Stat Modification Shrines (Full Implementation) ===
 
         ShrineType::Mysterious => {
-            // -1 all stats, +6 random stat
-            let mut rng = rand::rng();
-            let random_stat = match rng.random_range(0..4) {
+            // -1 all stats, +6 random stat (C++ GenerateRnd(4))
+            let random_stat = match crate::engine::random::gameplay_rnd(0, 3) {
                 0 => CharacterAttribute::Strength,
                 1 => CharacterAttribute::Magic,
                 2 => CharacterAttribute::Dexterity,
@@ -1152,15 +1151,14 @@ fn apply_shrine_effect(shrine_type: ShrineType, shrine: &mut Object, player: &mu
         }
 
         ShrineType::Weird => {
-            // Swap two random stats
-            let mut rng = rand::rng();
-            let stat1 = match rng.random_range(0..4) {
+            // Swap two random stats (C++ GenerateRnd(4))
+            let stat1 = match crate::engine::random::gameplay_rnd(0, 3) {
                 0 => CharacterAttribute::Strength,
                 1 => CharacterAttribute::Magic,
                 2 => CharacterAttribute::Dexterity,
                 _ => CharacterAttribute::Vitality,
             };
-            let mut stat2 = match rng.random_range(0..4) {
+            let mut stat2 = match crate::engine::random::gameplay_rnd(0, 3) {
                 0 => CharacterAttribute::Strength,
                 1 => CharacterAttribute::Magic,
                 2 => CharacterAttribute::Dexterity,
@@ -1168,7 +1166,7 @@ fn apply_shrine_effect(shrine_type: ShrineType, shrine: &mut Object, player: &mu
             };
             // Ensure different stats
             while stat2 as u8 == stat1 as u8 {
-                stat2 = match rng.random_range(0..4) {
+                stat2 = match crate::engine::random::gameplay_rnd(0, 3) {
                     0 => CharacterAttribute::Strength,
                     1 => CharacterAttribute::Magic,
                     2 => CharacterAttribute::Dexterity,
@@ -1184,9 +1182,8 @@ fn apply_shrine_effect(shrine_type: ShrineType, shrine: &mut Object, player: &mu
         ShrineType::Shimmering => shrine_effects::apply_shimmering(player), // +2 Mag
 
         ShrineType::Sparkling => {
-            // +2 random stat (Str/Mag/Dex/Vit)
-            let mut rng = rand::rng();
-            let random_stat = match rng.random_range(0..4) {
+            // +2 random stat (Str/Mag/Dex/Vit) (C++ GenerateRnd(4))
+            let random_stat = match crate::engine::random::gameplay_rnd(0, 3) {
                 0 => CharacterAttribute::Strength,
                 1 => CharacterAttribute::Magic,
                 2 => CharacterAttribute::Dexterity,
@@ -1196,9 +1193,8 @@ fn apply_shrine_effect(shrine_type: ShrineType, shrine: &mut Object, player: &mu
         }
 
         ShrineType::Solar => {
-            // Time-based stat boost (+2 to stat based on hour)
-            let mut rng = rand::rng();
-            let random_stat = match rng.random_range(0..4) {
+            // Time-based stat boost (+2 to stat based on hour) (C++ GenerateRnd(4))
+            let random_stat = match crate::engine::random::gameplay_rnd(0, 3) {
                 0 => CharacterAttribute::Strength,
                 1 => CharacterAttribute::Magic,
                 2 => CharacterAttribute::Dexterity,

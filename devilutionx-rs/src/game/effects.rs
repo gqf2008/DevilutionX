@@ -429,20 +429,18 @@ impl EffectsManager {
 
     /// 随机化某些音效
     fn randomize_sfx(&self, sfx_id: SfxID) -> SfxID {
-        use rand::Rng;
-        let mut rng = rand::rng();
 
         match sfx_id {
             // 2个变种
             SfxID::Warrior69 | SfxID::Sorceror69 | SfxID::Rogue69 |
             SfxID::Monk69 | SfxID::Swing | SfxID::SpellAcid | SfxID::OperateShrine => {
-                let offset = rng.random_range(0..2);
+                let offset = crate::engine::random::gameplay_rnd(0, 1) as i16;
                 SfxID::from_i16(sfx_id.as_i16() + offset).unwrap_or(sfx_id)
             }
             // 3个变种
             SfxID::Warrior14 | SfxID::Warrior15 | SfxID::Warrior16 |
             SfxID::Warrior2 | SfxID::Rogue14 | SfxID::Sorceror14 | SfxID::Monk14 => {
-                let offset = rng.random_range(0..3);
+                let offset = crate::engine::random::gameplay_rnd(0, 2) as i16;
                 SfxID::from_i16(sfx_id.as_i16() + offset).unwrap_or(sfx_id)
             }
             _ => sfx_id,
