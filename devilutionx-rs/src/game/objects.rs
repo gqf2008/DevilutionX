@@ -1130,7 +1130,6 @@ pub fn operate_shrine(shrine: &mut Object, _player_pos: Point, _send_network_msg
 ///
 /// Day 26-30: Integrated with Player system via shrine_effects module
 fn apply_shrine_effect(shrine_type: ShrineType, shrine: &mut Object, player: &mut Player) {
-    use rand::Rng;
 
     // Mark shrine as activated
     shrine.ovar2 = 1;

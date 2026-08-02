@@ -73,7 +73,7 @@ pub enum AttackResult {
 pub fn monster_attack_player(
     monster: &Monster,
     player: &mut Player,
-    rng: &mut impl Rng,
+    _rng: &mut impl Rng,
     current_level: u8,
 ) -> AttackResult {
     // 1. Distance check (C++ line 1174)
@@ -86,7 +86,7 @@ pub fn monster_attack_player(
     let base_hit = calculate_monster_to_hit(monster, player, current_level);
 
     // 3. Roll to hit (C++ line 1176)
-    let hit_roll = rng.random_range(0..100);
+    let hit_roll = crate::engine::random::gameplay_rnd(0, 99);
 
     if hit_roll >= base_hit {
         return AttackResult::Miss; // C++ line 1199
@@ -97,7 +97,7 @@ pub fn monster_attack_player(
     // (dex + baseToBlock + 2*playerLevel - 2*monsterLevel), clamped 0-100.
     let mut blk_roll = 100;
     if matches!(player._p_mode, PlayerMode::Stand | PlayerMode::Attack) && player._p_block_flag {
-        blk_roll = rng.random_range(0..100);
+        blk_roll = crate::engine::random::gameplay_rnd(0, 99);
     }
     let base_to_block = crate::game::player_dat::get_player_combat_data(to_dat_class(player._p_class))
         .base_to_block as i32;
@@ -114,7 +114,7 @@ pub fn monster_attack_player(
     // MonsterAttackPlayer itself.
     let min_dam_64x = (monster.min_damage as i32) << 6;
     let max_dam_64x = (monster.max_damage as i32) << 6;
-    let raw_damage_64x = rng.random_range(min_dam_64x..=max_dam_64x);
+    let raw_damage_64x = crate::engine::random::gameplay_rnd(min_dam_64x, max_dam_64x);
     let final_damage_64x = (raw_damage_64x + player._p_i_get_hit * 64).max(64); // Min 1 damage
 
     // 6. Apply damage to player (C++ line 1228).
@@ -207,13 +207,13 @@ fn calculate_monster_to_hit(monster: &Monster, player: &Player, current_level: u
 pub fn player_attack_monster(
     player: &Player,
     monster: &mut Monster,
-    rng: &mut impl Rng,
+    _rng: &mut impl Rng,
 ) -> AttackResult {
     // 1. Calculate hit chance (C++ line 549)
     let hit_chance = calculate_player_to_hit(player, monster);
 
     // 2. Roll to hit (C++ line 547)
-    let hit_roll = rng.random_range(0..100);
+    let hit_roll = crate::engine::random::gameplay_rnd(0, 99);
 
     if hit_roll >= hit_chance {
         return AttackResult::Miss; // C++ line 557
@@ -222,7 +222,7 @@ pub fn player_attack_monster(
     // 3. Calculate base damage (C++ line 566-567)
     let min_dam = player._p_i_min_dam;
     let max_dam = player._p_i_max_dam;
-    let mut damage = rng.random_range(min_dam..=max_dam);
+    let mut damage = crate::engine::random::gameplay_rnd(min_dam, max_dam);
 
     // 4. Apply damage bonuses (C++ line 568-570)
     damage += damage * player._p_i_bonus_dam / 100;
@@ -233,7 +233,7 @@ pub fn player_attack_monster(
     // `PlayerClassFlag::CriticalStrike` flag (data-driven, per attributes.tsv).
     let attrs = crate::game::player_dat::get_class_attributes(to_dat_class(player._p_class));
     if attrs.class_flags & (crate::game::player_dat::PlayerClassFlag::CriticalStrike as u8) != 0
-        && rng.random_range(0..100) < player._p_level as i32
+        && crate::engine::random::gameplay_rnd(0, 99) < player._p_level as i32
     {
         damage *= 2; // Double damage on crit
     }
