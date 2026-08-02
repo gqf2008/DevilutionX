@@ -329,7 +329,7 @@ pub fn run_game_loop(mode: InterfaceMode, window: &mut GameWindow, game_state: &
         }
 
         // Process network messages
-        network::process_game_message_packets();
+        network::process_game_message_packets(game_state);
 
         // Run game logic iterations
         if game_loop_iteration(state.startup, game_state)? {

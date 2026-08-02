@@ -184,6 +184,29 @@ pub fn snet_is_game_host() -> bool {
     })
 }
 
+/// C++ `SNetSendMessage` on the global provider (loopback queues the message).
+pub fn snet_send_message(dest: u8, data: &[u8]) -> bool {
+    GLOBAL_STORM_NET.with(|slot| {
+        slot.borrow_mut()
+            .as_mut()
+            .map_or(false, |net| net.send_message(dest, data))
+    })
+}
+
+/// C++ `SNetReceiveMessage` on the global provider.
+pub fn snet_receive_message() -> Option<(u8, Vec<u8>)> {
+    GLOBAL_STORM_NET.with(|slot| {
+        slot.borrow_mut()
+            .as_mut()
+            .and_then(|net| net.receive_message())
+    })
+}
+
+/// Whether a game session is active on the global provider.
+pub fn snet_is_active() -> bool {
+    GLOBAL_STORM_NET.with(|slot| slot.borrow().is_some())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
