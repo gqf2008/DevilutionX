@@ -1931,6 +1931,16 @@ impl CathedralGenerator {
         };
         if self.place_miniset(&stairs_up, DUNGEON_SIZE * DUNGEON_SIZE, true).is_none() {
             success = false;
+            // C++ PlaceCathedralStairs (drlg_l1.cpp:1140-1145): with the
+            // legacy Cathedral layout the stairs-up placement failing returns
+            // false IMMEDIATELY — the stairs-down miniset is never attempted,
+            // so only two RNG draws are consumed. Consuming the extra two
+            // draws (as this port did before) desynchronises the gameplay RNG
+            // for every retry, producing a different layout for seeds that
+            // need multiple PlaceStairs attempts.
+            if self.original_cathedral {
+                return false;
+            }
         }
         if self.place_miniset(&stairs_down_miniset(), DUNGEON_SIZE * DUNGEON_SIZE, true).is_none() {
             success = false;

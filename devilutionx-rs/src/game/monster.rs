@@ -410,10 +410,15 @@ impl Monster {
         let data = crate::game::monstdat::get_monster_data(monster_type);
         let ticks = data.rate[0] as i32;
         let frames = data.frames[0] as i32;
-        m.anim_tick_counter = crate::engine::random::gameplay_rnd(0, ticks - 1);
-        m.anim_current_frame = crate::engine::random::gameplay_rnd(0, frames - 1);
+        // Raw GenerateRnd(v) with the exact C++ argument: `GenerateRnd(0)` and
+        // `GenerateRnd(-1)` must NOT advance the LCG (a 1-frame/0-frame anim),
+        // and the modulus must be `v`, not `v+1`.
+        m.anim_tick_counter = crate::engine::random::gameplay_generate_rnd(ticks - 1);
+        m.anim_current_frame = crate::engine::random::gameplay_generate_rnd(frames - 1);
         let base = monster_type.base_stats();
-        let rolled = crate::engine::random::gameplay_rnd(base.hp_min, base.hp);
+        // C++ RandomIntBetween(hpMin, hpMax) = GenerateRnd(hpMax - hpMin + 1)
+        // + hpMin — always advances, even for a flat range (e.g. golem 1..1).
+        let rolled = crate::engine::random::gameplay_generate_rnd(base.hp - base.hp_min + 1) + base.hp_min;
         let max_hp = std::cmp::max(rolled << 5, 64);
         m.hp = max_hp;
         m.max_hp = max_hp;
@@ -4822,8 +4827,8 @@ mod tests {
 
         // Independent generator replicating the C++ draw order.
         let mut gen = crate::engine::random::DiabloGenerator::new(12345);
-        let expect_tick = gen.generate_rnd(4); // rate[0]=4 -> GenerateRnd(3)
-        let expect_frame = gen.generate_rnd(11); // frames[0]=11 -> GenerateRnd(10)
+        let expect_tick = gen.generate_rnd(3); // rate[0]=4 -> GenerateRnd(3)
+        let expect_frame = gen.generate_rnd(10); // frames[0]=11 -> GenerateRnd(10)
         let expect_roll = gen.generate_rnd(4) + 4; // RandomIntBetween(4,7)
         let expect_item_seed = gen.advance_rnd_seed() as u32;
         let expect_ai_seed = gen.advance_rnd_seed() as u32;

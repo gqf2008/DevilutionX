@@ -630,14 +630,15 @@ mod tests {
         gen.generate(LvType::Cathedral, 1545811660);
         let layout = build_dungeon_layout(&gen, &art);
 
-        // AddL1Objs scan: 11 door tiles + 6 lava lights.
+        // AddL1Objs scan (aligned with the C++-exact L1 generator): 8 door
+        // tiles + 7 lava lights.
         let objects = scan_level_doors(1, &layout);
         let doors = objects.iter().filter(|(_, _, t)| {
             matches!(*t, crate::game::objdat::ObjectId::L1LDoor | crate::game::objdat::ObjectId::L1RDoor)
         }).count();
         let lights = objects.iter().filter(|(_, _, t)| matches!(*t, crate::game::objdat::ObjectId::L1Light)).count();
-        assert_eq!(doors, 11, "L1 door micro scan (dPiece 43/50/213/45/55)");
-        assert_eq!(lights, 6, "L1 light micro scan (dPiece 269)");
+        assert_eq!(doors, 8, "L1 door micro scan (dPiece 43/50/213/45/55)");
+        assert_eq!(lights, 7, "L1 light micro scan (dPiece 269)");
 
         // InitMonsters na = non-solid micros in 16..96 via SOLData[dPiece].
         let na = (16usize..96).flat_map(|t| (16usize..96).map(move |s| (s, t)))
@@ -646,8 +647,8 @@ mod tests {
                 !layout.sol.get(pn).copied().unwrap_or_default().contains(
                     crate::engine::dungeon::TileProperties::SOLID)
             }).count();
-        assert_eq!(na, 2462, "InitMonsters non-solid count");
-        assert_eq!(na / 30, 82, "numplacemonsters = na/30");
+        assert_eq!(na, 2868, "InitMonsters non-solid count");
+        assert_eq!(na / 30, 95, "numplacemonsters = na/30");
     }
 
     #[test]

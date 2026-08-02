@@ -399,6 +399,20 @@ pub fn gameplay_advance_rnd_seed() -> i32 {
     GAMEPLAY_RNG.with(|r| r.borrow_mut().advance_rnd_seed())
 }
 
+/// C++ `GenerateRnd(v)` on the gameplay RNG — a raw draw with the exact C++
+/// argument (`v`, not `v+1`), so calls like `GenerateRnd(ticksPerFrame - 1)`
+/// and `GenerateRnd(0)` (no advance) are reproduced bit-for-bit. Unlike
+/// `gameplay_rnd(min, max)` this never short-circuits for `min >= max`.
+pub fn gameplay_generate_rnd(v: i32) -> i32 {
+    GAMEPLAY_RNG.with(|r| r.borrow_mut().generate_rnd(v))
+}
+
+/// Current LCG state of the gameplay RNG (C++ `GetLCGEngineState`), for
+/// diagnostics and stream-alignment probes.
+pub fn gameplay_rng_state() -> u32 {
+    GAMEPLAY_RNG.with(|r| r.borrow().state())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
