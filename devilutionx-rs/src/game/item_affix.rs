@@ -2493,8 +2493,10 @@ pub fn get_item_bonus<P>(
         }
         ItemType::Staff => {
             if allow_spells {
-                // Staffs get spell + charges, optionally with prefix
-                apply_staff_power(item, player, max_lvl, only_good);
+                // C++ GetStaffSpell: 75% spell+charges path, 25% affix path
+                // (non-Hellfire). The demo runs single-player Diablo, so
+                // hellfire/multiplayer/is_spawn are all false today.
+                get_staff_spell_cpp(item, player, max_lvl, only_good, false, false, false);
             } else {
                 // Force staff to use regular affixes
                 apply_random_affixes(
@@ -2694,14 +2696,155 @@ pub fn apply_staff_power<P>(
         }
     }
 
-    // Staff display name: prefix + base (spell name generation is a
-    // follow-up; the C++ format is "{Prefix} {Item} of {Spell}").
-    if let Some(prefix) = prefix_data {
-        item.name = generate_magic_item_name(&item.base_name, Some(prefix), None);
+    // C++ GenerateStaffName: "{base} of {spell}"; with a prefix the
+    // identified name becomes "{prefix} {base} of {spell}" (C++
+    // GenerateStaffNameMagical). Spell-name translation and panel-width
+    // fallback are skipped (single display-name field in the Rust Item).
+    let spell_name = crate::game::spelldat::SPELLS_DATA
+        .get(item.spell as usize)
+        .map(|s| s.name)
+        .unwrap_or("");
+    let staff_name = if spell_name.is_empty() {
+        item.base_name.clone()
+    } else {
+        format!("{} of {}", item.base_name, spell_name)
+    };
+    item.name = match prefix_data {
+        Some(prefix) => format!("{} {}", prefix.name, staff_name),
+        None => staff_name,
+    };
+
+    // Recalculate value (simplified CalcItemValue)
+    item.buy_value = calc_affix_item_value(item);
+}
+
+/// Reconstruct a `SpellID` from its raw discriminant.
+///
+/// `SpellID` is a contiguous fieldless `#[repr(i8)]` enum (0..=RuneOfStone),
+/// so any value in that range names a variant; used only on bounded spell ids.
+fn spell_id_from_i32(v: i32) -> Option<crate::game::spelldat::SpellID> {
+    use crate::game::spelldat::SpellID;
+    if (0..=SpellID::RuneOfStone as i32).contains(&v) {
+        // SAFETY: every value in 0..=RuneOfStone names a variant.
+        Some(unsafe { std::mem::transmute(v as i8) })
+    } else {
+        None
+    }
+}
+
+/// Exact port of GetSpellStaffLevel() from spells.cpp lines 326-348.
+pub fn get_spell_staff_level(
+    spell: crate::game::spelldat::SpellID,
+    is_spawn: bool,
+) -> i32 {
+    use crate::game::spelldat::SpellID;
+
+    // C++: shareware build bans a fixed set of staff spells.
+    if is_spawn {
+        match spell {
+            SpellID::StoneCurse
+            | SpellID::Guardian
+            | SpellID::Golem
+            | SpellID::Apocalypse
+            | SpellID::Elemental
+            | SpellID::BloodStar
+            | SpellID::BoneSpirit => return -1,
+            _ => {}
+        }
     }
 
-    // Recalculate value
-    item.buy_value = calc_affix_item_value(item);
+    // C++: if (static_cast<uint8_t>(s) >= SpellsData.size()) return -1;
+    let spell_id = spell as i32;
+    if spell_id < 0 || (spell_id as usize) >= crate::game::spelldat::SPELLS_DATA.len() {
+        return -1;
+    }
+
+    crate::game::spelldat::SPELLS_DATA[spell as usize].staff_level as i32
+}
+
+/// Exact port of GetStaffSpell() from items.cpp lines 1237-1280.
+///
+/// Generates a staff's spell + charges (75% path) or falls back to regular
+/// staff affixes (25% path when not Hellfire), then applies the staff power
+/// (`GetStaffPower`). The `hellfire`/`multiplayer`/`is_spawn` parameters
+/// mirror the C++ global flags; the demo runs single-player Diablo so all are
+/// `false` today.
+pub fn get_staff_spell_cpp<P>(
+    item: &mut super::items::Item,
+    player: &P,
+    lvl: i32,
+    only_good: bool,
+    hellfire: bool,
+    multiplayer: bool,
+    is_spawn: bool,
+) {
+    use crate::game::spelldat::SpellID;
+    use super::super::engine::random::{flip_coin, generate_rnd};
+
+    // C++: if (!gbIsHellfire && FlipCoin(4)) { GetItemPower(...); return; }
+    if !hellfire && flip_coin(4) {
+        apply_random_affixes(item, player, lvl / 2, lvl, AffixItemType::STAFF, only_good);
+        return;
+    }
+
+    // C++: int l = lvl / 2; if (l == 0) l = 1;
+    let mut l = lvl / 2;
+    if l == 0 {
+        l = 1;
+    }
+
+    // C++: int rv = GenerateRnd(static_cast<int32_t>(SpellsData.size())) + 1;
+    let mut rv = generate_rnd(crate::game::spelldat::SPELLS_DATA.len() as i32) + 1;
+
+    // C++: if (gbIsSpawn && lvl > 10) lvl = 10;
+    let lvl = if is_spawn && lvl > 10 { 10 } else { lvl };
+
+    // C++: scan from Firebolt; skip Resurrect/HealOther in single-player and
+    // wrap at SpellsData.size(). Firebolt always has staff level 1 with l >= 1,
+    // so the loop always terminates.
+    let mut s = SpellID::Firebolt as i32;
+    let mut bs = SpellID::Null;
+    while rv > 0 {
+        if let Some(spell) = spell_id_from_i32(s) {
+            let s_level = get_spell_staff_level(spell, is_spawn);
+            if s_level != -1 && l >= s_level {
+                rv -= 1;
+                bs = spell;
+            }
+        }
+        s += 1;
+        if !multiplayer && s == SpellID::Resurrect as i32 {
+            s = SpellID::Telekinesis as i32;
+        }
+        if !multiplayer && s == SpellID::HealOther as i32 {
+            s = SpellID::BloodStar as i32;
+        }
+        if s as usize == crate::game::spelldat::SPELLS_DATA.len() {
+            s = SpellID::Firebolt as i32;
+        }
+    }
+
+    let data = &crate::game::spelldat::SPELLS_DATA[bs as usize];
+
+    // C++: item._iSpell = bs;
+    item.spell = bs as i8;
+
+    // C++: item._iCharges = minc + GenerateRnd(maxc); _iMaxCharges = _iCharges;
+    let minc = data.staff_min as i32;
+    let maxc = data.staff_max as i32 - minc + 1;
+    item.charges = minc + generate_rnd(maxc);
+    item.max_charges = item.charges;
+
+    // C++: item._iMinMag = GetSpellData(bs).minInt;
+    item.required_mag = data.min_int;
+
+    // C++: v = charges * staffCost() / 5; _ivalue += v; _iIvalue += v;
+    let v = item.charges * data.staff_cost() as i32 / 5;
+    item.value += v;
+    item.identified_value += v;
+
+    // C++: GetStaffPower(player, item, lvl, onlygood);
+    apply_staff_power(item, player, lvl, only_good);
 }
 
 // ============================================================================
@@ -3613,6 +3756,93 @@ mod tests {
         // Level 0 should still get the first spell
         let zero_spell = get_staff_spell(0);
         assert!(zero_spell.is_some());
+    }
+
+    #[test]
+    fn test_get_spell_staff_level() {
+        use crate::game::spelldat::SpellID;
+
+        // Firebolt's staff level from the aligned SPELLS_DATA.
+        assert_eq!(
+            get_spell_staff_level(SpellID::Firebolt, false),
+            crate::game::spelldat::SPELLS_DATA[SpellID::Firebolt as usize].staff_level as i32
+        );
+        // Out-of-range id -> -1 (C++ bounds check).
+        assert_eq!(get_spell_staff_level(SpellID::Invalid, false), -1);
+        // Shareware bans a fixed set (C++ spells.cpp:328-341).
+        assert_eq!(get_spell_staff_level(SpellID::StoneCurse, true), -1);
+        assert_eq!(get_spell_staff_level(SpellID::StoneCurse, false),
+            crate::game::spelldat::SPELLS_DATA[SpellID::StoneCurse as usize].staff_level as i32);
+    }
+
+    #[test]
+    fn test_apply_staff_power_generates_staff_name() {
+        use super::super::items::{Item, ItemQuality};
+
+        let mut item = Item::empty();
+        item.base_name = "War Staff".to_string();
+        item.spell = crate::game::spelldat::SpellID::Firebolt as i8;
+
+        // only_good forces the prefix path (C++ GetStaffPrefix: FlipCoin(10) || onlygood).
+        apply_staff_power(&mut item, &(), 8, true);
+
+        assert_eq!(item.quality, ItemQuality::Magic);
+        assert!(
+            item.name.ends_with("War Staff of Firebolt"),
+            "staff name should be '{{Prefix}} War Staff of Firebolt', got {:?}",
+            item.name
+        );
+        assert_ne!(item.name, "War Staff of Firebolt", "prefix must be present");
+        assert_eq!(item.base_name, "War Staff", "base name is untouched");
+    }
+
+    #[test]
+    fn test_get_staff_spell_cpp_sets_spell_and_charges() {
+        use super::super::items::Item;
+        use crate::engine::random::set_rnd_seed;
+        use crate::game::spelldat::SpellID;
+
+        // The 75% spell path is RNG-driven, so try several seeds and validate
+        // the invariants on every run that takes it. All assertions are
+        // range-based, so they hold even if the shared global LCG is advanced
+        // by another test thread mid-call.
+        let mut spell_path_hits = 0;
+        for seed in 0..40u32 {
+            let mut item = Item::empty();
+            item.base_name = "Short Staff".to_string();
+            set_rnd_seed(seed);
+            get_staff_spell_cpp(&mut item, &(), 16, false, false, false, false);
+            if item.spell < 0 {
+                continue; // 25% affix path (or interleaved roll)
+            }
+            spell_path_hits += 1;
+            let spell = spell_id_from_i32(item.spell as i32).expect("staff spell must be valid");
+            let data = &crate::game::spelldat::SPELLS_DATA[spell as usize];
+            assert!(
+                spell as i32 >= SpellID::Firebolt as i32
+                    && spell as i32 <= SpellID::RuneOfStone as i32
+            );
+            assert_eq!(item.spell, spell as i8);
+            assert_eq!(item.charges, item.max_charges);
+            assert!(
+                item.charges >= data.staff_min as i32 && item.charges <= data.staff_max as i32,
+                "charges {} outside [{}, {}]",
+                item.charges,
+                data.staff_min,
+                data.staff_max
+            );
+            assert_eq!(item.required_mag, data.min_int);
+            // v = charges * staffCost / 5 added to both values.
+            let v = item.charges * data.staff_cost() as i32 / 5;
+            assert_eq!(item.value, v);
+            assert_eq!(item.identified_value, v);
+            assert!(
+                item.name.contains(&format!(" of {}", data.name)),
+                "staff name should mention the spell, got {:?}",
+                item.name
+            );
+        }
+        assert!(spell_path_hits > 0, "some seed must take the 75% spell path");
     }
 
     #[test]
