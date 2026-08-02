@@ -965,6 +965,92 @@ impl GameState {
     /// ring→left ring, amulet→amulet); the previously equipped item, if any,
     /// swaps back into the inventory cell. Returns false when the cell is
     /// empty or the item is not equippable.
+    /// Load a saved game into the engine (C++ `LoadGame` + `UnPackPlayer`).
+    /// Applies the hero `PlayerPack` to the player (stats, vitals, position,
+    /// spells, inventory grid/belt) and the `game` entry header + level-seed
+    /// table to the GameState.
+    pub fn load_from_save(
+        &mut self,
+        pack: &crate::game::pack::PlayerPack,
+        header: &crate::game::loadsave::CppGameHeader,
+        seeds: &[(u32, u32)],
+    ) {
+        use crate::game::player_exact::{HeroClass, PlayerItem};
+        let p = &mut self.player;
+        // Name (null-padded 32 bytes, C++ PlayerNameLength).
+        let nb = pack.name.as_bytes();
+        let n = nb.len().min(crate::game::player_exact::PLAYER_NAME_LENGTH - 1);
+        p._p_name[..n].copy_from_slice(&nb[..n]);
+        p._p_name[n..].fill(0);
+        p._p_class = HeroClass::try_from(pack.class).unwrap_or(HeroClass::Warrior);
+        p.plr_level = pack.plr_level;
+        p._p_level = pack.level;
+        p.position = crate::game::types::Point::new(pack.px as i32, pack.py as i32);
+        p._p_base_str = pack.base_str as i32;
+        p._p_strength = p._p_base_str;
+        p._p_base_mag = pack.base_mag as i32;
+        p._p_magic = p._p_base_mag;
+        p._p_base_dex = pack.base_dex as i32;
+        p._p_dexterity = p._p_base_dex;
+        p._p_base_vit = pack.base_vit as i32;
+        p._p_vitality = p._p_base_vit;
+        p._p_stat_pts = pack.stat_pts as i32;
+        p._p_experience = pack.experience;
+        p._p_gold = pack.gold;
+        p._p_hp_base = pack.hp_base;
+        p._p_max_hp_base = pack.max_hp_base;
+        p._p_hit_points = pack.hp_base;
+        p._p_max_hp = pack.max_hp_base;
+        p._p_mana_base = pack.mana_base;
+        p._p_max_mana_base = pack.max_mana_base;
+        p._p_mana = pack.mana_base;
+        p._p_max_mana = pack.max_mana_base;
+        p._p_mem_spells = pack.mem_spells;
+        for (i, &lvl) in pack.spl_lvl.iter().enumerate() {
+            if i < p._p_spl_lvl.len() {
+                p._p_spl_lvl[i] = lvl;
+            }
+        }
+        // Inventory: grid, count, body/belt/list items (item id from the
+        // packed ItemPack; full generated items are not stored in the hero).
+        p.inv_grid = pack.inv_grid;
+        p._p_num_inv = pack.num_inv as i32;
+        let item_from_pack = |ip: &crate::game::pack::ItemPack| PlayerItem {
+            item_id: ip.idx as i32,
+            equipped: false,
+            _itype: crate::game::item_dat::get_item_data(ip.idx as usize)
+                .map(|d| d.item_type)
+                .unwrap_or(crate::game::item_dat::ItemType::Misc),
+            full: None,
+        };
+        for (i, ip) in pack.inv_body.iter().enumerate() {
+            if i < p.inv_body.len() {
+                let mut it = item_from_pack(ip);
+                it.equipped = !ip.is_empty();
+                p.inv_body[i] = it;
+            }
+        }
+        for (i, ip) in pack.inv_list.iter().enumerate() {
+            if i < p.inv_list.len() {
+                p.inv_list[i] = item_from_pack(ip);
+            }
+        }
+        for (i, ip) in pack.spd_list.iter().enumerate() {
+            if i < p.spd_list.len() {
+                p.spd_list[i] = item_from_pack(ip);
+            }
+        }
+        // Game state: level + seeds.
+        self.current_dungeon_level = header.currlevel as u8;
+        self.is_town = header.currlevel == 0 || header.leveltype == 0;
+        self.in_dungeon = !self.is_town;
+        for (i, (seed, _)) in seeds.iter().enumerate() {
+            if i < self.dungeon_seeds.len() {
+                self.dungeon_seeds[i] = *seed;
+            }
+        }
+    }
+
     pub fn equip_inventory_item(&mut self, grid_index: usize) -> bool {
         use crate::game::item_dat::{ItemEquipType, get_item_data};
         if grid_index >= self.player.inv_grid.len() {

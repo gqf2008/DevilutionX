@@ -425,6 +425,38 @@ fn decodes_real_cpp_save_game_entry() {
     assert_eq!(pack.plr_level, 1, "fixture hero starts at dungeon level 1");
 }
 
+/// Tier 1: the reference hero PlayerPack + game entry header/seeds load
+/// into a fresh `GameState` (C++ `LoadGame` + `UnPackPlayer`), so the
+/// demo replay can start from the saved state.
+#[test]
+fn loads_reference_save_into_game_state() {
+    use devilutionx_rs::game::codec::codec_decode;
+    use devilutionx_rs::game::game_state::GameState;
+    use devilutionx_rs::game::loadsave::CppGameHeader;
+    use devilutionx_rs::game::pack::PlayerPack;
+    use devilutionx_rs::game::player_exact::Player;
+
+    const PASSWORD_SPAWN_SINGLE: &str = "adslhfb1";
+    let mut save = load_save_archive(fixture_path("spawn_0.sv")).expect("open save");
+    let hero = codec_decode(&save.read_entry("hero").unwrap(), PASSWORD_SPAWN_SINGLE);
+    let pack = PlayerPack::from_bytes(&hero);
+    let decoded = codec_decode(&save.read_entry("game").unwrap(), PASSWORD_SPAWN_SINGLE);
+    let header = CppGameHeader::parse(&decoded).expect("game header parses");
+    let seeds = CppGameHeader::parse_level_seeds(&decoded, 17).expect("seed table");
+
+    let mut gs = GameState::new(Player::new(), false, 42);
+    gs.load_from_save(&pack, &header, &seeds);
+    assert_eq!(gs.player.get_name(), "timedemo", "hero name loaded");
+    assert_eq!(gs.player._p_class as u8, 0, "Warrior");
+    assert_eq!(gs.current_dungeon_level, 1);
+    assert!(!gs.is_town, "saved game starts in the dungeon");
+    assert_eq!(gs.player._p_experience, pack.experience);
+    assert_eq!(gs.player._p_hit_points, pack.hp_base);
+    assert_eq!(gs.player._p_max_mana, pack.max_mana_base);
+    assert_eq!(gs.dungeon_seeds[1], seeds[1].0, "L1 seed from the save");
+    assert_eq!(gs.player.inv_grid, pack.inv_grid, "InvGrid loaded");
+}
+
 /// Tier 1..3 acceptance: load `spawn_0.sv`, replay `demo_0.dmo` headlessly through
 /// the engine game loop, and byte-compare the final save against the reference.
 ///
