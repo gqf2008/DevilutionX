@@ -490,6 +490,15 @@ fn replay_from_saved_state_reports_reference_diff() {
     devilutionx_rs::engine::random::seed_gameplay_rng(12345);
     let mut gs = GameState::new(Player::new(), false, 12345);
     gs.load_from_save(&pack, &header, &seeds);
+    // Generate the saved L1 level headlessly (C++-exact layout +
+    // PlaceMonsters) so the post-replay entry carries the level's
+    // monsters/objects.
+    assert!(devilutionx_rs::game::game_loop::prepare_dungeon_for_replay(&mut gs, 1),
+            "L1 level generation succeeds");
+    println!("[ReplayPrep] monsters={} floor={} objects={}",
+            gs.monster_manager.active_count(),
+            gs.dungeon_layout.as_ref().map(|l| l.floor_tiles.len()).unwrap_or(0),
+            gs.objects.len());
     let mut rng = rand::rngs::StdRng::seed_from_u64(0);
     let mut driver = ReplayDriver::new(parse_demo(&data).unwrap());
     let mut move_target: Option<(i32, i32)> = None;
@@ -523,7 +532,10 @@ fn replay_from_saved_state_reports_reference_diff() {
         &ref_save.read_entry("game").unwrap(),
         PASSWORD_SPAWN_SINGLE,
     );
-    let n = actual.len().min(reference.len());
+    let ref_header = CppGameHeader::parse(&reference).expect("reference header");
+    println!("[ReplayDiff] reference monsters={} items={} missiles={} objects={}",
+            ref_header.active_monster_count, ref_header.active_item_count,
+            ref_header.active_missile_count, ref_header.active_object_count);    let n = actual.len().min(reference.len());
     let first = (0..n).find(|&i| actual[i] != reference[i]);
     println!("[ReplayDiff] actual={}B reference={}B first_diff={:?}",
         actual.len(), reference.len(), first.map(|i| (i, actual[i], reference[i])));

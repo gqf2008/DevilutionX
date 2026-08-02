@@ -274,6 +274,35 @@ pub fn build_hell_layout(dungeon: &Dungeon, level: &DungeonLevelData) -> Dungeon
 ///
 /// Level numbering is the simple 1=L1 Cathedral, 2=L2 Catacombs, 3=L3 Caves,
 /// 4=L4 Hell. `seed` drives the Diablo LCG so layouts are reproducible.
+/// Generate a dungeon layout headlessly (no MPQ art) for the replay/save
+/// pipeline. The logical 40x40 grid, floor tiles and trans_val come from
+/// the generator (C++-exact); the dPiece micro grid uses a synthetic
+/// identity TIL since no l*.til art is loaded, and dPreLight stays 0
+/// (fully lit, matching L1). Only L1 (Cathedral) is supported.
+pub fn generate_level_headless(level: u8, seed: u32) -> Result<DungeonLayout, String> {
+    use crate::engine::dungeon::{DungeonLevelData, DungeonType, TilEntry};
+    use crate::levels::drlg_l1::CathedralGenerator;
+    if level != 1 {
+        return Err(format!("headless level generation only supports L1, got {level}"));
+    }
+    let mut art = DungeonLevelData::new(DungeonType::Cathedral);
+    // Synthetic identity TIL: entry i -> micros (i*4, i*4+1, i*4+2, i*4+3)
+    // so build_dungeon_layout can stamp a deterministic dPiece grid. Door
+    // detection (scan_level_doors) needs the real L1 micros, so doors are
+    // only detected when real art is loaded.
+    art.til.tiles = (0..256u16)
+        .map(|i| TilEntry {
+            micro1: i * 4,
+            micro2: i * 4 + 1,
+            micro3: i * 4 + 2,
+            micro4: i * 4 + 3,
+        })
+        .collect();
+    let mut gen = CathedralGenerator::new();
+    gen.generate(crate::levels::types::DungeonType::Cathedral, seed);
+    Ok(build_dungeon_layout(&gen, &art))
+}
+
 pub fn generate_dungeon_layout(
     level: u8,
     seed: u32,
@@ -372,7 +401,7 @@ pub fn build_dungeon_layout(gen: &CathedralGenerator, level: &DungeonLevelData) 
 
             // Collect the 2×2 micro-tile footprint of every *floor* logical tile
             // as a walkable spawn candidate (used by monster placement).
-            if tile == Tile::Floor {
+            if tile.is_floor_like() {
                 if xx + 1 < MAXDUNX && yy + 1 < MAXDUNY {
                     layout.floor_tiles.push((xx as i32, yy as i32));
                     layout.floor_tiles.push(((xx + 1) as i32, yy as i32));
@@ -598,10 +627,16 @@ mod tests {
         // The max TransVal equals the number of distinct floor regions.
         let max_val = layout.trans_val.iter().max().copied().unwrap_or(0);
         assert!(max_val >= 1, "TransVal starts at 1");
-        // Every collected floor tile must belong to a region (non-zero).
-        for &(x, y) in layout.floor_tiles.iter().take(64) {
-            assert_ne!(layout.trans_val[(y as usize) * MAXDUNX + x as usize], 0, "floor tile ({},{}) has a TransVal", x, y);
-        }
+        // Core Floor(13) tiles belong to a flooded region (non-zero). The
+        // floor *variants* (fill_floor output, after FloodTransparencyValues)
+        // carry dTransVal 0 in C++, so only require at least one floor tile
+        // to be in a region.
+        let region_floor = layout
+            .floor_tiles
+            .iter()
+            .filter(|(x, y)| layout.trans_val[(*y as usize) * MAXDUNX + *x as usize] != 0)
+            .count();
+        assert!(region_floor > 0, "expected floor tiles in a flooded region");
     }
 
 

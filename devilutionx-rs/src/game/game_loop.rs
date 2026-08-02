@@ -1233,6 +1233,77 @@ fn place_dungeon_monsters(game_state: &mut GameState, spawn_x: i32, spawn_y: i32
     }
 }
 
+/// Headless dungeon setup for the replay/save pipeline: generate the level
+/// layout from the saved seed (real MPQ art when available, synthetic
+/// otherwise), seed the gameplay RNG, place monsters (C++ PlaceMonsters)
+/// and init lighting. Returns false when level generation fails.
+pub fn prepare_dungeon_for_replay(game_state: &mut GameState, level: u8) -> bool {
+    use crate::engine::dungeon::{DungeonLevelData, DungeonType};
+    use crate::game::dungeon_level::generate_dungeon_layout;
+    let seed = game_state.dungeon_seeds.get(level as usize).copied().unwrap_or(0);
+    crate::engine::random::seed_gameplay_rng(seed);
+
+    // Try the real MPQ art first (repo-root devilutionx.mpq / spawn.mpq),
+    // then fall back to the synthetic headless layout.
+    let mut real_art = None;
+    for cand in ["devilutionx.mpq", "spawn.mpq", "diabdat.mpq", "DIABDAT.MPQ"] {
+        let path = std::path::Path::new(cand);
+        if path.exists() {
+            if let Ok(mut mpq) = crate::engine::mpq::MpqArchive::open(path) {
+                if let Ok(art) = DungeonLevelData::load_from_mpq(&mut mpq, DungeonType::Cathedral) {
+                    real_art = Some(art);
+                    break;
+                }
+            }
+        }
+    }
+    let layout = match real_art {
+        Some(art) => generate_dungeon_layout(level, seed, &art),
+        None => crate::game::dungeon_level::generate_level_headless(level, seed),
+    };
+    let layout = match layout {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("[ReplayPrep] level generation failed: {e}");
+            return false;
+        }
+    };
+
+    // Doors from the dPiece scan (real art -> real door micros; synthetic
+    // layout -> no doors).
+    game_state.objects = crate::game::dungeon_level::scan_level_doors(level, &layout)
+        .into_iter()
+        .map(|(x, y, otype)| {
+            crate::game::objects::Object::new(otype, crate::game::types::Point::new(x, y))
+        })
+        .collect();
+    game_state.init_doors_closed();
+    game_state.dungeon_layout = Some(layout);
+    game_state.current_dungeon_level = level;
+    game_state.in_dungeon = true;
+    game_state.is_town = false;
+    game_state.explored.fill(false);
+
+    // C++ InitLevels: light table + dLight = dPreLight + player light.
+    game_state.light_manager.init();
+    game_state.light_manager.make_light_table(crate::game::lighting::DungeonLevelType::Cathedral);
+    if let Some(l) = &game_state.dungeon_layout {
+        for y in 0..112usize {
+            for x in 0..112usize {
+                game_state.light_manager.light_buffer[y][x] = l.pre_light[y * 112 + x];
+            }
+        }
+    }
+    game_state.player_light_index = game_state.light_manager.add_light(
+        game_state.player.position,
+        game_state.player._p_light_rad as u8,
+    );
+
+    // Place monsters from the C++ PlaceMonsters algorithm.
+    place_dungeon_monsters(game_state, game_state.player.position.x, game_state.player.position.y);
+    true
+}
+
 /// Open the local game MPQ (spawn.mpq shareware, or diabdat.mpq full) and load
 /// the stand sprites for the given monster types into a [`MonsterSpriteSet`].
 ///

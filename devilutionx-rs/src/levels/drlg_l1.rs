@@ -200,6 +200,7 @@ pub enum Tile {
     Mega135 = 135,
     Mega203 = 203,
     Mega206 = 206,
+
     /// C++ `Floor12 = 139` .. `Floor23 = 163` (floor/shadow variations)
     Floor12 = 139,
     Floor13 = 140,
@@ -254,6 +255,20 @@ pub enum Tile {
     CryptHWall = 235,
     CryptVWall = 236,
 }
+impl Tile {
+    /// True for the walkable floor family (Floor 13 and the Floor12..Floor23
+    /// fill_floor variations). C++ `IsTileSolid` treats these as non-solid,
+    /// and `PlaceMonsters` counts them for the per-level monster budget.
+    pub fn is_floor_like(&self) -> bool {
+        matches!(
+            self,
+            Tile::Floor | Tile::Floor12 | Tile::Floor13 | Tile::Floor14 | Tile::Floor15
+                | Tile::Floor16 | Tile::Floor17 | Tile::Floor18 | Tile::Floor19 | Tile::Floor20
+                | Tile::Floor21 | Tile::Floor22 | Tile::Floor23,
+        )
+    }
+}
+
 
 impl Default for Tile {
     fn default() -> Self {
