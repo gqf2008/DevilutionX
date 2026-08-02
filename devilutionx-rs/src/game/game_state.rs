@@ -1612,6 +1612,113 @@ impl GameState {
         }
     }
 
+    /// Find a door object at a world (micro) tile, if any.
+    pub fn door_at_tile(&self, x: i32, y: i32) -> Option<usize> {
+        self.objects
+            .iter()
+            .position(|o| o.is_door() && o.position.x == x && o.position.y == y)
+    }
+
+    /// C++ `IsDoorClear` (objects.cpp:1553-1559): a door may only close when
+    /// nothing (corpse/monster/item/player) occupies its tile.
+    fn is_door_clear(&self, idx: usize) -> bool {
+        let Some(door) = self.objects.get(idx) else { return true };
+        let (x, y) = (door.position.x, door.position.y);
+        if self.player.position.x == x && self.player.position.y == y {
+            return false;
+        }
+        if self
+            .monster_manager
+            .iter()
+            .any(|(_, m)| m.is_alive() && m.x == x && m.y == y)
+        {
+            return false;
+        }
+        if self.ground_items.iter().any(|g| g.x == x && g.y == y) {
+            return false;
+        }
+        true
+    }
+
+    /// Set the door tile micros for the given state, mirroring C++
+    /// `SetDoorStateOpen`/`SetDoorStateClosed` (objects.cpp:1055-1160):
+    /// open doors reveal the archway micro; closed doors show the door panel.
+    fn set_door_micros(&mut self, idx: usize, open: bool) {
+        use crate::game::objdat::ObjectId;
+        let Some(door) = self.objects.get(idx) else { return };
+        let (x, y) = (door.position.x as usize, door.position.y as usize);
+        let (open_micro, closed_micro) = match door.otype {
+            ObjectId::L1LDoor => (392, door.ovar1 as u16),
+            ObjectId::L1RDoor => (394, door.ovar1 as u16),
+            ObjectId::L2LDoor => (12, 537),
+            ObjectId::L2RDoor => (16, 539),
+            ObjectId::L3LDoor => (537, 530),
+            ObjectId::L3RDoor => (540, 533),
+            _ => return,
+        };
+        if let Some(layout) = self.dungeon_layout.as_mut() {
+            if x < layout.width && y < layout.height {
+                layout.d_piece[y * layout.width + x] = if open { open_micro } else { closed_micro };
+            }
+        }
+    }
+
+    /// Initialise every door object to the closed state, mirroring C++
+    /// `AddDoor` (objects.cpp:1178-1198): record the original micro tile in
+    /// `ovar1` (L1 closed-door micro = original) and apply the closed micros
+    /// (L2 537/539, L3 530/533).
+    pub fn init_doors_closed(&mut self) {
+        use crate::game::objdat::ObjectId;
+        let idxs: Vec<usize> = (0..self.objects.len()).filter(|&i| self.objects[i].is_door()).collect();
+        for i in idxs {
+            let original = self
+                .dungeon_layout
+                .as_ref()
+                .map(|l| {
+                    let o = &self.objects[i];
+                    l.d_piece[o.position.y as usize * l.width + o.position.x as usize]
+                })
+                .unwrap_or(0);
+            self.objects[i].ovar1 = original as i32;
+            self.objects[i].door_state = crate::game::objects::DOOR_CLOSED;
+            self.objects[i].ovar4 = crate::game::objects::DOOR_CLOSED;
+            self.set_door_micros(i, false);
+        }
+    }
+
+    /// C++ `OperateDoor` (objects.cpp:1762-1785): toggle a door open/closed,
+
+    /// refusing to close over a blocked tile (DOOR_BLOCKED). Updates the
+    /// rendered dPiece micros so the door visibly opens/closes.
+    pub fn operate_door(&mut self, idx: usize) {
+        let is_door = self
+            .objects
+            .get(idx)
+            .map(|o| o.is_door())
+            .unwrap_or(false);
+        if !is_door {
+            return;
+        }
+        let open = self
+            .objects
+            .get(idx)
+            .map(|o| o.door_state == crate::game::objects::DOOR_CLOSED)
+            .unwrap_or(false);
+        if !open && !self.is_door_clear(idx) {
+            if let Some(door) = self.objects.get_mut(idx) {
+                door.door_state = crate::game::objects::DOOR_BLOCKED;
+                door.ovar4 = crate::game::objects::DOOR_BLOCKED;
+            }
+            return;
+        }
+        let new_state = if open { crate::game::objects::DOOR_OPEN } else { crate::game::objects::DOOR_CLOSED };
+        if let Some(door) = self.objects.get_mut(idx) {
+            door.door_state = new_state;
+            door.ovar4 = new_state;
+        }
+        self.set_door_micros(idx, open);
+    }
+
     /// Process objects (public for GameLoop)
     ///
     /// **C++ Reference**: `Source/objects.cpp` - `ProcessObjects()`
@@ -2344,6 +2451,81 @@ mod tests {
         m.mode = crate::game::monster::MonsterMode::Stand;
         gs.add_monster(m);
         gs
+    }
+
+    /// C++ `OperateDoor`/`SetDoorStateOpen`/`SetDoorStateClosed`:
+    /// an L2LDOOR placed at micro 540 is closed to 537; operating toggles the
+    /// dPiece between the open arch (12) and the closed panel (537).
+    #[test]
+    fn test_operate_door_toggles_micros() {
+        use crate::game::objdat::ObjectId;
+        use crate::game::objects::Object;
+        let mut gs = GameState::new(Player::new(), false, 42);
+        let mut layout = DungeonLayout::default();
+        for v in layout.d_piece.iter_mut() {
+            *v = 99;
+        }
+        // L2LDOOR placement micro 540 (AddL2Objs: 12/540).
+        layout.d_piece[10 * layout.width + 20] = 540;
+        gs.dungeon_layout = Some(layout);
+        let door = Object::new(ObjectId::L2LDoor, crate::game::types::Point::new(20, 10));
+        gs.objects.push(door);
+        gs.init_doors_closed();
+        assert_eq!(
+            gs.dungeon_layout.as_ref().unwrap().d_piece[10 * gs.dungeon_layout.as_ref().unwrap().width + 20],
+            537,
+            "closed L2LDOOR micro is 537 (SetDoorStateClosed)"
+        );
+        assert_eq!(gs.objects[0].door_state, crate::game::objects::DOOR_CLOSED);
+
+        gs.operate_door(0);
+        assert_eq!(gs.objects[0].door_state, crate::game::objects::DOOR_OPEN);
+        assert_eq!(
+            gs.dungeon_layout.as_ref().unwrap().d_piece[10 * gs.dungeon_layout.as_ref().unwrap().width + 20],
+            12,
+            "open L2LDOOR micro is 12 (SetDoorStateOpen)"
+        );
+
+        gs.operate_door(0);
+        assert_eq!(gs.objects[0].door_state, crate::game::objects::DOOR_CLOSED);
+        assert_eq!(
+            gs.dungeon_layout.as_ref().unwrap().d_piece[10 * gs.dungeon_layout.as_ref().unwrap().width + 20],
+            537,
+            "re-closed L2LDOOR micro is 537"
+        );
+    }
+
+    /// C++ `OperateDoor` (objects.cpp:1767-1771): a door cannot close over a
+    /// blocked tile (monster standing in it) - it goes DOOR_BLOCKED and the
+    /// dPiece stays open.
+    #[test]
+    fn test_operate_door_blocked_refuses_close() {
+        use crate::game::objdat::ObjectId;
+        use crate::game::objects::Object;
+        let mut gs = GameState::new(Player::new(), false, 42);
+        let mut layout = DungeonLayout::default();
+        for v in layout.d_piece.iter_mut() {
+            *v = 99;
+        }
+        layout.d_piece[10 * layout.width + 20] = 540;
+        gs.dungeon_layout = Some(layout);
+        gs.objects.push(Object::new(ObjectId::L2LDoor, crate::game::types::Point::new(20, 10)));
+        gs.init_doors_closed();
+        gs.operate_door(0); // open
+        assert_eq!(gs.objects[0].door_state, crate::game::objects::DOOR_OPEN);
+
+        // A monster stands in the doorway.
+        let mut m = crate::game::monster::Monster::new(1, crate::game::monster::MonsterType::Zombie, 20, 10, 1);
+        m.mode = crate::game::monster::MonsterMode::Stand;
+        gs.add_monster(m);
+
+        gs.operate_door(0); // try to close -> blocked
+        assert_eq!(gs.objects[0].door_state, crate::game::objects::DOOR_BLOCKED);
+        assert_eq!(
+            gs.dungeon_layout.as_ref().unwrap().d_piece[10 * gs.dungeon_layout.as_ref().unwrap().width + 20],
+            12,
+            "blocked door keeps the open arch micro"
+        );
     }
 
     // ========================================================================

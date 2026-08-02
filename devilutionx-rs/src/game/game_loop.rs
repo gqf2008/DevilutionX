@@ -680,6 +680,16 @@ fn handle_event(
                     }
                 }
 
+                // If the click lands on a door tile, operate it (open/close)
+                // instead of walking. C++ `CheckObject` routes object clicks to
+                // `OperateDoor` (objects.cpp:4314).
+                if let Some(door_idx) = game_state.door_at_tile(wx, wy) {
+                    game_state.operate_door(door_idx);
+                    state.move_target = None;
+                    println!("[Door] operated door {} at ({},{})", door_idx, wx, wy);
+                    return true;
+                }
+
                 // Otherwise the click is on the ground: store it as a click-to-
                 // move destination for the 2 Hz logic tick to walk toward one
                 // tile at a time.
@@ -798,6 +808,8 @@ pub fn descend_to_level(game_state: &mut GameState, level: u8) -> Result<(), Str
     game_state.current_dungeon_level = level;
     game_state.in_dungeon = true;
     game_state.objects = door_objects;
+    // C++ AddDoor: doors start closed (closed micros baked into dPiece).
+    game_state.init_doors_closed();
     // Keep is_town in sync so GameState::update's monster/item logic matches the
     // active mode (dungeon processes monsters; town skips them).
     game_state.is_town = false;
