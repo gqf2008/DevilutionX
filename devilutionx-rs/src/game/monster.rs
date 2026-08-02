@@ -42,195 +42,14 @@ pub const TEXT_BANNER10: i32 = 39;  // Banner quest text 10
 pub const TEXT_BANNER11: i32 = 40;  // Banner quest text 11
 pub const TEXT_BANNER12: i32 = 41;  // Banner quest text 12
 
-/// Monster type enumeration
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum MonsterType {
-    // Cathedral (L1)
-    Zombie,
-    FallenOne,
-    Skeleton,
-    SkeletonArcher,
-    Scavenger,
-
-    // Catacombs (L2)
-    Ghoul,
-    BlackKnight,
-    Gargoyle,
-    Overlord,
-
-    // Caves (L3)
-    Golem,
-    FlayerDemon,
-    StormRider,
-    VenomSpitter,
-
-    // Hell (L4)
-    SuccubusBlack,
-    Balrog,
-    VileOne,
-    MageHell,
-
-    // Bosses
-    Butcher,
-    SkeletonKing,
-    Lazarus,
-    Diablo,
-}
-
-impl MonsterType {
-    /// Get base stats for monster type.
-    ///
-    /// Values are the authoritative `monstdat.tsv` rows (hitPointsMaximum,
-    /// minDamage, maxDamage, armorClass, toHit, exp) from upstream/master, keyed
-    /// by each simplified type to its closest C++ `_monster_id` (per arm).
-    /// `Lazarus` is a set-level unique boss with no base TSV row; its stats stay
-    /// as the demo approximation.
-    pub fn base_stats(&self) -> MonsterStats {
-        match self {
-            MonsterType::Zombie => MonsterStats::new(4, 7, 2, 5, 5, 10, 54), // C++ MT_NZOMBIE
-            MonsterType::FallenOne => MonsterStats::new(1, 4, 1, 3, 0, 15, 46), // C++ MT_RFALLSP
-            MonsterType::Skeleton => MonsterStats::new(2, 4, 1, 4, 0, 20, 64), // C++ MT_WSKELAX
-            MonsterType::SkeletonArcher => MonsterStats::new(2, 4, 1, 2, 0, 15, 110), // C++ MT_WSKELBW
-            MonsterType::Scavenger => MonsterStats::new(3, 6, 1, 5, 10, 20, 80), // C++ MT_NSCAV
-            MonsterType::Ghoul => MonsterStats::new(7, 11, 3, 10, 10, 10, 58), // C++ MT_BZOMBIE
-            MonsterType::BlackKnight => MonsterStats::new(150, 150, 15, 20, 75, 110, 3360), // C++ MT_NBLACK
-            MonsterType::Gargoyle => MonsterStats::new(60, 90, 10, 16, 45, 65, 1205), // C++ MT_GARGOYLE
-            MonsterType::Overlord => MonsterStats::new(60, 80, 6, 12, 55, 55, 635), // C++ MT_FAT
-            MonsterType::Golem => MonsterStats::new(1, 1, 1, 1, 1, 0, 0), // C++ MT_GOLEM
-            MonsterType::FlayerDemon => MonsterStats::new(160, 200, 10, 20, 70, 85, 2058), // C++ MT_FLAYED
-            MonsterType::StormRider => MonsterStats::new(60, 120, 8, 18, 30, 80, 2391), // C++ MT_RSTORM
-            MonsterType::VenomSpitter => MonsterStats::new(60, 85, 4, 16, 30, 45, 1248), // C++ MT_RACID
-            MonsterType::SuccubusBlack => MonsterStats::new(120, 150, 1, 20, 60, 100, 3696), // C++ MT_SUCCUBUS
-            MonsterType::Balrog => MonsterStats::new(180, 200, 22, 30, 75, 130, 3643), // C++ MT_BALROG
-            MonsterType::VileOne => MonsterStats::new(135, 240, 12, 24, 75, 75, 4374), // C++ MT_HOLOWONE
-            MonsterType::MageHell => MonsterStats::new(70, 70, 8, 20, 0, 90, 4070), // C++ MT_COUNSLR
-            MonsterType::Butcher => MonsterStats::new(320, 320, 6, 12, 50, 50, 710), // C++ MT_CLEAVER
-            MonsterType::SkeletonKing => MonsterStats::new(140, 140, 6, 16, 70, 60, 570), // C++ MT_SKING
-            MonsterType::Lazarus => MonsterStats::new(200, 200, 30, 50, 70, 40, 5000), // C++ set-level boss (no monstdat row)
-            MonsterType::Diablo => MonsterStats::new(1666, 1666, 30, 60, 90, 220, 31666), // C++ MT_DIABLO
-        }
-    }
-
-    /// Get monster name
-    pub fn name(&self) -> &'static str {
-        match self {
-            MonsterType::Zombie => "Zombie",
-            MonsterType::FallenOne => "Fallen One",
-            MonsterType::Skeleton => "Skeleton",
-            MonsterType::SkeletonArcher => "Skeleton Archer",
-            MonsterType::Scavenger => "Scavenger",
-            MonsterType::Ghoul => "Ghoul",
-            MonsterType::BlackKnight => "Black Knight",
-            MonsterType::Gargoyle => "Gargoyle",
-            MonsterType::Overlord => "Overlord",
-            MonsterType::Golem => "Golem",
-            MonsterType::FlayerDemon => "Flayer Demon",
-            MonsterType::StormRider => "Storm Rider",
-            MonsterType::VenomSpitter => "Venom Spitter",
-            MonsterType::SuccubusBlack => "Succubus",
-            MonsterType::Balrog => "Balrog",
-            MonsterType::VileOne => "Vile One",
-            MonsterType::MageHell => "Hell Mage",
-            MonsterType::Butcher => "The Butcher",
-            MonsterType::SkeletonKing => "Skeleton King",
-            MonsterType::Lazarus => "Archbishop Lazarus",
-            MonsterType::Diablo => "Diablo",
-        }
-    }
-
-    /// Get monsters for dungeon type
-    pub fn for_dungeon(dungeon_type: DungeonType) -> Vec<MonsterType> {
-        match dungeon_type {
-            DungeonType::Cathedral => vec![
-                MonsterType::Zombie,
-                MonsterType::FallenOne,
-                MonsterType::Skeleton,
-                MonsterType::SkeletonArcher,
-                MonsterType::Scavenger,
-            ],
-            DungeonType::Catacombs => vec![
-                MonsterType::Ghoul,
-                MonsterType::BlackKnight,
-                MonsterType::Gargoyle,
-                MonsterType::Overlord,
-            ],
-            DungeonType::Caves => vec![
-                MonsterType::Golem,
-                MonsterType::FlayerDemon,
-                MonsterType::StormRider,
-                MonsterType::VenomSpitter,
-            ],
-            DungeonType::Hell => vec![
-                MonsterType::SuccubusBlack,
-                MonsterType::Balrog,
-                MonsterType::VileOne,
-                MonsterType::MageHell,
-            ],
-            _ => vec![MonsterType::Zombie],
-        }
-    }
-
-    /// Is this a boss monster?
-    pub fn is_boss(&self) -> bool {
-        matches!(self,
-            MonsterType::Butcher |
-            MonsterType::SkeletonKing |
-            MonsterType::Lazarus |
-            MonsterType::Diablo
-        )
-    }
-
-    /// Get monster class for this type
-    pub fn monster_class(&self) -> MonsterClass {
-        match self {
-            // Undead types
-            MonsterType::Zombie |
-            MonsterType::Ghoul |
-            MonsterType::Skeleton |
-            MonsterType::SkeletonArcher |
-            MonsterType::SkeletonKing => MonsterClass::Undead,
-
-            // Animal types
-            MonsterType::FallenOne |
-            MonsterType::Scavenger => MonsterClass::Animal,
-
-            // Demon types (default)
-            MonsterType::BlackKnight |
-            MonsterType::Gargoyle |
-            MonsterType::Overlord |
-            MonsterType::Golem |
-            MonsterType::FlayerDemon |
-            MonsterType::StormRider |
-            MonsterType::VenomSpitter |
-            MonsterType::SuccubusBlack |
-            MonsterType::Balrog |
-            MonsterType::VileOne |
-            MonsterType::MageHell |
-            MonsterType::Butcher |
-            MonsterType::Lazarus |
-            MonsterType::Diablo => MonsterClass::Demon,
-        }
-    }
-}
-
-/// Monster base stats
-#[derive(Debug, Clone, Copy)]
-pub struct MonsterStats {
-    pub hp: i32,
-    /// Lower bound of the hit-point range (C++ `hitPointsMinimum`).
-    pub hp_min: i32,
-    pub min_damage: i32,
-    pub max_damage: i32,
-    pub armor: i32,
-    pub to_hit: i32,
-    pub experience: u32,
-}
-
-impl MonsterStats {
-    fn new(hp_min: i32, hp: i32, min_damage: i32, max_damage: i32, armor: i32, to_hit: i32, experience: u32) -> Self {
-        Self { hp, hp_min, min_damage, max_damage, armor, to_hit, experience }
-    }
-}
+/// Monster type - the full C++ `_monster_id` enum (138 default types).
+///
+/// **C++ Reference**: `_monster_id` in monstdat.h (`MT_NZOMBIE`..`MT_NAKRUL`).
+/// The original simplified 22-type enum is removed: the engine now uses the
+/// complete C++ identity (`monstdat::MonsterId`). The old short names (e.g.
+/// `Zombie`, `FallenOne`) are kept as associated constants on `MonsterId` so
+/// early engine call sites keep working.
+pub use crate::game::monstdat::MonsterId as MonsterType;
 
 /// Monster AI state
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -320,55 +139,8 @@ pub enum LeaderRelation {
     Separated = 2,
 }
 
-/// Monster AI type
-///
-/// **C++ Reference**: `enum class MonsterAIID` in monstdat.h:22-60
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-#[repr(i8)]
-pub enum MonsterAIID {
-    #[default]
-    Zombie = 0,
-    Fat = 1,
-    SkeletonMelee = 2,
-    SkeletonRanged = 3,
-    Scavenger = 4,
-    Rhino = 5,
-    GoatMelee = 6,
-    GoatRanged = 7,
-    Fallen = 8,
-    Magma = 9,
-    SkeletonKing = 10,
-    Bat = 11,
-    Gargoyle = 12,
-    Butcher = 13,
-    Succubus = 14,
-    Sneak = 15,
-    Storm = 16,
-    FireMan = 17,
-    Gharbad = 18,
-    Acid = 19,
-    AcidUnique = 20,
-    Golem = 21,
-    Zhar = 22,
-    Snotspill = 23,
-    Snake = 24,
-    Counselor = 25,
-    Mega = 26,
-    Diablo = 27,
-    Lazarus = 28,
-    LazarusSuccubus = 29,
-    Lachdanan = 30,
-    Warlord = 31,
-    FireBat = 32,
-    Torchant = 33,
-    HorkDemon = 34,
-    Lich = 35,
-    ArchLich = 36,
-    Psychorb = 37,
-    Necromorb = 38,
-    BoneDemon = 39,
-    Invalid = -1,
-}
+/// Monster AI type - exact C++ `MonsterAIID` enum (`monstdat` is canonical).
+pub use crate::game::monstdat::MonsterAIID;
 
 /// Monster flags bitfield
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -574,7 +346,7 @@ impl Monster {
             ai_state: MonsterAIState::Idle,
             goal: MonsterGoal::Normal,
             mode: MonsterMode::Stand,
-            ai: MonsterAIID::Zombie,
+            ai: monster_type.monster_ai(),
             goal_var1: 0,
             goal_var2: 0,
             goal_var3: 0,

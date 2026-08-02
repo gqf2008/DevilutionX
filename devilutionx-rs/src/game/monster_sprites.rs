@@ -37,7 +37,7 @@ pub const MONSTER_FRAME_WIDTH: u16 = 128;
 fn sprite_asset_paths(monster_type: &MonsterType) -> Option<(&'static str, &'static str)> {
     // Map each `MonsterType` to its spawn.mpq CL2 folder + neutral prefix.
     // The `<prefix>n.cl2` file holds the 8-direction stand animation.
-    let (dir, prefix) = match monster_type {
+    let (dir, prefix) = match *monster_type {
         MonsterType::Zombie => ("zombie", "zombie"),
         MonsterType::FallenOne => ("falsword", "fall"),
         MonsterType::Skeleton => ("skelaxe", "sklax"),
@@ -170,7 +170,7 @@ impl MonsterSpriteSet {
 /// A stable RGB display colour per monster type, used for the coloured-block
 /// fallback when no real sprite is available. Keeps each type visually distinct.
 pub fn monster_display_color(monster_type: &MonsterType) -> (u8, u8, u8) {
-    match monster_type {
+    match *monster_type {
         MonsterType::Zombie => (110, 150, 90),   // sickly green
         MonsterType::FallenOne => (180, 70, 60), // red
         MonsterType::Skeleton => (220, 215, 190),// bone white
@@ -192,6 +192,15 @@ pub fn monster_display_color(monster_type: &MonsterType) -> (u8, u8, u8) {
         MonsterType::SkeletonKing => (240, 230, 200),
         MonsterType::Lazarus => (140, 60, 180),
         MonsterType::Diablo => (220, 40, 30),
+        // All remaining types get a stable colour derived from the C++
+        // `_monster_id` so every monster stays visually distinct.
+        other => {
+            let idx = other as i16;
+            let r = 90 + (idx.wrapping_mul(7).rem_euclid(120)) as u8;
+            let g = 90 + (idx.wrapping_mul(13).rem_euclid(120)) as u8;
+            let b = 90 + (idx.wrapping_mul(29).rem_euclid(120)) as u8;
+            (r, g, b)
+        }
     }
 }
 

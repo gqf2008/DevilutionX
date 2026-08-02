@@ -3,6 +3,7 @@
 //! Contains monster types, AI IDs, and data structures.
 
 use serde::{Deserialize, Serialize};
+use super::types::DungeonType;
 
 /// Monster AI ID - exact match of MonsterAIID enum
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
@@ -930,6 +931,119 @@ pub fn get_monster_data(id: MonsterId) -> &'static MonsterData {
     } else {
         // Return first zombie as fallback
         &MONSTERS_DATA[0]
+    }
+}
+
+/// Engine-level summary of a monster's base stats (C++ `InitMonster` inputs).
+#[derive(Debug, Clone, Copy)]
+pub struct MonsterStats {
+    pub hp: i32,
+    /// Lower bound of the hit-point range (C++ `hitPointsMinimum`).
+    pub hp_min: i32,
+    pub min_damage: i32,
+    pub max_damage: i32,
+    pub armor: i32,
+    pub to_hit: i32,
+    pub experience: u32,
+}
+
+#[allow(non_upper_case_globals)] // legacy simplified-type aliases
+impl MonsterId {
+    // ------------------------------------------------------------------
+    // Legacy simplified-type aliases (original engine `monster.rs` enum).
+    // Each maps to its closest C++ `_monster_id`; new code should use the
+    // full `MonsterId` variants directly.
+    // ------------------------------------------------------------------
+    pub const Zombie: Self = Self::ZombieN;
+    pub const FallenOne: Self = Self::FallenRSpear;
+    pub const Skeleton: Self = Self::SkeletonAxeW;
+    pub const SkeletonArcher: Self = Self::SkeletonBowW;
+    pub const Scavenger: Self = Self::ScavengerN;
+    pub const Ghoul: Self = Self::ZombieB;
+    pub const BlackKnight: Self = Self::BlackKnightN;
+    pub const Overlord: Self = Self::Fat;
+    pub const FlayerDemon: Self = Self::Flayed;
+    pub const StormRider: Self = Self::StormR;
+    pub const VenomSpitter: Self = Self::AcidBeastR;
+    pub const SuccubusBlack: Self = Self::Succubus;
+    pub const VileOne: Self = Self::HollowOne;
+    pub const MageHell: Self = Self::Counselor;
+    /// Arch-Bishop Lazarus: set-level unique boss whose base type is
+    /// `MT_ADVOCATE` (unique_monstdat.tsv row 6).
+    pub const Lazarus: Self = Self::Advocate;
+
+    /// Base stats from the authoritative `monstdat.tsv` row
+    /// (`MonsterData`, C++ `InitMonster`).
+    pub fn base_stats(&self) -> MonsterStats {
+        let d = get_monster_data(*self);
+        MonsterStats {
+            hp: d.hp_max as i32,
+            hp_min: d.hp_min as i32,
+            min_damage: d.min_damage as i32,
+            max_damage: d.max_damage as i32,
+            armor: d.armor_class as i32,
+            to_hit: d.to_hit as i32,
+            experience: d.experience as u32,
+        }
+    }
+
+    /// Display name from `monstdat.tsv` (`MonsterData::name`).
+    pub fn name(&self) -> &'static str {
+        get_monster_data(*self).name
+    }
+
+    /// C++ `MonsterData::monsterClass`.
+    pub fn monster_class(&self) -> MonsterClass {
+        get_monster_data(*self).monster_class
+    }
+
+    /// C++ `MonsterData::ai` (`MonsterAIID`).
+    pub fn monster_ai(&self) -> MonsterAIID {
+        get_monster_data(*self).ai
+    }
+
+    /// True for boss/unique encounters (used to scale aggro range and
+    /// intelligence in the simplified spawner; the real game uses
+    /// `UniqueMonstersData`).
+    pub fn is_boss(&self) -> bool {
+        matches!(
+            *self,
+            Self::Butcher | Self::SkeletonKing | Self::Diablo | Self::NaKrul | Self::Advocate
+        )
+    }
+
+    /// Per-dungeon monster table (kept from the original simplified engine;
+    /// each entry now uses its real `_monster_id`). The C++ game instead
+    /// selects per-level in `GetLevelMTypes` using `MonstersData` level ranges.
+    pub fn for_dungeon(dungeon_type: DungeonType) -> Vec<MonsterId> {
+        match dungeon_type {
+            DungeonType::Cathedral => vec![
+                MonsterId::ZombieN,
+                MonsterId::FallenRSpear,
+                MonsterId::SkeletonAxeW,
+                MonsterId::SkeletonBowW,
+                MonsterId::ScavengerN,
+            ],
+            DungeonType::Catacombs => vec![
+                MonsterId::ZombieB,
+                MonsterId::BlackKnightN,
+                MonsterId::Gargoyle,
+                MonsterId::Fat,
+            ],
+            DungeonType::Caves => vec![
+                MonsterId::Golem,
+                MonsterId::Flayed,
+                MonsterId::StormR,
+                MonsterId::AcidBeastR,
+            ],
+            DungeonType::Hell => vec![
+                MonsterId::Succubus,
+                MonsterId::Balrog,
+                MonsterId::HollowOne,
+                MonsterId::Counselor,
+            ],
+            _ => vec![MonsterId::ZombieN],
+        }
     }
 }
 
