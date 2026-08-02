@@ -959,6 +959,61 @@ impl GameState {
         self.recalc_equipment_stats();
     }
 
+    /// Equip an inventory item by its grid cell (C++ `EquipItem` /
+    /// `ChangeEquipment`, inv.cpp). Moves the item from `InvList` to the
+    /// matching `InvBody` slot (helm→head, armor→chest, weapon→left hand,
+    /// ring→left ring, amulet→amulet); the previously equipped item, if any,
+    /// swaps back into the inventory cell. Returns false when the cell is
+    /// empty or the item is not equippable.
+    pub fn equip_inventory_item(&mut self, grid_index: usize) -> bool {
+        use crate::game::item_dat::{ItemEquipType, get_item_data};
+        if grid_index >= self.player.inv_grid.len() {
+            return false;
+        }
+        let cell = self.player.inv_grid[grid_index];
+        if cell <= 0 {
+            return false; // empty or belt cell
+        }
+        let list_idx = (cell - 1) as usize;
+        if list_idx >= self.player.inv_list.len() || self.player.inv_list[list_idx].is_empty() {
+            return false;
+        }
+        let item = self.player.inv_list[list_idx].clone();
+        // Equip type from the authoritative itemdat.tsv row (C++ ILOC_*).
+        let equip_type = get_item_data(item.item_id as usize)
+            .map(|d| d.equip_type)
+            .unwrap_or(ItemEquipType::Unequipable);
+        let body_slot = match equip_type {
+            ItemEquipType::Helm => Some(0), // Head
+            ItemEquipType::Armor => Some(6), // Chest
+            ItemEquipType::OneHand | ItemEquipType::TwoHand => Some(Self::INV_BODY_HAND_LEFT),
+            ItemEquipType::Ring => Some(1), // RingLeft
+            ItemEquipType::Amulet => Some(3), // Amulet
+            _ => None, // unequipable / belt / none
+        };
+        let Some(body_slot) = body_slot else { return false };
+        if body_slot >= self.player.inv_body.len() {
+            return false;
+        }
+        // Swap with the equipped item; clear the source grid cell and re-mark
+        // the displaced item at a free cell.
+        let displaced = std::mem::replace(&mut self.player.inv_body[body_slot], item);
+        self.player.inv_list[list_idx] = displaced.clone();
+        self.player.inv_grid[grid_index] = 0;
+        if !displaced.is_empty() {
+            if let Some(cell) = self
+                .player
+                .inv_grid
+                .iter_mut()
+                .find(|c| **c == 0)
+            {
+                *cell = (list_idx + 1) as i8;
+            }
+        }
+        self.recalc_equipment_stats();
+        true
+    }
+
     /// True when the player currently has a weapon equipped in the left-hand
     /// slot (so the combat path should apply weapon damage rather than bare-
     /// handed zero damage).
@@ -4693,6 +4748,40 @@ mod tests {
     /// level(difficulty) raw fixed-point units (level / 2 when > 1), capped
     /// at maxHitPoints; the engine stores HP in 32x fixed point like
     /// single-player C++.
+    /// C++ EquipItem / ChangeEquipment: an inventory sword equips into the
+    /// left-hand InvBody slot; the grid cell clears and equipment stats
+    /// recalc.
+    #[test]
+    fn test_equip_inventory_item_sword_to_hand() {
+        use crate::game::game_state::{GroundItem, GroundItemType};
+        use crate::game::items::{Item, ItemClass, ItemMiscId, ItemQuality};
+        use crate::game::player_exact::Player;
+
+        let mut gs = GameState::new(Player::new(), false, 42);
+        gs.player.position = Point::new(10, 10);
+        let mut sword = Item::empty();
+        sword.item_index = 119; // Short Sword, equip_type OneHand
+        sword.item_class = ItemClass::Weapon;
+        sword.misc_id = ItemMiscId::None;
+        sword.quality = ItemQuality::Normal;
+        sword.name = "Short Sword".to_string();
+        gs.ground_items.push(GroundItem {
+            x: 10, y: 10,
+            item_type: GroundItemType::ManaPotion,
+            item_index: Some(119),
+            item: Some(sword),
+        });
+        gs.pickup_ground_items();
+        assert_eq!(gs.player.inv_grid[0], 1, "sword at grid cell 0");
+
+        assert!(gs.equip_inventory_item(0), "equip succeeds");
+        let hand = &gs.player.inv_body[GameState::INV_BODY_HAND_LEFT];
+        assert_eq!(hand.item_id, 119, "sword in left hand");
+        assert_eq!(gs.player.inv_grid[0], 0, "grid cell cleared");
+        assert!(gs.player.inv_list[0].is_empty(), "inventory slot vacated");
+        assert!(gs.player._p_i_max_dam > 0, "equipment stats recalculated");
+    }
+
     /// C++ AutoPlaceItemInInventory: real non-potion drops (e.g. a sword)
     /// go to the first free 40-slot inventory cell and bump `_pNumInv`.
     #[test]
