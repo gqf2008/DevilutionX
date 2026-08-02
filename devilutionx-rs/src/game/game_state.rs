@@ -387,6 +387,8 @@ pub struct GameState {
     /// monster set is a 20-type simplification, so counts land in the first
     /// slots.
     pub kill_counts: [i32; 138],
+    /// Per-tile corpse id (C++ dCorpse, dead.cpp:95 `(corpseId & 0x1F) + (dir << 5)`).
+    pub dcorpse: Vec<i8>,
     /// Active floating damage numbers (C++ `qol/floatingnumbers.cpp`).
     pub floating_numbers: crate::game::floatingnumbers::FloatingNumbers,
 
@@ -577,6 +579,7 @@ impl GameState {
             pending_spell: None,
             explored: vec![false; 112 * 112],
             kill_counts: [0; 138],
+            dcorpse: vec![0; 112 * 112],
             floating_numbers: crate::game::floatingnumbers::FloatingNumbers::new(),
             quests: {
                 let mut q = crate::game::quest_new::QuestManager::new();
@@ -1377,6 +1380,12 @@ impl GameState {
                             // Record the death tile for loot drop.
                             let mp = monster.position();
                             kill_positions.push((mp.x, mp.y, monster.level as i32));
+                            // Record the corpse tile (C++ dCorpse, dead.cpp:95).
+                            if mp.x >= 0 && mp.x < 112 && mp.y >= 0 && mp.y < 112 {
+                                let dir = monster.facing as u8 as i32;
+                                self.dcorpse[mp.y as usize * 112 + mp.x as usize] =
+                                    ((monster.corpse_id as i32 & 0x1F) + (dir << 5)) as i8;
+                            }
                             // Queue the monster-death SFX. The game loop drains
                             // pending_sfx and forwards it to AudioManager.
                             sfx_kills += 1;
@@ -2278,7 +2287,7 @@ impl GameState {
         for &v in &dmonster {
             dungeon_only.extend_from_slice(&v.to_be_bytes()); // dMonster (BE i32)
         }
-        dungeon_only.extend(std::iter::repeat(0u8).take(112 * 112)); // dCorpse
+        dungeon_only.extend_from_slice(&self.dcorpse.iter().map(|&v| v as u8).collect::<Vec<u8>>()); // dCorpse
         match &self.dungeon_layout {
             Some(layout) => dungeon_only.extend_from_slice(&layout.pre_light),
             None => dungeon_only.extend(std::iter::repeat(0u8).take(112 * 112)),
