@@ -29,6 +29,7 @@ use game::game_state::GameState;
 use game::game_loop::{run_game_loop, InterfaceMode};
 use ui::diabloui::mainmenu::{MainMenu, MainMenuSelection};
 use ui::diabloui::settings::SettingsMenu;
+use ui::diabloui::selconn::SelConnMenu;
 use ui::diabloui::UiContext;
 use std::env;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -1728,6 +1729,146 @@ fn ui_settings_dialog(ctx: &mut DiabloContext, event_pump: &mut sdl2::EventPump)
     }
 }
 
+/// Render the connection-selection dialog (C++ `UiSelectProvider` +
+/// selconn.cpp layout): a provider list on the right with the focused
+/// provider's description and max players.
+fn render_sel_conn(
+    canvas: &mut sdl2::render::Canvas<sdl2::video::Window>,
+    font: &mut PixelFont,
+    menu: &SelConnMenu,
+    assets: &UiAssetsSnapshot,
+    fade: u8,
+) -> Result<(), String> {
+    let creator = canvas.texture_creator();
+    let (ui_x, ui_y) = ui_origin();
+
+    canvas.set_draw_color(Color::RGB(0, 0, 0));
+    canvas.clear();
+    if let Some(bg) = &assets.mainmenu_bg {
+        render_ui_image(canvas, &creator, bg, ui_x, ui_y, fade)?;
+    } else {
+        canvas.set_draw_color(Color::RGB(10, 10, 20));
+        canvas.clear();
+    }
+
+    // Title (C++ "Multi Player Game" / "Select Connection").
+    font.render_text(canvas, "Multi Player Game", ui_x + (640 - font.text_width("Multi Player Game")) / 2, ui_y + 40, mod_color(Color::RGB(170, 170, 170), fade));
+
+    // Provider list on the right (C++ rect7/rect8 area).
+    let list_x = ui_x + 305;
+    let list_y = ui_y + 130;
+    let item_w: i32 = 285;
+    let item_h: i32 = 30;
+    for i in 0..menu.item_count() {
+        let item_y = list_y + i as i32 * item_h;
+        let selected = i == menu.selected_index();
+        if selected {
+            canvas.set_draw_color(mod_color(Color::RGB(40, 32, 16), fade));
+            let _ = canvas.fill_rect(Rect::new(list_x, item_y, item_w as u32, item_h as u32));
+        }
+        let color = if selected {
+            mod_color(Color::RGB(255, 215, 0), fade)
+        } else {
+            mod_color(Color::RGB(170, 170, 170), fade)
+        };
+        let label = menu.row_label(i);
+        let text_w = font.text_width(&label);
+        font.render_text(canvas, &label, list_x + (item_w - text_w) / 2, item_y + (item_h - font.line_height()) / 2, color);
+    }
+
+    // Description + players (C++ selconn_Description / selconn_MaxPlayers).
+    font.render_text(
+        canvas,
+        &format!("Players Supported: {}", menu.players_supported()),
+        ui_x + 35,
+        ui_y + 250,
+        mod_color(Color::RGB(150, 150, 150), fade),
+    );
+    let desc = menu.description();
+    font.render_text(canvas, desc, ui_x + 35, ui_y + 280, mod_color(Color::RGB(150, 150, 150), fade));
+    Ok(())
+}
+
+/// Hit-test the connection-provider rows.
+fn hit_test_sel_conn_item(mouse_x: i32, mouse_y: i32, item_count: usize) -> Option<usize> {
+    let (ui_x, ui_y) = ui_origin();
+    let list_x = ui_x + 305;
+    let list_y = ui_y + 130;
+    let item_w: i32 = 285;
+    let item_h: i32 = 30;
+    if mouse_x < list_x || mouse_x >= list_x + item_w {
+        return None;
+    }
+    for i in 0..item_count {
+        let item_y = list_y + i as i32 * item_h;
+        if mouse_y >= item_y && mouse_y < item_y + item_h {
+            return Some(i);
+        }
+    }
+    None
+}
+
+/// Connection-selection dialog (C++ `UiSelectProvider`, selconn.cpp).
+/// Returns `None` when the user cancels.
+fn ui_sel_conn_dialog(ctx: &mut DiabloContext, event_pump: &mut sdl2::EventPump) -> Result<Option<crate::net::storm::ConnType>, String> {
+    let mut menu = SelConnMenu::new();
+    let assets = snapshot_ui_assets();
+    let start_time = Instant::now();
+    let mut fade_ctx = UiContext::new();
+    fade_ctx.start_fade_in(0);
+
+    let result = 'dialog_loop: loop {
+        for event in event_pump.poll_iter() {
+            match event {
+                Event::Quit { .. } => break 'dialog_loop None,
+                Event::KeyDown { keycode: Some(key), .. } => match key {
+                    Keycode::Up | Keycode::W => {
+                        menu.move_selection(-1);
+                        engine::audio::dispatch_sfx("ui_click");
+                    }
+                    Keycode::Down | Keycode::S => {
+                        menu.move_selection(1);
+                        engine::audio::dispatch_sfx("ui_click");
+                    }
+                    Keycode::Return | Keycode::Space => {
+                        engine::audio::dispatch_sfx("menu_click");
+                        break 'dialog_loop Some(menu.selected_connection());
+                    }
+                    Keycode::Escape => break 'dialog_loop None,
+                    _ => {}
+                },
+                Event::MouseButtonUp {
+                    mouse_btn: sdl2::mouse::MouseButton::Left,
+                    x,
+                    y,
+                    ..
+                } => {
+                    if let Some(idx) = hit_test_sel_conn_item(x, y, menu.item_count()) {
+                        menu.set_selection(idx);
+                        engine::audio::dispatch_sfx("menu_click");
+                        break 'dialog_loop Some(menu.selected_connection());
+                    }
+                }
+                Event::MouseMotion { x, y, .. } => {
+                    if let Some(idx) = hit_test_sel_conn_item(x, y, menu.item_count()) {
+                        menu.set_selection(idx);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let now_ms = start_time.elapsed().as_millis() as u32;
+        let _ = fade_ctx.update_fade(now_ms);
+        let fade = fade_ctx.fade_value.min(255) as u8;
+        render_sel_conn(ctx.window.canvas_mut(), &mut ctx.font, &menu, &assets, fade)?;
+        std::thread::sleep(std::time::Duration::from_millis(16));
+    };
+
+    println!("[UiSelConnDialog] Result: {:?}", result);
+    Ok(result)
+}
+
 fn ui_main_menu_dialog(
     name: &str,
     ctx: &mut DiabloContext,
@@ -1873,12 +2014,20 @@ fn init_multiplayer_menu(ctx: &mut DiabloContext, event_pump: &mut sdl2::EventPu
     // 3. UiSelHeroMultDialog (hero selection with multiplayer options)
     // 4. NetInit(false) to set up network
     // 5. StartGame for either hosting or joining
-    //
-    // For now, reuse hero select dialog as placeholder
+
+    // 2. UiSelectProvider (selconn.cpp): pick ZeroTier / Client-Server / Offline.
+    let Some(conn) = ui_sel_conn_dialog(ctx, event_pump)? else {
+        println!("[InitMultiPlayerMenu] Connection selection cancelled");
+        return Ok(true);
+    };
+    println!("[InitMultiPlayerMenu] Connection: {:?}", conn);
+    // TODO: SNetInitializeProvider(provider, gameData) + NetInit + hosting/joining.
+
+    // 3. Reuse the single-player hero select as a placeholder until the
+    // multiplayer hero menu is ported.
     if let Some(class) = select_hero_dialog(ctx, event_pump)? {
         println!("[InitMultiPlayerMenu] Selected class: {:?}", class);
-        // TODO: Implement connection selection and game hosting/joining
-        // For now we just return to the menu
+        // TODO: Implement game hosting/joining; for now return to the menu.
     }
 
     Ok(true)
