@@ -2345,10 +2345,12 @@ impl GameState {
                 dlight[y * 112 + x] = self.light_manager.light_buffer[y][x];
             }
         }
+        // C++ writes dFlags & SavedFlags; the engine only tracks the
+        // Explored bit (DungeonFlag::Explored = 1 << 7, gendung.h:73).
         let dflags: Vec<u8> = self
             .explored
             .iter()
-            .map(|&b| if b { 1 } else { 0 })
+            .map(|&b| if b { 1 << 7 } else { 0 })
             .collect();
         let zero_grid = vec![0u8; 112 * 112];
         // Dungeon-only grids: dMonster/dCorpse are zeros (no per-tile monster
