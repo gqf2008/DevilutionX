@@ -1031,24 +1031,16 @@ fn place_dungeon_monsters(game_state: &mut GameState, spawn_x: i32, spawn_y: i32
         return;
     }
 
-    // Level-appropriate monster types: the level number maps 1:1 to the
-    // C++ dungeon type (1=L1 Cathedral .. 4=L4 Hell, 5/6 = Hellfire
-    // Nest/Crypt), and `MonsterId::for_dungeon` returns the real
-    // `_monster_id`s for that dungeon. C++ `GetLevelMTypes` additionally
-    // filters by `MonstersData` level ranges and the image budget.
-    use crate::game::monster::MonsterType;
-    let level = game_state.current_dungeon_level;
-    let dungeon_type = match level {
-        2 => crate::game::types::DungeonType::Catacombs,
-        3 => crate::game::types::DungeonType::Caves,
-        4 => crate::game::types::DungeonType::Hell,
-        5 => crate::game::types::DungeonType::Nest,
-        6 => crate::game::types::DungeonType::Crypt,
-        _ => crate::game::types::DungeonType::Cathedral,
-    };
-    let mut types = MonsterType::for_dungeon(dungeon_type);
-    if types.is_empty() {
-        types.push(MonsterType::Zombie);
+    // Build the C++ per-level monster-type table (`GetLevelMTypes`) and
+    // place from its scatter roster (C++ `PlaceMonsters` picks
+    // `scattertypes[GenerateRnd(numscattypes)]`); `Monster::level_type`
+    // carries the table slot into `SaveMonster`.
+    use crate::game::monster::{MonsterType, PLACE_SCATTER, get_level_m_types};
+    let mut level_types = get_level_m_types(game_state.current_dungeon_level);
+    let mut scatter = level_types.scatter_indices();
+    if scatter.is_empty() {
+        level_types.add(MonsterType::Zombie, PLACE_SCATTER);
+        scatter = level_types.scatter_indices();
     }
 
     // Deterministic per-level spawns: C++ places monsters through the gameplay
@@ -1074,7 +1066,8 @@ fn place_dungeon_monsters(game_state: &mut GameState, spawn_x: i32, spawn_y: i32
         };
         occupied.push((tx, ty));
 
-        let monster_type = types[crate::engine::random::gameplay_rnd(0, types.len() as i32 - 1) as usize];
+        let type_index = scatter[crate::engine::random::gameplay_rnd(0, scatter.len() as i32 - 1) as usize];
+        let monster_type = level_types.get(type_index).expect("scatter slot exists").monster_type;
         // Build the monster on its spawn tile. `Monster::new` seeds enemy/target
         // with the monster's own tile (a safe no-op until `update_ai` repoints
         // them at the player) and home_x/home_y with the spawn tile (used to
@@ -1094,6 +1087,8 @@ fn place_dungeon_monsters(game_state: &mut GameState, spawn_x: i32, spawn_y: i32
         // within aggro_range (8 tiles).
         m.ai_state = crate::game::monster::MonsterAIState::Idle;
         m.mode = crate::game::monster::MonsterMode::Stand;
+        // C++ SaveMonster levelType = the slot in the level type table.
+        m.level_type = type_index as u8;
 
         game_state.monster_manager.add_monster(m);
         used_types.push(monster_type);

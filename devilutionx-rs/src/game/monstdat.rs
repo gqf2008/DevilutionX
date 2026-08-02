@@ -927,6 +927,19 @@ pub const MONSTERS_DATA: [MonsterData; NUM_DEFAULT_MTYPES] = [
 ];
 
 /// Get monster data by ID using const array lookup
+/// Build a `MonsterId` from its C++ `_monster_id` value (0..NUM_DEFAULT_MTYPES).
+///
+/// The enum is `#[repr(i16)]` with contiguous discriminants 0..137, so the
+/// transmute below is safe for the checked range (mirrors the index cast in
+/// `get_monster_data`).
+pub fn monster_id_from_index(index: i16) -> Option<MonsterId> {
+    if index >= 0 && (index as usize) < NUM_DEFAULT_MTYPES {
+        Some(unsafe { std::mem::transmute::<i16, MonsterId>(index) })
+    } else {
+        None
+    }
+}
+
 pub fn get_monster_data(id: MonsterId) -> &'static MonsterData {
     let index = id as i16;
     if index >= 0 && (index as usize) < MONSTERS_DATA.len() {

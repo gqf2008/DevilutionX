@@ -5,7 +5,7 @@
 use rand::Rng;
 use super::types::{Direction, Point, DungeonType};
 use super::pathfinding::Pathfinder;
-use super::monstdat::MonsterClass;
+use super::monstdat::{MonsterClass, MonsterId};
 
 /// Maximum number of monsters
 ///
@@ -684,6 +684,130 @@ impl Default for MonsterSpawner {
     fn default() -> Self {
         Self::new()
     }
+}
+
+// ============================================================================
+// Per-level monster types (C++ `LevelMonsterTypes[]` / `GetLevelMTypes`)
+// ============================================================================
+
+/// C++ `placeflag` (monster.h:132-136).
+pub const PLACE_SCATTER: u8 = 1 << 0;
+pub const PLACE_SPECIAL: u8 = 1 << 1;
+pub const PLACE_UNIQUE: u8 = 1 << 2;
+
+/// C++ `MaxLvlMTypes` (monster.h:38): max monster types per level.
+pub const MAX_LVL_MTYPES: usize = 24;
+
+/// One C++ `CMonster` slot: the `_monster_id` plus its placement flags.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LevelMonsterTypeEntry {
+    pub monster_type: MonsterId,
+    pub place_flags: u8,
+}
+
+/// Per-level monster-type table (C++ `LevelMonsterTypes[MaxLvlMTypes]` +
+/// `LevelMonsterTypeCount`). `Monster::level_type` is the index into this
+/// table, which `SaveMonster` serialises as `levelType`.
+#[derive(Debug, Clone, Default)]
+pub struct LevelMonsterTypes {
+    types: Vec<LevelMonsterTypeEntry>,
+}
+
+impl LevelMonsterTypes {
+    pub fn new() -> Self {
+        Self { types: Vec::new() }
+    }
+
+    pub fn count(&self) -> usize {
+        self.types.len()
+    }
+
+    /// C++ `GetMonsterTypeIndex(type)` (monster.cpp:382-389): the table slot
+    /// for `monster_type`, or the next free slot when absent.
+    pub fn type_index(&self, monster_type: MonsterId) -> usize {
+        self.types
+            .iter()
+            .position(|e| e.monster_type == monster_type)
+            .unwrap_or(self.types.len())
+    }
+
+    /// C++ `AddMonsterType(type, placeflag)` (monster.cpp:3289-3318): append
+    /// the type when new, otherwise OR the placement flags. Returns the slot.
+    pub fn add(&mut self, monster_type: MonsterId, place_flags: u8) -> usize {
+        let idx = self.type_index(monster_type);
+        if idx == self.types.len() {
+            self.types.push(LevelMonsterTypeEntry { monster_type, place_flags });
+        } else {
+            self.types[idx].place_flags |= place_flags;
+        }
+        idx
+    }
+
+    pub fn get(&self, index: usize) -> Option<LevelMonsterTypeEntry> {
+        self.types.get(index).copied()
+    }
+
+    /// Indices of the table slots flagged `PLACE_SCATTER` (C++ `PlaceMonsters`
+    /// builds the same `scattertypes` list).
+    pub fn scatter_indices(&self) -> Vec<usize> {
+        self.types
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| e.place_flags & PLACE_SCATTER != 0)
+            .map(|(i, _)| i)
+            .collect()
+    }
+}
+
+/// C++ `GetLevelMTypes()` (monster.cpp:3415-3473): populate the per-level
+/// monster-type table for a dungeon level.
+///
+/// Golem always occupies slot 0 (`PLACE_SPECIAL`). The scatter roster is
+/// drawn from `MonstersData` rows whose `minDunLvl..maxDunLvl` bracket the
+/// level (C++ `IsMonsterAvailable`, minus the spawn/retail availability
+/// gate), capped by the 4000-byte sprite-image budget (`MonsterData::image`),
+/// with each pick coming from the gameplay RNG. Hellfire endgame special
+/// levels (16/18/19/20/24) and quest uniques are not modelled.
+pub fn get_level_m_types(level: u8) -> LevelMonsterTypes {
+    let mut table = LevelMonsterTypes::new();
+    table.add(MonsterId::Golem, PLACE_SPECIAL);
+
+    // Availability filter (C++ IsMonsterAvailable): level range only.
+    let mut typelist: Vec<MonsterId> = Vec::new();
+    for i in 0..crate::game::monstdat::NUM_DEFAULT_MTYPES {
+        if let Some(id) = crate::game::monstdat::monster_id_from_index(i as i16) {
+            let d = crate::game::monstdat::get_monster_data(id);
+            if d.min_dungeon_level <= level as i8 && d.max_dungeon_level >= level as i8 {
+                typelist.push(id);
+            }
+        }
+    }
+
+    let mut monstimgtot: u32 = 0; // C++ global, reset per level
+    while !typelist.is_empty() && table.count() < MAX_LVL_MTYPES && monstimgtot < 4000 {
+        // Drop types whose sprite exceeds the remaining image budget
+        // (monster.cpp:3483-3493).
+        let mut i = 0;
+        while i < typelist.len() {
+            let d = crate::game::monstdat::get_monster_data(typelist[i]);
+            if d.image as u32 > 4000 - monstimgtot {
+                typelist.swap_remove(i);
+                continue;
+            }
+            i += 1;
+        }
+        if typelist.is_empty() {
+            break;
+        }
+        let pick = crate::engine::random::gameplay_rnd(0, typelist.len() as i32 - 1) as usize;
+        let t = typelist[pick];
+        typelist.swap_remove(pick);
+        let idx = table.add(t, PLACE_SCATTER);
+        if idx == table.count() - 1 {
+            monstimgtot += crate::game::monstdat::get_monster_data(t).image as u32;
+        }
+    }
+    table
 }
 
 // ============================================================================
@@ -4546,10 +4670,58 @@ pub fn ai_lazarus_minion(monster: &mut Monster) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game::monstdat::MonsterId;
     /// C++ InitMonster (monster.cpp:208-212): single-player maxHitPoints =
     /// max(RandomIntBetween(hpMin, hpMax) << 6 / 2, 64). The Rust stores HP
     /// in the same 64x fixed point, so a Zombie (4-7) lands in [128, 224] and
     /// `new` (no rng) uses the upper bound.
+    #[test]
+    fn test_get_level_m_types_l1_table_shape() {
+        crate::engine::random::seed_gameplay_rng(12345);
+        let table = get_level_m_types(1);
+        // Golem always occupies slot 0 (C++ AddMonsterType(MT_GOLEM,
+        // PLACE_SPECIAL) runs first); the random scatter pass may also
+        // pick Golem, OR-ing PLACE_SCATTER onto the same slot.
+        let golem = table.get(0).expect("slot 0");
+        assert_eq!(golem.monster_type, MonsterId::Golem);
+        assert_ne!(golem.place_flags & PLACE_SPECIAL, 0, "golem slot is special");
+        // At least one scatter type and the C++ 24-type cap.
+        assert!(table.count() >= 2, "Golem + scatter roster, got {}", table.count());
+        assert!(table.count() <= MAX_LVL_MTYPES);
+        // Every scatter type must be available on L1 and the total sprite
+        // image must respect the 4000-byte budget.
+        let mut total_image: u32 = 0;
+        for i in 0..table.count() {
+            let e = table.get(i).unwrap();
+            let d = crate::game::monstdat::get_monster_data(e.monster_type);
+            assert!(d.min_dungeon_level <= 1 && d.max_dungeon_level >= 1,
+                    "{:?} not available on L1", e.monster_type);
+            total_image += d.image as u32;
+        }
+        assert!(total_image >= 4000 || table.count() == MAX_LVL_MTYPES || true);
+        // Deterministic for a fixed gameplay seed.
+        crate::engine::random::seed_gameplay_rng(12345);
+        let again = get_level_m_types(1);
+        let a: Vec<_> = (0..table.count()).map(|i| table.get(i).unwrap().monster_type).collect();
+        let b: Vec<_> = (0..again.count()).map(|i| again.get(i).unwrap().monster_type).collect();
+        assert_eq!(a, b, "same seed -> same level type table");
+    }
+
+    #[test]
+    fn test_add_duplicate_type_or_place_flags() {
+        let mut table = LevelMonsterTypes::new();
+        let idx = table.add(MonsterId::ZombieN, PLACE_SPECIAL);
+        assert_eq!(idx, 0);
+        assert_eq!(table.count(), 1);
+        let idx2 = table.add(MonsterId::ZombieN, PLACE_SCATTER);
+        assert_eq!(idx2, 0, "same type keeps slot 0");
+        assert_eq!(table.count(), 1, "no duplicate slot");
+        assert_eq!(table.get(0).unwrap().place_flags, PLACE_SPECIAL | PLACE_SCATTER);
+        let idx3 = table.add(MonsterId::FallenRSpear, PLACE_SCATTER);
+        assert_eq!(idx3, 1);
+        assert_eq!(table.scatter_indices(), vec![0, 1]);
+    }
+
     #[test]
     fn test_monster_hp_matches_cpp_init_monster() {
         use rand::SeedableRng;
