@@ -2098,6 +2098,32 @@ impl BinaryMissileData {
     }
 }
 
+/// Map an engine `SimpleMissileData` to the C++ `SaveMissile` structure.
+///
+/// The engine missile only tracks position / per-tick delta / damage / range;
+/// the remaining fields take C++ defaults for a Firebolt cast by the player
+/// (`mitype = MissileID::Firebolt`, `source/caster = 0/1`, `lightId = -1`,
+/// `animAdd = 1`). `dam` is stored in 64x fixed-point like C++ `_midam`
+/// (missiles.cpp `AddMissile`), so the engine display damage is shifted << 6.
+pub fn simple_missile_to_binary(m: &SimpleMissileData) -> BinaryMissileData {
+    let mut b = BinaryMissileData::default();
+    b.mitype = 1; // MissileID::Firebolt
+    b.position_x = m.x;
+    b.position_y = m.y;
+    b.velocity_x = m.dx;
+    b.velocity_y = m.dy;
+    b.start_x = m.x;
+    b.start_y = m.y;
+    b.dam = m.damage << 6;
+    b.duration = m.range_left;
+    b.source = 0; // player
+    b.caster = 1; // TargetMonsters
+    b.anim_add = 1;
+    b.light_id = -1;
+    b
+}
+
+
 // ============================================================================
 // SaveGameData dungeon body (C++ loadsave.cpp:2808-2844)
 // ============================================================================

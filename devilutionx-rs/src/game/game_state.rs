@@ -2123,6 +2123,133 @@ impl GameState {
         self.camera.tile_y = self.player.position.y;
     }
 
+    /// Serialise the current engine state as a C++-compatible `SaveGameData`
+    /// `game` entry (loadsave.cpp:2762-2935). States the Rust engine models
+    /// (player, monsters, objects, simple missiles, dropped items, dynamic
+    /// lights, player vision) map onto the Binary structures; quests, portals,
+    /// kill counts, unique flags and the lighting/flag grids default until
+    /// those systems are fully wired. `dungeon_body` follows the C++ order.
+    pub fn write_save_game_v3(&self) -> Vec<u8> {
+        use crate::game::loadsave::{
+            self, BinaryItemData, BinaryLightData, BinaryMissileData, CppGameHeader, GameSnapshot, LevelSnapshot,
+            SaveHelper, simple_missile_to_binary,
+        };
+        let header = CppGameHeader {
+            magic: *b"SHAR",
+            setlevel: 0,
+            setlvlnum: 0,
+            currlevel: if self.is_town { 0 } else { self.current_dungeon_level as u32 },
+            leveltype: if self.is_town { 0 } else { 1 },
+            view_position_x: self.player.position.x,
+            view_position_y: self.player.position.y,
+            invflag: false,
+            char_flag: false,
+            active_monster_count: self.monster_manager.active_count() as i32,
+            active_item_count: self.ground_items.len() as i32,
+            active_missile_count: self.simple_missiles.len() as u32,
+            active_object_count: self.objects.len() as i32,
+        };
+        let seeds: Vec<(u32, u32)> = (0..17u32)
+            .map(|i| {
+                (
+                    self.dungeon_seeds.get(i as usize).copied().unwrap_or(0),
+                    if i == 0 { 0 } else { 1 },
+                )
+            })
+            .collect();
+        let mut ph = SaveHelper::new(22000);
+        loadsave::save_player(&mut ph, &self.player, false);
+        let player_pack = ph.into_data();
+        let quests = vec![crate::game::quest_new::Quest::default(); 16];
+        let portals = vec![(false, (0, 0), 0, 0, false); 4];
+        let kill = vec![0i32; 138];
+
+        // Dungeon body (monsters, missiles, objects, lights, vision).
+        let (monsters, params) = self.capture_monsters();
+        let active_monsters: Vec<(u32, loadsave::BinaryMonsterData)> = monsters
+            .into_iter()
+            .enumerate()
+            .map(|(i, m)| (i as u32, m))
+            .collect();
+        let missiles: Vec<BinaryMissileData> = self
+            .capture_simple_missiles()
+            .iter()
+            .map(simple_missile_to_binary)
+            .collect();
+        let objects: Vec<loadsave::BinaryObjectData> = self.capture_objects();
+        let lights: Vec<(u8, BinaryLightData)> = (0..self.light_manager.active_light_count)
+            .map(|i| {
+                let idx = self.light_manager.active_lights[i] as usize;
+                let l = &self.light_manager.lights[idx];
+                (
+                    idx as u8,
+                    BinaryLightData {
+                        position_x: l.position.tile.x,
+                        position_y: l.position.tile.y,
+                        radius: l.radius as i32,
+                        is_invalid: l.is_invalid,
+                        has_changed: l.has_changed,
+                        old_x: l.position.old.x,
+                        old_y: l.position.old.y,
+                        old_radius: l.old_radius as i32,
+                        offset_x: l.position.offset.0 as i32,
+                        offset_y: l.position.offset.1 as i32,
+                    },
+                )
+            })
+            .collect();
+        let vision: Vec<BinaryLightData> = if !self.is_town {
+            vec![BinaryLightData {
+                position_x: self.player.position.x,
+                position_y: self.player.position.y,
+                radius: self.player._p_light_rad as i32,
+                ..Default::default()
+            }]
+        } else {
+            Vec::new()
+        };
+        let monster_level = params.first().map(|p| p.level).unwrap_or(1);
+
+        let mut body = SaveHelper::new(32 * 1024);
+        loadsave::write_dungeon_body(
+            &mut body,
+            &active_monsters,
+            monster_level,
+            0,
+            0,
+            0,
+            &missiles,
+            &(0..self.objects.len() as i8).collect::<Vec<i8>>(),
+            &Vec::new(),
+            &objects,
+            &lights,
+            &vision,
+        );
+        let dungeon_body = body.into_data();
+
+        // Dropped items (floor items -> SaveItem).
+        let dropped: Vec<BinaryItemData> = self
+            .capture_floor_items()
+            .iter()
+            .map(|f| {
+                let mut b = BinaryItemData::default();
+                b.position_x = f.x;
+                b.position_y = f.y;
+                b.item_type = f.kind as i32 + 1;
+                b
+            })
+            .collect();
+        let mut dh = SaveHelper::new(4096);
+        loadsave::write_dropped_items(&mut dh, &dropped, false);
+        let dropped_items = dh.into_data();
+
+        let grid = vec![0u8; 112 * 112];
+        loadsave::write_game_data_v3(
+            &header, &seeds, &player_pack, &quests, (0, 0, 0, 0), &portals, &kill,
+            &dungeon_body, &dropped_items, &[], &grid, &grid, &grid, &[], &[], &[],
+        )
+    }
+
     /// Process objects (public for GameLoop)
     ///
     /// **C++ Reference**: `Source/objects.cpp` - `ProcessObjects()`

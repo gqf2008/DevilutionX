@@ -797,6 +797,67 @@ fn save_player_layout_and_reference_quests_offset() {
         "quest 0 header fields are zero");
 }
 
+/// The engine SimpleMissile must map onto the C++ SaveMissile structure:
+/// position/delta/damage (64x) carry over, the rest default like a player-cast
+/// Firebolt, and the body serialises to the canonical 176 bytes.
+#[test]
+fn simple_missile_maps_to_cpp_savemissile() {
+    use devilutionx_rs::game::loadsave::{
+        SaveHelper, SimpleMissileData, simple_missile_to_binary,
+    };
+
+    let m = SimpleMissileData {
+        x: 30,
+        y: 31,
+        dx: 1,
+        dy: -1,
+        damage: 5,
+        range_left: 4,
+    };
+    let b = simple_missile_to_binary(&m);
+    assert_eq!(b.position_x, 30);
+    assert_eq!(b.position_y, 31);
+    assert_eq!(b.dam, 5 << 6, "damage is 64x fixed-point like C++ _midam");
+    assert_eq!(b.mitype, 1, "engine missiles are Firebolt");
+    assert_eq!(b.light_id, -1, "NO_LIGHT default");
+
+    let mut h = SaveHelper::new(176);
+    b.to_binary(&mut h);
+    assert_eq!(h.into_data().len(), 176, "SaveMissile body is 176 bytes");
+}
+
+/// The engine can serialise its live state into a C++-compatible
+/// SaveGameData game entry: the header parses, the magic is SHAR, the player
+/// segment starts at 179 (43 + 136) and the entry is structurally complete.
+#[test]
+fn engine_state_serialises_cpp_game_entry() {
+    use devilutionx_rs::game::game_state::GameState;
+    use devilutionx_rs::game::loadsave::CppGameHeader;
+    use devilutionx_rs::game::player_exact::Player;
+
+    let mut gs = GameState::new(Player::new(), false, 42);
+    gs.in_dungeon = true;
+    gs.current_dungeon_level = 1;
+    gs.is_town = false;
+
+    let entry = gs.write_save_game_v3();
+    assert_eq!(&entry[..4], b"SHAR", "spawn magic");
+    let header = CppGameHeader::parse(&entry).expect("header parses");
+    assert_eq!(header.currlevel, 1);
+    assert_eq!(header.leveltype, 1, "Cathedral");
+    // Empty engine state still yields the fixed sections: player 21680 +
+    // quests/portals/kill counts + grids (3x12544) etc.
+    assert!(entry.len() > 60_000, "full entry is substantial (got {})", entry.len());
+
+    // Player segment at 179; the name field sits at our verified offset 320.
+    let name_off = 43 + 17 * 8 + 320;
+    assert!(name_off + 32 <= entry.len(), "player name inside entry");
+    assert!(
+        entry[name_off..name_off + 32].iter().all(|&b| b == 0),
+        "fresh player has an empty name field"
+    );
+}
+
 /// Tier 3 foundation: the Rust `CppGameHeader` writer must reproduce the
 /// C++ `SaveGameData` header + level-seed table byte-for-byte. Decodes the
 /// real C++ reference save, re-serialises the parsed header/seeds, and
