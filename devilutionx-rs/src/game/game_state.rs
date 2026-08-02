@@ -389,6 +389,8 @@ pub struct GameState {
     pub kill_counts: [i32; 138],
     /// Per-tile corpse id (C++ dCorpse, dead.cpp:95 `(corpseId & 0x1F) + (dir << 5)`).
     pub dcorpse: Vec<i8>,
+    /// Unique items already spawned (C++ UniqueItemFlags[128]).
+    pub unique_flags: [bool; 128],
     /// Active floating damage numbers (C++ `qol/floatingnumbers.cpp`).
     pub floating_numbers: crate::game::floatingnumbers::FloatingNumbers,
 
@@ -580,6 +582,7 @@ impl GameState {
             explored: vec![false; 112 * 112],
             kill_counts: [0; 138],
             dcorpse: vec![0; 112 * 112],
+            unique_flags: [false; 128],
             floating_numbers: crate::game::floatingnumbers::FloatingNumbers::new(),
             quests: {
                 let mut q = crate::game::quest_new::QuestManager::new();
@@ -1527,6 +1530,9 @@ impl GameState {
                     0,     // uidOffset
                     false, // forceNotUnique
                 );
+                if item.unique_id > 0 && (item.unique_id as usize) < 128 {
+                    self.unique_flags[item.unique_id as usize] = true;
+                }
                 let display = if item.name.is_empty() {
                     crate::game::item_dat::get_item_data(idx)
                         .map(|d| d.name)
@@ -2302,7 +2308,7 @@ impl GameState {
         );
         loadsave::write_game_data_v3(
             &header, &seeds, &player_pack, &quests, return_state, &portals, &kill,
-            &dungeon_body, &dropped_items, &[], &dlight, &dflags, &zero_grid,
+            &dungeon_body, &dropped_items, &self.unique_flags, &dlight, &dflags, &zero_grid,
             &dungeon_only, &[], &[],
         )
     }
