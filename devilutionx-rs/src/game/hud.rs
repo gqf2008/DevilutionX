@@ -23,6 +23,8 @@
 //! No mutation of game state is performed.
 
 use crate::engine::font::PixelFont;
+use crate::engine::surface::{self as surface_mod, Surface};
+use crate::engine::types::{Point, Rectangle, Size};
 use crate::engine::window::GameWindow;
 use crate::game::game_state::GameState;
 use sdl2::pixels::Color;
@@ -144,7 +146,7 @@ mod pal {
 /// Reads player stats from `game_state.player` (64x fixed-point hp/mana). All
 /// drawing is procedural (rectangles + per-pixel sphere fill) so it works with
 /// or without the real Diablo panel CEL art.
-pub fn draw_hud(window: &mut GameWindow, game_state: &GameState) {
+pub fn draw_hud(window: &mut GameWindow, game_state: &GameState, palette_hud_drawn: bool) {
     let canvas = window.canvas_mut();
     let player = &game_state.player;
 
@@ -157,16 +159,143 @@ pub fn draw_hud(window: &mut GameWindow, game_state: &GameState) {
     let experience = player._p_experience;
     let gold = player._p_gold;
 
-    draw_panel_background(canvas);
-    draw_sphere(canvas, LIFE_CX, LIFE_CY, SPHERE_R, fill_ratio(hp, max_hp), SphereKind::Life);
-    draw_sphere(canvas, MANA_CX, MANA_CY, SPHERE_R, fill_ratio(mana, max_mana), SphereKind::Mana);
-    draw_skill_slot(canvas);
-    draw_belt(canvas);
-    draw_xp_bar(canvas, level, experience);
+    if !palette_hud_drawn {
+        // The palette backbuffer did not draw the HUD (fallback render
+        // path without faithful art): draw the full panel on the canvas.
+        draw_panel_background(canvas);
+        draw_sphere(canvas, LIFE_CX, LIFE_CY, SPHERE_R, fill_ratio(hp, max_hp), SphereKind::Life);
+        draw_sphere(canvas, MANA_CX, MANA_CY, SPHERE_R, fill_ratio(mana, max_mana), SphereKind::Mana);
+        draw_skill_slot(canvas);
+        draw_belt(canvas);
+        draw_xp_bar(canvas, level, experience);
+    }
 
     // Text overlay. PixelFont renders at scale 2 for readability.
     let font = PixelFont::new(2);
     draw_stats_text(canvas, &font, hp, max_hp, mana, max_mana, level, gold);
+}
+
+/// 8-bit palette indices (Diablo's classic 256-colour palette, procedural
+/// approximation of the stone panel / red-blue globes / gold XP bar).
+mod pal_idx {
+    pub const PANEL: u8 = 0x52; // mid brown stone
+    pub const PANEL_EDGE: u8 = 0x5E; // lighter stone edge
+    pub const SLOT: u8 = 0x12; // dark slot fill
+    pub const SPHERE_BG: u8 = 0x0E; // dark glass interior
+    pub const LIFE: u8 = 0x20; // red
+    pub const LIFE_LO: u8 = 0x18; // dark red
+    pub const MANA: u8 = 0x98; // blue
+    pub const MANA_LO: u8 = 0x90; // dark blue
+    pub const XP_BACK: u8 = 0x10;
+    pub const XP_FILL: u8 = 0xE0; // gold
+}
+
+/// Draw the HUD panel into the 8-bit palette backbuffer: panel background,
+/// life/mana spheres, skill slot, belt slots and XP bar. This is the Rust
+/// counterpart of C++ `DrawMain` (scrollrt.cpp) which draws the bottom panel
+/// onto the same surface as the world before the palette-converted upload.
+/// The text overlay still renders on the canvas via [`draw_hud`].
+pub fn draw_hud_palette(surface: &mut Surface, player: &crate::game::player_exact::Player) {
+    use pal_idx::*;
+    // Panel background strip + top bevel.
+    surface_mod::fill_rect(
+        surface,
+        Rectangle::new(Point::new(0, PANEL_TOP), Size::new(PANEL_W, PANEL_H)),
+        PANEL,
+    );
+    surface_mod::fill_rect(
+        surface,
+        Rectangle::new(Point::new(0, PANEL_TOP), Size::new(PANEL_W, 2)),
+        PANEL_EDGE,
+    );
+    // Life / mana spheres.
+    draw_sphere_palette(
+        surface,
+        LIFE_CX,
+        LIFE_CY,
+        SPHERE_R,
+        fill_ratio(player._p_hit_points, player._p_max_hp),
+        LIFE,
+        LIFE_LO,
+    );
+    draw_sphere_palette(
+        surface,
+        MANA_CX,
+        MANA_CY,
+        SPHERE_R,
+        fill_ratio(player._p_mana, player._p_max_mana),
+        MANA,
+        MANA_LO,
+    );
+    // Skill slot.
+    surface_mod::fill_rect(
+        surface,
+        Rectangle::new(Point::new(SKILL_SLOT_X, SKILL_SLOT_Y), Size::new(SKILL_SLOT, SKILL_SLOT)),
+        SLOT,
+    );
+    // Belt slots.
+    for i in 0..BELT_SLOTS {
+        let bx = SKILL_SLOT_X + SKILL_SLOT / 2 - BELT_TOTAL_W / 2 + i as i32 * BELT_SLOT_W;
+        surface_mod::fill_rect(
+            surface,
+            Rectangle::new(Point::new(bx, BELT_Y), Size::new(BELT_SLOT_W - 1, BELT_SLOT_H)),
+            SLOT,
+        );
+    }
+    // XP bar (thin gold strip above the panel).
+    surface_mod::fill_rect(
+        surface,
+        Rectangle::new(Point::new(XP_BAR_X, XP_BAR_Y), Size::new(XP_BAR_W, XP_BAR_H)),
+        XP_BACK,
+    );
+    let progress = xp_progress(player._p_level, player._p_experience);
+    let fill_w = ((XP_BAR_W as f32) * progress) as i32;
+    if fill_w > 0 {
+        surface_mod::fill_rect(
+            surface,
+            Rectangle::new(Point::new(XP_BAR_X, XP_BAR_Y), Size::new(fill_w, XP_BAR_H)),
+            XP_FILL,
+        );
+    }
+}
+
+/// Per-pixel liquid sphere fill on the 8-bit surface, matching the canvas
+/// `draw_sphere` geometry: liquid grows from the bottom upward.
+fn draw_sphere_palette(
+    surface: &mut Surface,
+    cx: i32,
+    cy: i32,
+    r: i32,
+    ratio: f32,
+    fill: u8,
+    fill_lo: u8,
+) {
+    let r = r.max(1);
+    // Dark glass interior.
+    for dy in -r..=r {
+        let hw = circle_half_width(r, dy);
+        if hw <= 0 {
+            continue;
+        }
+        for x in (cx - hw)..=(cx + hw) {
+            if let Some(px) = surface.at_mut(x, cy + dy) {
+                *px = pal_idx::SPHERE_BG;
+            }
+        }
+    }
+    // Liquid region (bottom-up fill, same surface_y formula as canvas).
+    let surface_y = cy + r - ((r as f32 * 2.0 * ratio).round() as i32);
+    for dy in (surface_y - cy)..=r {
+        let hw = circle_half_width(r, dy);
+        if hw <= 0 {
+            continue;
+        }
+        for x in (cx - hw)..=(cx + hw) {
+            if let Some(px) = surface.at_mut(x, cy + dy) {
+                *px = if cy + dy >= surface_y { fill } else { fill_lo };
+            }
+        }
+    }
 }
 
 /// Convert 64x fixed-point (current, max) into a 0.0..=1.0 fill ratio.
@@ -396,6 +525,31 @@ fn lerp_color(a: Color, b: Color, t: f32) -> Color {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_draw_hud_palette_paints_panel_and_spheres() {
+        let mut player = crate::game::player_exact::Player::new();
+        player._p_max_hp = 100 * 64;
+        player._p_hit_points = 50 * 64;
+        player._p_max_mana = 100 * 64;
+        player._p_mana = 100 * 64;
+        let mut buf = vec![0u8; (SCREEN_W * SCREEN_H) as usize];
+        let (w, h) = (SCREEN_W as usize, SCREEN_H as usize);
+        {
+            let mut surface = Surface::new(&mut buf, w as u32, w as i32, h as i32);
+            draw_hud_palette(&mut surface, &player);
+        }
+        // Panel background painted in the bottom strip.
+        assert_ne!(buf[400 * w + 10], 0, "panel background painted");
+        // Life sphere area painted (centre-left, y = PANEL_TOP + 60).
+        assert_ne!(buf[(PANEL_TOP + 60) as usize * w + LIFE_CX as usize], 0, "life sphere painted");
+        // Mana sphere area painted.
+        assert_ne!(buf[(PANEL_TOP + 60) as usize * w + MANA_CX as usize], 0, "mana sphere painted");
+        // XP bar painted (above the panel).
+        assert_ne!(buf[XP_BAR_Y as usize * w + (XP_BAR_X + 40) as usize], 0, "XP bar painted");
+        // World area (upper screen) untouched.
+        assert_eq!(buf[50 * w + 50], 0, "world area untouched");
+    }
 
     #[test]
     fn test_xp_progress_level_1_start() {

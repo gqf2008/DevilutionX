@@ -1482,6 +1482,7 @@ fn render_world_pipeline(
     entities: &dyn Fn(&mut crate::engine::surface::Surface, &crate::engine::scrollrt::Lighting),
     player_light_radius: u8,
     explored: &[bool],
+    player: &crate::game::player_exact::Player,
 ) {
     let palette = crate::engine::palette::Palette::from_rgb_bytes(&level.palette.colors)
         .unwrap_or_else(crate::engine::palette::Palette::new);
@@ -1589,6 +1590,9 @@ fn render_world_pipeline(
         // backbuffer before the palette-converted upload (C++ DrawView draws
         // them on the surface). Depth order: caller sorts by wx+wy.
         entities(&mut surface, &lighting);
+        // C++ DrawMain draws the bottom panel onto the same surface as the
+        // world; do the same here so the HUD shares the palette upload.
+        crate::game::hud::draw_hud_palette(&mut surface, player);
     }
     let _ = window.present_backbuffer(&palette);
 }
@@ -1703,11 +1707,11 @@ fn draw_and_blit(
 
     if game_state.in_dungeon {
         if let (Some(level), Some(layout)) = (&game_state.dungeon_level_data, &game_state.dungeon_layout) {
-            render_world_pipeline(window, level, layout, view_pos, viewport_h, &monster_entities_closure, game_state.player._p_light_rad as u8, &game_state.explored);
+            render_world_pipeline(window, level, layout, view_pos, viewport_h, &monster_entities_closure, game_state.player._p_light_rad as u8, &game_state.explored, &game_state.player);
             drew_pipeline = true;
         }
     } else if let (Some(level), Some(layout)) = (&game_state.level_data, &game_state.town_layout) {
-        render_world_pipeline(window, level, layout, view_pos, viewport_h, &monster_entities_closure, game_state.player._p_light_rad as u8, &game_state.explored);
+        render_world_pipeline(window, level, layout, view_pos, viewport_h, &monster_entities_closure, game_state.player._p_light_rad as u8, &game_state.explored, &game_state.player);
         drew_pipeline = true;
     }
 
@@ -1785,7 +1789,7 @@ fn draw_and_blit(
     // Draw the bottom HUD panel (life/mana spheres, XP bar, belt, stats) on top
     // of the rendered world + player sprite. Pure canvas drawing (no textures).
     draw_simple_missiles(window, game_state, cam_tile_x, cam_tile_y, screen_center_x, screen_center_y);
-    hud::draw_hud(window, game_state);
+    hud::draw_hud(window, game_state, drew_pipeline);
 
     // Debug status line (throttled: only every 30 ticks to avoid log spam).
     if game_state.game_tick % 30 == 0 {
