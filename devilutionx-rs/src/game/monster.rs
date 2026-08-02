@@ -87,27 +87,27 @@ impl MonsterType {
     /// as the demo approximation.
     pub fn base_stats(&self) -> MonsterStats {
         match self {
-            MonsterType::Zombie => MonsterStats::new(7, 2, 5, 5, 10, 54), // C++ MT_NZOMBIE
-            MonsterType::FallenOne => MonsterStats::new(4, 1, 3, 0, 15, 46), // C++ MT_RFALLSP
-            MonsterType::Skeleton => MonsterStats::new(4, 1, 4, 0, 20, 64), // C++ MT_WSKELAX
-            MonsterType::SkeletonArcher => MonsterStats::new(4, 1, 2, 0, 15, 110), // C++ MT_WSKELBW
-            MonsterType::Scavenger => MonsterStats::new(6, 1, 5, 10, 20, 80), // C++ MT_NSCAV
-            MonsterType::Ghoul => MonsterStats::new(11, 3, 10, 10, 10, 58), // C++ MT_BZOMBIE
-            MonsterType::BlackKnight => MonsterStats::new(150, 15, 20, 75, 110, 3360), // C++ MT_NBLACK
-            MonsterType::Gargoyle => MonsterStats::new(90, 10, 16, 45, 65, 1205), // C++ MT_GARGOYLE
-            MonsterType::Overlord => MonsterStats::new(80, 6, 12, 55, 55, 635), // C++ MT_FAT
-            MonsterType::Golem => MonsterStats::new(1, 1, 1, 1, 0, 0), // C++ MT_GOLEM
-            MonsterType::FlayerDemon => MonsterStats::new(200, 10, 20, 70, 85, 2058), // C++ MT_FLAYED
-            MonsterType::StormRider => MonsterStats::new(120, 8, 18, 30, 80, 2391), // C++ MT_RSTORM
-            MonsterType::VenomSpitter => MonsterStats::new(85, 4, 16, 30, 45, 1248), // C++ MT_RACID
-            MonsterType::SuccubusBlack => MonsterStats::new(150, 1, 20, 60, 100, 3696), // C++ MT_SUCCUBUS
-            MonsterType::Balrog => MonsterStats::new(200, 22, 30, 75, 130, 3643), // C++ MT_BALROG
-            MonsterType::VileOne => MonsterStats::new(240, 12, 24, 75, 75, 4374), // C++ MT_HOLOWONE
-            MonsterType::MageHell => MonsterStats::new(70, 8, 20, 0, 90, 4070), // C++ MT_COUNSLR
-            MonsterType::Butcher => MonsterStats::new(320, 6, 12, 50, 50, 710), // C++ MT_CLEAVER
-            MonsterType::SkeletonKing => MonsterStats::new(140, 6, 16, 70, 60, 570), // C++ MT_SKING
-            MonsterType::Lazarus => MonsterStats::new(200, 30, 50, 70, 40, 5000), // C++ set-level boss (no monstdat row)
-            MonsterType::Diablo => MonsterStats::new(1666, 30, 60, 90, 220, 31666), // C++ MT_DIABLO
+            MonsterType::Zombie => MonsterStats::new(4, 7, 2, 5, 5, 10, 54), // C++ MT_NZOMBIE
+            MonsterType::FallenOne => MonsterStats::new(1, 4, 1, 3, 0, 15, 46), // C++ MT_RFALLSP
+            MonsterType::Skeleton => MonsterStats::new(2, 4, 1, 4, 0, 20, 64), // C++ MT_WSKELAX
+            MonsterType::SkeletonArcher => MonsterStats::new(2, 4, 1, 2, 0, 15, 110), // C++ MT_WSKELBW
+            MonsterType::Scavenger => MonsterStats::new(3, 6, 1, 5, 10, 20, 80), // C++ MT_NSCAV
+            MonsterType::Ghoul => MonsterStats::new(7, 11, 3, 10, 10, 10, 58), // C++ MT_BZOMBIE
+            MonsterType::BlackKnight => MonsterStats::new(150, 150, 15, 20, 75, 110, 3360), // C++ MT_NBLACK
+            MonsterType::Gargoyle => MonsterStats::new(60, 90, 10, 16, 45, 65, 1205), // C++ MT_GARGOYLE
+            MonsterType::Overlord => MonsterStats::new(60, 80, 6, 12, 55, 55, 635), // C++ MT_FAT
+            MonsterType::Golem => MonsterStats::new(1, 1, 1, 1, 1, 0, 0), // C++ MT_GOLEM
+            MonsterType::FlayerDemon => MonsterStats::new(160, 200, 10, 20, 70, 85, 2058), // C++ MT_FLAYED
+            MonsterType::StormRider => MonsterStats::new(60, 120, 8, 18, 30, 80, 2391), // C++ MT_RSTORM
+            MonsterType::VenomSpitter => MonsterStats::new(60, 85, 4, 16, 30, 45, 1248), // C++ MT_RACID
+            MonsterType::SuccubusBlack => MonsterStats::new(120, 150, 1, 20, 60, 100, 3696), // C++ MT_SUCCUBUS
+            MonsterType::Balrog => MonsterStats::new(180, 200, 22, 30, 75, 130, 3643), // C++ MT_BALROG
+            MonsterType::VileOne => MonsterStats::new(135, 240, 12, 24, 75, 75, 4374), // C++ MT_HOLOWONE
+            MonsterType::MageHell => MonsterStats::new(70, 70, 8, 20, 0, 90, 4070), // C++ MT_COUNSLR
+            MonsterType::Butcher => MonsterStats::new(320, 320, 6, 12, 50, 50, 710), // C++ MT_CLEAVER
+            MonsterType::SkeletonKing => MonsterStats::new(140, 140, 6, 16, 70, 60, 570), // C++ MT_SKING
+            MonsterType::Lazarus => MonsterStats::new(200, 200, 30, 50, 70, 40, 5000), // C++ set-level boss (no monstdat row)
+            MonsterType::Diablo => MonsterStats::new(1666, 1666, 30, 60, 90, 220, 31666), // C++ MT_DIABLO
         }
     }
 
@@ -217,6 +217,8 @@ impl MonsterType {
 #[derive(Debug, Clone, Copy)]
 pub struct MonsterStats {
     pub hp: i32,
+    /// Lower bound of the hit-point range (C++ `hitPointsMinimum`).
+    pub hp_min: i32,
     pub min_damage: i32,
     pub max_damage: i32,
     pub armor: i32,
@@ -225,8 +227,8 @@ pub struct MonsterStats {
 }
 
 impl MonsterStats {
-    fn new(hp: i32, min_damage: i32, max_damage: i32, armor: i32, to_hit: i32, experience: u32) -> Self {
-        Self { hp, min_damage, max_damage, armor, to_hit, experience }
+    fn new(hp_min: i32, hp: i32, min_damage: i32, max_damage: i32, armor: i32, to_hit: i32, experience: u32) -> Self {
+        Self { hp, hp_min, min_damage, max_damage, armor, to_hit, experience }
     }
 }
 
@@ -545,6 +547,10 @@ impl Monster {
     /// Create a new monster
     pub fn new(id: u32, monster_type: MonsterType, x: i32, y: i32, level_modifier: u8) -> Self {
         let base = monster_type.base_stats();
+        // C++ InitMonster (monster.cpp:208-212): single-player maxHitPoints =
+        // max(RandomIntBetween(hpMin, hpMax) << 6 / 2, 64). The no-rng path
+        // uses the upper bound deterministically; `new_with_rng` rolls.
+        let max_hp = std::cmp::max((base.hp as i32) << 5, 64);
         let level_scale = 1.0 + (level_modifier as f32 * 0.1);
         let is_boss = monster_type.is_boss();
 
@@ -552,8 +558,8 @@ impl Monster {
             id,
             monster_type,
             name: monster_type.name().to_string(),
-            hp: (base.hp as f32 * level_scale) as i32,
-            max_hp: (base.hp as f32 * level_scale) as i32,
+            hp: max_hp,
+            max_hp,
             damage: ((base.min_damage + base.max_damage) as f32 / 2.0 * level_scale) as i32,
             armor: (base.armor as f32 * level_scale) as i32,
             to_hit: base.to_hit,
@@ -610,6 +616,28 @@ impl Monster {
             talk_msg: 0,
         }
     }
+
+    /// C++ `InitMonster` (monster.cpp:208-212): roll maxHitPoints in the
+    /// monster's [hpMin, hpMax] range, << 6 fixed-point, halved in
+    /// single-player with a 64 floor (1 HP). Used by the game loop so each
+    /// spawn has real variance; `new` uses the deterministic upper bound.
+    pub fn new_with_rng(
+        id: u32,
+        monster_type: MonsterType,
+        x: i32,
+        y: i32,
+        level_modifier: u8,
+        rng: &mut impl rand::Rng,
+    ) -> Self {
+        let mut m = Self::new(id, monster_type, x, y, level_modifier);
+        let base = monster_type.base_stats();
+        let rolled = rng.random_range(base.hp_min..=base.hp);
+        let max_hp = std::cmp::max(rolled << 5, 64);
+        m.hp = max_hp;
+        m.max_hp = max_hp;
+        m
+    }
+
 
     /// No leader constant (C++ exact: NoLeader = -1, but stored as u8)
     pub const NO_LEADER: u8 = 255;
@@ -4787,6 +4815,29 @@ pub fn ai_lazarus_minion(monster: &mut Monster) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// C++ InitMonster (monster.cpp:208-212): single-player maxHitPoints =
+    /// max(RandomIntBetween(hpMin, hpMax) << 6 / 2, 64). The Rust stores HP
+    /// in the same 64x fixed point, so a Zombie (4-7) lands in [128, 224] and
+    /// `new` (no rng) uses the upper bound.
+    #[test]
+    fn test_monster_hp_matches_cpp_init_monster() {
+        use rand::SeedableRng;
+        // Deterministic `new`: upper bound 7 << 5 = 224.
+        let m = Monster::new(1, MonsterType::Zombie, 10, 10, 1);
+        assert_eq!(m.max_hp, 224, "Zombie hpMax 7 << 5");
+        assert_eq!(m.hp, m.max_hp);
+        // Rolled `new_with_rng`: in [hpMin<<5, hpMax<<5] = [128, 224].
+        let mut rng = rand::rngs::StdRng::seed_from_u64(7);
+        for i in 0..10 {
+            let m = Monster::new_with_rng(i, MonsterType::Zombie, 10, 10, 1, &mut rng);
+            assert!((128..=224).contains(&m.max_hp), "rolled hp {} in range", m.max_hp);
+            assert_eq!(m.hp, m.max_hp);
+        }
+        // Low-hp monster (Golem 1-1): 1 << 5 = 32 -> clamped to 64 (C++ floor).
+        let g = Monster::new(2, MonsterType::Golem, 10, 10, 1);
+        assert_eq!(g.max_hp, 64, "Golem hp 1 << 5 clamped to min 64");
+    }
+
     /// `base_stats()` must match the authoritative monstdat.tsv rows.
     /// (hp = hitPointsMaximum, then minDamage/maxDamage/armorClass/toHit/exp.)
     #[test]

@@ -960,12 +960,13 @@ fn place_dungeon_monsters(game_state: &mut GameState, spawn_x: i32, spawn_y: i32
         // with the monster's own tile (a safe no-op until `update_ai` repoints
         // them at the player) and home_x/home_y with the spawn tile (used to
         // bound idle wandering).
-        let mut m = crate::game::monster::Monster::new(
+        let mut m = crate::game::monster::Monster::new_with_rng(
             placed as u32 + 1,
             monster_type,
             tx,
             ty,
             1, // level modifier
+            &mut rng,
         );
         // Seed the enemy position with the player spawn so the first AI tick can
         // compute distance to the player.
