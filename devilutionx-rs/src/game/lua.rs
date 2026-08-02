@@ -227,17 +227,35 @@ impl LuaEngine {
     }
 
     /// Register `devilutionx.towners` (C++ `lua/modules/towners.cpp`): one
-    /// table per towner with a `position()` function. The Rust port has no
-    /// towner state wired yet, so `position()` returns nil.
+    /// table per towner with a `position()` function. Positions come from the
+    /// live `GameState.towners` list (synced via [`sync_towners`]): the C++
+    /// `GetTowner(id)` returns null when the NPC is absent, in which case
+    /// `position()` yields nothing (nil).
     pub fn register_towners_module(&self) -> mlua::Result<()> {
         let towners: Table = self.lua.create_table()?;
-        for name in [
-            "griswold", "pepin", "deadguy", "ogden", "cain", "farnham", "adria", "gillian",
-            "wirt", "cow", "lester", "celia", "nut",
-        ] {
+        for (kind, short) in TOWNER_SHORT_NAMES.iter().enumerate() {
             let t: Table = self.lua.create_table()?;
-            t.set("position", self.lua.create_function(|_, ()| Ok(mlua::Value::Nil))?)?;
-            towners.set(name, t)?;
+            let short_owned = (*short).to_string();
+            t.set(
+                "position",
+                self.lua.create_function(move |lua, ()| -> mlua::Result<mlua::MultiValue> {
+                    // C++ towners.<name>.position() returns optional<pair<int,int>>.
+                    let Ok(table) = lua.named_registry_value::<Table>("towner_positions") else {
+                        return Ok(mlua::MultiValue::new());
+                    };
+                    let Ok(pos) = table.get::<Table>(short_owned.as_str()) else {
+                        return Ok(mlua::MultiValue::new());
+                    };
+                    let x: i64 = pos.get("x")?;
+                    let y: i64 = pos.get("y")?;
+                    Ok(mlua::MultiValue::from_vec(vec![
+                        mlua::Value::Integer(x),
+                        mlua::Value::Integer(y),
+                    ]))
+                })?,
+            )?;
+            towners.set(*short, t)?;
+            let _ = kind;
         }
         let devilutionx: Table = self.lua.globals().get("devilutionx")?;
         devilutionx.set("towners", towners)?;
@@ -626,6 +644,13 @@ fn toggle_debug_flag(flag: &std::sync::atomic::AtomicBool, on: Option<bool>) -> 
     }
 }
 
+/// Short names for `devilutionx.towners.<name>` (C++ `TownerShortNames`,
+/// Source/towners.cpp): index == `TownerType` discriminant.
+const TOWNER_SHORT_NAMES: [&str; 13] = [
+    "griswold", "pepin", "deadguy", "ogden", "cain", "farnham", "adria", "gillian",
+    "wirt", "cow", "lester", "celia", "nut",
+];
+
 // ============================================================================
 // Global engine state (C++ `Source/lua/lua_global.cpp`)
 // ============================================================================
@@ -674,6 +699,26 @@ pub fn sync_player(player: &crate::game::player_exact::Player) {
         let name = decode_player_name(&player._p_name);
         let _ = engine.state().set_named_registry_value("player_name", name);
         let _ = engine.state().set_named_registry_value("player_level", player._p_level as i32);
+    });
+}
+
+/// Push the live towner list (`GameState.towners`) into the Lua registry so
+/// `devilutionx.towners.<name>.position()` reports the real town coordinates
+/// (C++ reads the live `Towners[]` array via `GetTowner`).
+pub fn sync_towners(towners: &[(i32, i32, &'static str, u8)]) {
+    with_lua(|engine| {
+        let lua = engine.state();
+        let Ok(table) = lua.create_table() else { return };
+        for &(x, y, _name, kind) in towners {
+            let Some(short) = TOWNER_SHORT_NAMES.get(kind as usize) else {
+                continue;
+            };
+            let Ok(pos) = lua.create_table() else { continue };
+            let _ = pos.set("x", x as i64);
+            let _ = pos.set("y", y as i64);
+            let _ = table.set(*short, pos);
+        }
+        let _ = lua.set_named_registry_value("towner_positions", table);
     });
 }
 
@@ -1005,6 +1050,46 @@ mod tests {
         // with_lua/call_event are safe when the engine is not initialized.
         crate::game::lua::call_event("on_update");
         assert!(crate::game::lua::with_lua(|_| ()).is_none());
+    }
+
+
+    #[test]
+    fn test_towners_position_returns_live_positions() {
+        crate::game::lua::lua_initialize().unwrap();
+
+        // Simulate the live towner list (GameState.towners format:
+        // (tile_x, tile_y, display_name, TownerType as u8)).
+        let towners: Vec<(i32, i32, &'static str, u8)> = vec![
+            (62, 63, "Griswold", 0),
+            (55, 79, "Pepin", 1),
+        ];
+        crate::game::lua::sync_towners(&towners);
+
+        crate::game::lua::with_lua(|engine| {
+            engine
+                .load_script(
+                    "towners.lua",
+                    r#"
+                    x1, y1 = devilutionx.towners.griswold.position()
+                    x2, y2 = devilutionx.towners.pepin.position()
+                    nx = devilutionx.towners.wirt.position()
+                    "#,
+                )
+                .unwrap();
+            let x1: i64 = engine.state().globals().get("x1").unwrap();
+            assert_eq!(x1, 62);
+            let y1: i64 = engine.state().globals().get("y1").unwrap();
+            assert_eq!(y1, 63);
+            let x2: i64 = engine.state().globals().get("x2").unwrap();
+            assert_eq!(x2, 55);
+            let y2: i64 = engine.state().globals().get("y2").unwrap();
+            assert_eq!(y2, 79);
+            // Absent towner -> nil (C++ GetTowner returns null).
+            let nx: mlua::Value = engine.state().globals().get("nx").unwrap();
+            assert!(matches!(nx, mlua::Value::Nil), "absent towner yields nil");
+        });
+
+        crate::game::lua::lua_shutdown();
     }
 
 }

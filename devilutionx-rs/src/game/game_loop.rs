@@ -447,6 +447,9 @@ fn game_logic(game_state: &mut GameState) -> Result<()> {
         // TOWN LOGIC
         // C++: ProcessTowners(), ProcessItems(), ProcessMissiles()
 
+        // Push the live NPC list into the Lua registry (towners.<name>.position()).
+        crate::game::lua::sync_towners(&game_state.towners);
+
         process_towners()?;
         // process_items is handled by game_state.update
         // process_missiles is handled by game_state.update
