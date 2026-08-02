@@ -208,10 +208,71 @@ def check_experience():
     print('Experience: %d rows, %d diffs' % (len(tsv), diffs))
     failures += diffs
 
+def check_quests():
+    global failures
+    rs = rust_source('quest_new.rs')
+    si = rs.find('pub fn get_quest_data'); vi = rs.find('vec![', si)
+    # vec![ ... ] block bounds
+    depth = 0
+    k = vi + 4
+    while k < len(rs):
+        if rs[k] == '[':
+            depth += 1
+        elif rs[k] == ']':
+            depth -= 1
+            if depth == 0:
+                break
+        k += 1
+    limit = k
+    blocks = []
+    i = rs.find('QuestData {', vi)
+    while i >= 0 and i < limit:
+        depth = 0; k = i + len('QuestData {') - 1
+        while k < len(rs):
+            if rs[k] == '{':
+                depth += 1
+            elif rs[k] == '}':
+                depth -= 1
+                if depth == 0:
+                    break
+            k += 1
+        blocks.append(rs[i:k+1]); i = rs.find('QuestData {', k)
+        if i > si + 60000:
+            break
+    def num(b, f):
+        m = re.search(f + r': (-?\d+)', b)
+        return int(m.group(1)) if m else None
+    tsv = tsv_rows('questdat.tsv')
+    diffs = 0
+    for b, t in zip(blocks, tsv):
+        got = (num(b, '_qdlvl'), num(b, '_qdmultlvl'),
+               re.search(r'_qlvlt: DungeonType::(\w+)', b).group(1),
+               num(b, 'quest_book_order'), num(b, '_qdrnd'),
+               re.search(r'_qslvl: SetLevel::(\w+)', b).group(1),
+               re.search(r'is_single_player_only: (\w+)', b).group(1),
+               re.search(r'_qlstr: "([^"]*)"', b).group(1))
+        def pasc(s):
+            return ''.join(w.capitalize() for w in s.split('_'))
+        exp = (int(t['qdlvl']), int(t['qdmultlvl']),
+               'None' if not t['qlvlt'] else pasc(t['qlvlt'].replace('DTYPE_', '').lower()),
+               int(t['bookOrder']), int(t['qdrnd']),
+               'None' if t['qslvl'] == 'SL_NONE'
+               else {'SL_SKELKING': 'SkeletonKing', 'SL_BONECHAMB': 'BoneChamber',
+                     'SL_MAZE': 'Maze', 'SL_POISONWATER': 'PoisonWater',
+                     'SL_VILEBETRAYER': 'VileBetrayer', 'SL_ARENA_CHURCH': 'ArenaChurch',
+                     'SL_ARENA_HELL': 'ArenaHell',
+                     'SL_ARENA_CIRCLE_OF_LIFE': 'ArenaCircleOfLife'}.get(t['qslvl'], t['qslvl']),
+               t['isSinglePlayerOnly'], t['qlstr'])
+        if got != exp:
+            diffs += 1
+    print('quests: %d rows, %d diffs' % (len(blocks), diffs))
+    failures += diffs
+
 check_monstdat()
 check_spelldat()
 check_objdat()
 check_affixes()
 check_experience()
+check_quests()
 print('TOTAL DIFFS:', failures)
 sys.exit(1 if failures else 0)
