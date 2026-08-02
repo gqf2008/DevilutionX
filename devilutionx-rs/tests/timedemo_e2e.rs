@@ -10,7 +10,7 @@
 //!   `#[ignore]`d until the engine's game loop / save systems are ported.
 
 use devilutionx_rs::engine::demo_reader::{
-    load_save_archive, parse_demo, DemoEventType, DemoParseError, ReplayDriver,
+    load_save_archive, parse_demo, DemoEventType, DemoParseError, DemoPayload, ReplayDriver,
 };
 
 /// Path to a file in the upstream `test/fixtures/timedemo/WarriorLevel1to2/` dir,
@@ -74,6 +74,79 @@ fn headless_replay_drives_game_ticks() {
         (gs1.player.position.x, gs1.player.position.y, gs1.player._p_hit_points, gs1.game_tick),
         (gs2.player.position.x, gs2.player.position.y, gs2.player._p_hit_points, gs2.game_tick),
         "headless replay is deterministic across two runs"
+    );
+}
+
+/// Tier 2 headless driver: translate the demo's MouseButtonDown events into
+/// click-to-move targets and walk toward them on GameTicks (mirroring the
+/// game loop's `tick_move_target`), then run `GameState::update`. This is the
+/// input->action layer of the replay; byte-compare against C++ remains Tier 3.
+#[test]
+fn headless_replay_applies_click_to_move() {
+    let data = match std::fs::read(fixture_path("demo_0.dmo")) {
+        Ok(d) => d,
+        Err(e) => panic!("demo fixture missing ({}): {e}", fixture_path("demo_0.dmo")),
+    };
+    let demo = parse_demo(&data).expect("demo should parse");
+    let mut driver = ReplayDriver::new(demo);
+
+    fn run(driver: &mut ReplayDriver, limit: usize) -> (i32, i32, u32) {
+        use devilutionx_rs::game::game_loop::{convert_screen_to_tile, tick_move_target};
+        use devilutionx_rs::game::game_state::GameState;
+        use devilutionx_rs::game::player_exact::{HeroClass, Player};
+        use rand::SeedableRng;
+        let mut player = Player::new();
+        player.init_class_stats();
+        player._p_class = HeroClass::Warrior;
+        let mut gs = GameState::new(player, false, 12345);
+        let mut rng = rand::rngs::StdRng::seed_from_u64(0);
+        let mut move_target: Option<(i32, i32)> = None;
+        let mut ticks = 0;
+        let mut clicks = 0;
+        driver.reset();
+        while ticks < limit {
+            match driver.peek() {
+                Some(ev) => {
+                    match ev.event_type {
+                        DemoEventType::MouseButtonDown => {
+                            if let DemoPayload::MouseButton { x, y, .. } = ev.payload {
+                                let cam = gs.camera;
+                                move_target = Some(convert_screen_to_tile(
+                                    x as i32, y as i32, cam.tile_x, cam.tile_y,
+                                ));
+                                clicks += 1;
+                            }
+                        }
+                        DemoEventType::GameTick => {
+                            if let Some(target) = move_target {
+                                tick_move_target(&mut gs, target, &mut move_target);
+                            }
+                            gs.update(&mut rng);
+                            ticks += 1;
+                        }
+                        _ => {}
+                    }
+                    driver.step();
+                }
+                None => break,
+            }
+        }
+        assert!(clicks > 0, "demo should contain mouse clicks");
+        assert_eq!(ticks, limit, "demo has enough GameTick events");
+        (gs.player.position.x, gs.player.position.y, gs.game_tick)
+    }
+
+    let mut d1 = ReplayDriver::new(parse_demo(&data).unwrap());
+    let mut d2 = ReplayDriver::new(parse_demo(&data).unwrap());
+    let s1 = run(&mut d1, 200);
+    let s2 = run(&mut d2, 200);
+    assert_eq!(s1, s2, "click-to-move replay is deterministic");
+    // The player must have moved from the start (clicks drive movement).
+    assert!(
+        s1.0 != 56 || s1.1 != 56,
+        "player moved away from the initial spawn, got ({},{})",
+        s1.0,
+        s1.1
     );
 }
 

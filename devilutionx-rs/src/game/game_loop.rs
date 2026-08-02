@@ -532,7 +532,7 @@ fn cleanup() {
 ///   u + v = rel_y / 16
 ///   u = ((u+v) + (u-v)) / 2
 ///   v = ((u+v) - (u-v)) / 2
-fn convert_screen_to_tile(
+pub fn convert_screen_to_tile(
     mx: i32,
     my: i32,
     cam_tile_x: i32,
@@ -1129,7 +1129,7 @@ fn apply_movement(game_state: &mut GameState, input: &InputSystem) {
 /// `target` is passed by value and `move_target` is a mutable reference back
 /// into `GameLoopState` so we can `None` it on arrival; the caller reads the
 /// current value from `state.move_target` before invoking us.
-fn tick_move_target(
+pub fn tick_move_target(
     game_state: &mut GameState,
     target: (i32, i32),
     move_target: &mut Option<(i32, i32)>,
