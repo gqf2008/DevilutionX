@@ -372,6 +372,12 @@ pub struct GameState {
     pub light_manager: crate::game::lighting::LightManager,
     /// Index of the player's light in `light_manager` (C++ `plrLights`).
     pub player_light_index: i32,
+    /// Explored micro-tiles (C++ `dFlags::Explored`): accumulated from the
+    /// per-frame vision rays so already-seen areas keep their stale light
+    /// when out of view (C++ keeps the last-drawn frame; the Rust renderer
+    /// approximates it by retaining dLight instead of blacking it out).
+    /// Reset on every descend.
+    pub explored: Vec<bool>,
     /// Active floating damage numbers (C++ `qol/floatingnumbers.cpp`).
     pub floating_numbers: crate::game::floatingnumbers::FloatingNumbers,
 
@@ -551,6 +557,7 @@ impl GameState {
             pending_sfx: Vec::new(),
             light_manager: crate::game::lighting::LightManager::new(),
             player_light_index: crate::game::lighting::NO_LIGHT,
+            explored: vec![false; 112 * 112],
             floating_numbers: crate::game::floatingnumbers::FloatingNumbers::new(),
             towners: Self::build_towner_list(),
             player_dead: false,
@@ -903,6 +910,33 @@ impl GameState {
 
         // Process monsters (C++ line 1520)
         if !self.is_town {
+            // C++ DoVision marks dFlags::Explored each tick (vision.cpp); the
+            // Rust renderer redraws every frame, so accumulate the tiles the
+            // player's vision rays reach (same wall-blocking algorithm as the
+            // renderer) and keep their stale light when they leave view.
+            if let (Some(layout), Some(level)) = (&self.dungeon_layout, &self.dungeon_level_data) {
+                let origin = crate::game::types::Point::new(self.player.position.x, self.player.position.y);
+                let sol = &level.sol;
+                let visible = crate::game::lighting::LightManager::cast_vision_rays(
+                    origin,
+                    self.player._p_light_rad as u8,
+                    |p| p.x >= 0 && p.x < 112 && p.y >= 0 && p.y < 112,
+                    |p| {
+                        if p.x < 0 || p.y < 0 || p.x >= 112 || p.y >= 112 {
+                            return false;
+                        }
+                        let piece = layout
+                            .d_piece
+                            .get((p.y as usize) * layout.width + (p.x as usize))
+                            .copied()
+                            .unwrap_or(0);
+                        crate::game::lighting::tile_allows_light(piece, sol)
+                    },
+                );
+                for tile in visible {
+                    self.explored[(tile.y as usize) * 112 + tile.x as usize] = true;
+                }
+            }
             self.logic_step = GameLogicStep::ProcessMonsters;
             self.process_monsters(rng);
 

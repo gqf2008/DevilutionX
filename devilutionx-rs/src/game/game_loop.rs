@@ -851,6 +851,8 @@ pub fn descend_to_level(game_state: &mut GameState, level: u8) -> Result<(), Str
     };
     game_state.light_manager.init();
     game_state.light_manager.make_light_table(level_type);
+    // C++ InitLevels clears dFlags (gendung.cpp): fresh exploration per level.
+    game_state.explored.fill(false);
     if let Some(layout) = &game_state.dungeon_layout {
         for y in 0..112usize {
             for x in 0..112usize {
@@ -1433,6 +1435,7 @@ fn render_world_pipeline(
     viewport_h: i32,
     entities: &dyn Fn(&mut crate::engine::surface::Surface, &crate::engine::scrollrt::Lighting),
     player_light_radius: u8,
+    explored: &[bool],
 ) {
     let palette = crate::engine::palette::Palette::from_rgb_bytes(&level.palette.colors)
         .unwrap_or_else(crate::engine::palette::Palette::new);
@@ -1513,7 +1516,7 @@ fn render_world_pipeline(
         for tile in &visible_tiles {
             visible_mask[(tile.y * 112 + tile.x) as usize] = true;
         }
-        crate::game::lighting::apply_light_occlusion(&mut dlight, 112, 112, &visible_mask);
+        crate::game::lighting::apply_light_occlusion(&mut dlight, 112, 112, &visible_mask, explored);
     }
     let lighting = crate::engine::scrollrt::Lighting::with_transparency(
         &dlight,
@@ -1654,11 +1657,11 @@ fn draw_and_blit(
 
     if game_state.in_dungeon {
         if let (Some(level), Some(layout)) = (&game_state.dungeon_level_data, &game_state.dungeon_layout) {
-            render_world_pipeline(window, level, layout, view_pos, viewport_h, &monster_entities_closure, game_state.player._p_light_rad as u8);
+            render_world_pipeline(window, level, layout, view_pos, viewport_h, &monster_entities_closure, game_state.player._p_light_rad as u8, &game_state.explored);
             drew_pipeline = true;
         }
     } else if let (Some(level), Some(layout)) = (&game_state.level_data, &game_state.town_layout) {
-        render_world_pipeline(window, level, layout, view_pos, viewport_h, &monster_entities_closure, game_state.player._p_light_rad as u8);
+        render_world_pipeline(window, level, layout, view_pos, viewport_h, &monster_entities_closure, game_state.player._p_light_rad as u8, &game_state.explored);
         drew_pipeline = true;
     }
 
@@ -3949,6 +3952,45 @@ mod tests {
         let player2 = Player::new();
         let mut gs2 = GameState::new(player2, true, 12345);
         assert!(descend_to_level(&mut gs2, 2).is_err());
+    }
+
+    #[test]
+    fn test_explored_resets_on_descend_and_accumulates_on_update() {
+        use crate::engine::dungeon::{DungeonLevelData, DungeonType, MinData, PaletteData, SolData, TilData, TilEntry};
+        use crate::game::game_state::GameState;
+        use crate::game::player_exact::Player;
+
+        let mut til_tiles = Vec::new();
+        for i in 0..16u16 {
+            til_tiles.push(TilEntry {
+                micro1: i,
+                micro2: i + 1,
+                micro3: i + 2,
+                micro4: i + 3,
+            });
+        }
+        let art = DungeonLevelData {
+            dungeon_type: DungeonType::Cathedral,
+            palette: PaletteData::default(),
+            sol: SolData { properties: vec![] },
+            min: MinData { mega_tiles: vec![], blocks_per_tile: 10 },
+            til: TilData { tiles: til_tiles },
+            level_cel: vec![],
+        };
+        let mut gs = GameState::new(Player::new(), true, 12345);
+        gs.dungeon_art[1] = Some(art);
+        descend_to_level(&mut gs, 1).expect("descend to L1");
+        assert!(gs.explored.iter().all(|&b| !b), "explored reset on descend");
+
+        let mut rng = rand::rngs::StdRng::seed_from_u64(0);
+        gs.update(&mut rng);
+        let px = gs.player.position.x as usize;
+        let py = gs.player.position.y as usize;
+        assert!(gs.explored[py * 112 + px], "player tile explored after update");
+        assert!(
+            gs.explored[(py + 2).min(111) * 112 + px],
+            "nearby tile inside the vision radius explored"
+        );
     }
 
     use crate::engine::dungeon::{

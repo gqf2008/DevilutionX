@@ -262,11 +262,21 @@ pub fn tile_allows_light(piece: u16, sol: &SolData) -> bool {
 /// so walls occlude the light halo even though `DoLighting` itself is a pure
 /// radial falloff. The Rust renderer redraws every frame without a stale-frame
 /// buffer, so it approximates "not visible" with the darkest light level.
-pub fn apply_light_occlusion(dlight: &mut [u8], width: usize, height: usize, visible: &[bool]) {
+pub fn apply_light_occlusion(
+    dlight: &mut [u8],
+    width: usize,
+    height: usize,
+    visible: &[bool],
+    explored: &[bool],
+) {
     debug_assert_eq!(dlight.len(), width * height);
     debug_assert_eq!(visible.len(), width * height);
+    debug_assert_eq!(explored.len(), width * height);
     for i in 0..(width * height) {
-        if !visible[i] {
+        // C++ keeps the last-drawn frame for explored-but-not-visible tiles
+        // (stale buffer); the Rust renderer approximates that by retaining
+        // the computed dLight instead of forcing full darkness.
+        if !visible[i] && !explored[i] {
             dlight[i] = LIGHTS_MAX;
         }
     }
@@ -1763,7 +1773,7 @@ mod tests {
         let mut dlight = vec![0u8; 9];
         let mut visible = vec![false; 9];
         visible[4] = true;
-        apply_light_occlusion(&mut dlight, 3, 3, &visible);
+        apply_light_occlusion(&mut dlight, 3, 3, &visible, &[false; 9]);
         assert_eq!(dlight[4], 0, "visible tile stays lit");
         for i in 0..9 {
             if i != 4 {
@@ -1772,9 +1782,25 @@ mod tests {
         }
         // Already-dark values stay dark; lit values are not raised.
         let mut dlight = vec![3u8; 9];
-        apply_light_occlusion(&mut dlight, 3, 3, &visible);
+        apply_light_occlusion(&mut dlight, 3, 3, &visible, &[false; 9]);
         assert_eq!(dlight[4], 3, "visible tile unchanged");
         assert_eq!(dlight[0], LIGHTS_MAX, "hidden tile forced to max darkness");
+    }
+
+    #[test]
+    fn test_apply_light_occlusion_keeps_explored_tiles() {
+        // 3x3, only the centre tile visible; the tile east of it was explored
+        // on an earlier frame. C++ keeps the stale frame for explored areas,
+        // so it must stay lit even though it is currently out of view.
+        let mut dlight = vec![0u8; 9];
+        let mut visible = vec![false; 9];
+        visible[4] = true;
+        let mut explored = vec![false; 9];
+        explored[5] = true; // explored but not visible now
+        apply_light_occlusion(&mut dlight, 3, 3, &visible, &explored);
+        assert_eq!(dlight[4], 0, "visible tile stays lit");
+        assert_eq!(dlight[5], 0, "explored-but-hidden tile keeps stale light");
+        assert_eq!(dlight[0], LIGHTS_MAX, "never-explored hidden tile fully dark");
     }
 
     #[test]
@@ -1795,7 +1821,7 @@ mod tests {
         }
 
         let mut dlight = vec![0u8; 112 * 112];
-        apply_light_occlusion(&mut dlight, 112, 112, &mask);
+        apply_light_occlusion(&mut dlight, 112, 112, &mask, &[false; 112 * 112]);
         assert_eq!(dlight[50 * 112 + 50], 0, "player tile lit");
         assert_eq!(dlight[50 * 112 + 52], 0, "tile before wall lit");
         assert_eq!(dlight[50 * 112 + 53], 0, "wall tile itself lit");
