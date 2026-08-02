@@ -829,18 +829,6 @@ pub fn descend_to_level(game_state: &mut GameState, level: u8) -> Result<(), Str
         level, seed, layout.width, layout.height, filled, art.til.tiles.len()
     );
 
-    // C++ InitObjects: AddL1Objs/AddL2Objs/AddL3Objs place doors from pure
-    // dPiece micro scans (objects.cpp:3756-3795). Populate the object list so
-    // monster-door checks (monster_check_doors) and position blocking see the
-    // real door objects.
-    let door_objects: Vec<crate::game::objects::Object> =
-        crate::game::dungeon_level::scan_level_doors(level, &layout)
-            .into_iter()
-            .map(|(x, y, otype)| {
-                crate::game::objects::Object::new(otype, crate::game::types::Point::new(x, y))
-            })
-            .collect();
-
     // Resolve the Cathedral→town up-stair tile (C++ `InitL1Triggers` scans for
     // `dPiece == 128`; the Rust generator instead stamps the EntranceStairs
     // TIL mega, so we detect by matching that mega's micro1 value in the
@@ -862,9 +850,6 @@ pub fn descend_to_level(game_state: &mut GameState, level: u8) -> Result<(), Str
     game_state.dungeon_up_stairs = up_stairs;
     game_state.current_dungeon_level = level;
     game_state.in_dungeon = true;
-    game_state.objects = door_objects;
-    // C++ AddDoor: doors start closed (closed micros baked into dPiece).
-    game_state.init_doors_closed();
     // Keep is_town in sync so GameState::update's monster/item logic matches the
     // active mode (dungeon processes monsters; town skips them).
     game_state.is_town = false;
@@ -919,11 +904,18 @@ pub fn descend_to_level(game_state: &mut GameState, level: u8) -> Result<(), Str
     // makes the descent robust against landing on/near the stair tile.
     game_state.mark_stair_transition();
 
-    // Step 1: place monsters on the dungeon floor. We clear any stale monsters
-    // (e.g. from a previous descent) and scatter a small pack across walkable
-    // floor tiles away from the player spawn. Also pre-load their stand sprites
-    // so the renderer can draw real CL2 art (with a coloured-block fallback).
-    place_dungeon_monsters(game_state, center_x, center_y);
+    // C++ `LoadGameLevelStandardLevel` RNG flow: build the scatter roster from
+    // the fresh level seed (`GetLevelMTypes`), then re-seed (`SetRndSeedFor
+    // DungeonLevel`) so `InitObjects` + `InitMonsters` placement draws start
+    // from the clean seed, then place objects (sarcophagi + doors/lights +
+    // barrels) and finally the scatter monster packs.
+    let level_types = crate::game::monster::get_level_m_types(level);
+    crate::engine::random::seed_gameplay_rng(seed);
+    place_dungeon_objects(game_state);
+    // C++ AddDoor: doors start closed (closed micros baked into dPiece).
+    game_state.init_doors_closed();
+    // Place monsters from the C++ PlaceMonsters algorithm.
+    place_dungeon_monsters(game_state, center_x, center_y, level_types);
 
     Ok(())
 }
@@ -1142,10 +1134,186 @@ fn place_group_cpp(
     placed
 }
 
+/// C++ `bxadd`/`byadd` (objects.cpp:119-121): barrel-group nudge deltas indexed
+/// by the raw `GenerateRnd(8)` direction value.
+const OBJECT_BX_ADD: [i32; 8] = [-1, 0, 1, -1, 1, -1, 0, 1];
+const OBJECT_BY_ADD: [i32; 8] = [-1, -1, -1, 0, 0, 1, 1, 1];
+
+/// C++ `FlipCoin(frequency)` (engine/random.hpp): `GenerateRnd(f) == 0`,
+/// which is true when `f <= 0` (GenerateRnd returns 0 for non-positive input).
+fn gameplay_flip_coin(frequency: i32) -> bool {
+    if frequency <= 0 {
+        return true;
+    }
+    crate::engine::random::gameplay_rnd(0, frequency - 1) == 0
+}
+
+/// C++ `RndLocOk` (objects.cpp:236-250): a random-object candidate tile is
+/// valid when it has no monster/player/object, is outside the quest SetPiece
+/// (not tracked in the headless replay — quest-free), is not solid per
+/// `SOLData[dPiece]`, and (Cathedral/Crypt) uses a dPiece outside the
+/// 126..142 lava/door range.
+fn rnd_loc_ok(
+    x: i32,
+    y: i32,
+    layout: &crate::game::game_state::DungeonLayout,
+    game_state: &crate::game::game_state::GameState,
+) -> bool {
+    if x < 0 || y < 0 || x >= layout.width as i32 || y >= layout.height as i32 {
+        return false;
+    }
+    // dMonster[p] != 0
+    if game_state
+        .monster_manager
+        .find_monster_at(crate::game::types::Point::new(x, y))
+        .is_some()
+    {
+        return false;
+    }
+    // dPlayer[p] != 0
+    if game_state.player.position.x == x && game_state.player.position.y == y {
+        return false;
+    }
+    // IsObjectAtPosition(p)
+    if game_state
+        .objects
+        .iter()
+        .any(|o| o.position.x == x && o.position.y == y)
+    {
+        return false;
+    }
+    // TileHasAny(p, TileProperties::Solid)
+    let pn = layout.d_piece[y as usize * layout.width + x as usize] as usize;
+    let props = layout.sol.get(pn).copied().unwrap_or_default();
+    if props.contains(crate::engine::dungeon::TileProperties::SOLID) {
+        return false;
+    }
+    // Cathedral/Crypt piece-range check (dPiece 126..142 excluded).
+    if pn > 125 && pn < 143 {
+        return false;
+    }
+    true
+}
+
+/// C++ `IsAreaOk(Rectangle)` (objects.cpp:251-254): every tile in the
+/// `w` x `h` rect anchored at `(x0, y0)` must pass `RndLocOk`.
+fn object_area_ok(
+    x0: i32,
+    y0: i32,
+    w: i32,
+    h: i32,
+    layout: &crate::game::game_state::DungeonLayout,
+    game_state: &crate::game::game_state::GameState,
+) -> bool {
+    for dy in 0..h {
+        for dx in 0..w {
+            if !rnd_loc_ok(x0 + dx, y0 + dy, layout, game_state) {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// C++ `InitObjects` (objects.cpp:3846-3860) for Cathedral L1, in exact draw
+/// order (the gameplay RNG has just been re-seeded by the caller, mirroring
+/// `SetRndSeedForDungeonLevel`): `DiscardRandomValues(1)`, then
+/// `InitRndLocBigObj(10, 15, OBJ_SARC)` (random sarcophagi), `AddL1Objs`
+/// (door + light micro scan, no RNG), then `InitRndBarrels()`.
+pub fn place_dungeon_objects(game_state: &mut GameState) {
+    use crate::game::objdat::ObjectId;
+    use crate::game::types::Point;
+
+    let Some(layout) = &game_state.dungeon_layout else {
+        return;
+    };
+    // Object placement must see the same object list C++ accumulates.
+    game_state.objects.clear();
+
+    // DiscardRandomValues(1): one raw LCG advance.
+    crate::engine::random::gameplay_advance_rnd_seed();
+
+    // InitRndLocBigObj(10, 15, OBJ_SARC): numobjs = GenerateRnd(5) + 10.
+    let numobjs = crate::engine::random::gameplay_rnd(0, 4) + 10;
+    for _ in 0..numobjs {
+        loop {
+            let xp = crate::engine::random::gameplay_rnd(16, 95);
+            let yp = crate::engine::random::gameplay_rnd(16, 95);
+            // IsAreaOk({ xp-1, yp-2 }, { 3, 4 })
+            if object_area_ok(xp - 1, yp - 2, 3, 4, layout, game_state) {
+                game_state
+                    .objects
+                    .push(crate::game::objects::Object::new(ObjectId::Sarc, Point::new(xp, yp)));
+                break;
+            }
+        }
+    }
+
+    // AddL1Objs: door + light objects from the dPiece scan (no RNG).
+    let level = game_state.current_dungeon_level;
+    game_state.objects.extend(
+        crate::game::dungeon_level::scan_level_doors(level, layout)
+            .into_iter()
+            .map(|(x, y, otype)| crate::game::objects::Object::new(otype, Point::new(x, y))),
+    );
+
+    // InitRndBarrels: numobjs = GenerateRnd(5) + 3 barrel groups.
+    let numobjs = crate::engine::random::gameplay_rnd(0, 4) + 3;
+    for _ in 0..numobjs {
+        let (mut xp, mut yp);
+        loop {
+            xp = crate::engine::random::gameplay_rnd(16, 95);
+            yp = crate::engine::random::gameplay_rnd(16, 95);
+            if rnd_loc_ok(xp, yp, layout, game_state) {
+                break;
+            }
+        }
+        let o = if gameplay_flip_coin(4) { ObjectId::BarrelEx } else { ObjectId::Barrel };
+        game_state
+            .objects
+            .push(crate::game::objects::Object::new(o, Point::new(xp, yp)));
+        // Regulates the chance to stop placing barrels in the current group.
+        let mut p = 0;
+        let mut c = 1;
+        let mut found = true;
+        while gameplay_flip_coin(p) && found {
+            let mut t = 0;
+            found = false;
+            while t < 3 {
+                let dir = crate::engine::random::gameplay_rnd(0, 7) as usize;
+                xp += OBJECT_BX_ADD[dir];
+                yp += OBJECT_BY_ADD[dir];
+                found = rnd_loc_ok(xp, yp, layout, game_state);
+                t += 1;
+                if found {
+                    break;
+                }
+            }
+            if found {
+                let o = if gameplay_flip_coin(5) { ObjectId::BarrelEx } else { ObjectId::Barrel };
+                game_state
+                    .objects
+                    .push(crate::game::objects::Object::new(o, Point::new(xp, yp)));
+                c += 1;
+            }
+            p = c / 2;
+        }
+    }
+}
+
 /// C++ `PlaceMonsters` (monster.cpp:3701-3756) single-player: place
 /// `na / 30` monsters (`na` = non-solid tiles in the 16..96 dungeon region)
 /// from the scatter roster, one group at a time.
-fn place_dungeon_monsters(game_state: &mut GameState, spawn_x: i32, spawn_y: i32) {
+///
+/// `level_types` must be the roster built by `get_level_m_types` *before* the
+/// gameplay RNG is re-seeded for placement (C++ `GetLevelMTypes` runs before
+/// the second `SetRndSeedForDungeonLevel`).
+fn place_dungeon_monsters(
+    game_state: &mut GameState,
+    spawn_x: i32,
+    spawn_y: i32,
+    mut level_types: crate::game::monster::LevelMonsterTypes,
+) {
     // Start each descent with a clean monster roster.
     game_state.monster_manager.clear();
     game_state.monster_sprites = None;
@@ -1158,10 +1326,10 @@ fn place_dungeon_monsters(game_state: &mut GameState, spawn_x: i32, spawn_y: i32
         }
     };
 
-    // Build the C++ per-level monster-type table (GetLevelMTypes) and place
-    // from its scatter roster using the C++ PlaceMonsters/PlaceGroup algorithm.
-    use crate::game::monster::{MAX_MONSTERS, MonsterType, PLACE_SCATTER, get_level_m_types};
-    let mut level_types = get_level_m_types(game_state.current_dungeon_level);
+    // Place from the scatter roster using the C++ PlaceMonsters/PlaceGroup
+    // algorithm. (The roster was built by get_level_m_types before the
+    // placement RNG re-seed.)
+    use crate::game::monster::{MAX_MONSTERS, MonsterType, PLACE_SCATTER};
     let mut scatter = level_types.scatter_indices();
     if scatter.is_empty() {
         level_types.add(MonsterType::Zombie, PLACE_SCATTER);
@@ -1296,20 +1464,24 @@ pub fn prepare_dungeon_for_replay(game_state: &mut GameState, level: u8) -> bool
         }
     };
 
-    // Doors from the dPiece scan (real art -> real door micros; synthetic
-    // layout -> no doors).
-    game_state.objects = crate::game::dungeon_level::scan_level_doors(level, &layout)
-        .into_iter()
-        .map(|(x, y, otype)| {
-            crate::game::objects::Object::new(otype, crate::game::types::Point::new(x, y))
-        })
-        .collect();
-    game_state.init_doors_closed();
     game_state.dungeon_layout = Some(layout);
     game_state.current_dungeon_level = level;
     game_state.in_dungeon = true;
     game_state.is_town = false;
     game_state.explored.fill(false);
+
+    // C++ `LoadGameLevelStandardLevel` RNG flow (diablo.cpp:3310-3332):
+    //   1. SetRndSeedForDungeonLevel()  -> GetLevelMTypes()  (scatter roster)
+    //   2. SetRndSeedForDungeonLevel()  -> InitObjects()     (this re-seed
+    //      wipes the roster/theme draws, so object+monster placement starts
+    //      from the fresh level seed)
+    //   3. InitMonsters()               (scatter placement)
+    // We mirror that: build the roster, re-seed, place objects, then place
+    // monsters from the precomputed roster.
+    let level_types = crate::game::monster::get_level_m_types(level);
+    crate::engine::random::seed_gameplay_rng(seed);
+    place_dungeon_objects(game_state);
+    game_state.init_doors_closed();
 
     // C++ InitLevels: light table + dLight = dPreLight + player light.
     game_state.light_manager.init();
@@ -1327,7 +1499,12 @@ pub fn prepare_dungeon_for_replay(game_state: &mut GameState, level: u8) -> bool
     );
 
     // Place monsters from the C++ PlaceMonsters algorithm.
-    place_dungeon_monsters(game_state, game_state.player.position.x, game_state.player.position.y);
+    place_dungeon_monsters(
+        game_state,
+        game_state.player.position.x,
+        game_state.player.position.y,
+        level_types,
+    );
     true
 }
 
