@@ -1323,14 +1323,16 @@ impl GameState {
 
     /// Regenerate monster HP
     ///
-    /// **C++ Reference**: `Source/monster.cpp:4143-4149`
+    /// **C++ Reference**: `ProcessMonsters` (monster.cpp:4269-4277):
+    /// `hitPoints += level(difficulty)` (or `level / 2` when > 1) in raw
+    /// fixed-point units, capped at maxHitPoints; skipped when dead. The
+    /// engine stores HP in the same 32x fixed point as single-player C++.
     fn regenerate_monster_hp(&mut self, monster_id: usize) {
         if let Some(monster) = self.monster_manager.get_monster_mut(monster_id) {
             if monster.hp < monster.max_hp && monster.hp > 0 {
-                // Simplified: regenerate based on intelligence (as proxy for level)
-                let regen = ((monster.intelligence as i32) / 2).max(1);
-                let regen_64x = regen << 6;
-                monster.hp = (monster.hp + regen_64x).min(monster.max_hp);
+                let lvl = crate::game::monstdat::get_monster_data(monster.monster_type).level as i32;
+                let regen = if lvl > 1 { lvl / 2 } else { lvl };
+                monster.hp = (monster.hp + regen).min(monster.max_hp);
             }
         }
     }
@@ -4606,6 +4608,48 @@ mod tests {
             .1
             .light_id;
         assert_eq!(li2, -1, "light id reset to NO_LIGHT");
+    }
+
+    /// C++ ProcessMonsters HP regen (monster.cpp:4269-4277): add
+    /// level(difficulty) raw fixed-point units (level / 2 when > 1), capped
+    /// at maxHitPoints; the engine stores HP in 32x fixed point like
+    /// single-player C++.
+    #[test]
+    fn test_monster_hp_regen_matches_cpp() {
+        use crate::game::monster::{Monster, MonsterType};
+        use crate::game::player_exact::Player;
+
+        let mut gs = GameState::new(Player::new(), false, 42);
+        // Zombie (MT_NZOMBIE): data.level = 1 -> regen +1.
+        let mut z = Monster::new(1, MonsterType::Zombie, 10, 10, 1);
+        z.hp = 100;
+        let zidx = gs.monster_manager.add_monster(z).expect("slot");
+        gs.regenerate_monster_hp(zidx);
+        assert_eq!(gs.monster_manager.get_monster(zidx).unwrap().hp, 101);
+
+        // Rotting Carcass (MT_GZOMBIE): data.level = 4 -> regen +2.
+        let mut r = Monster::new(2, MonsterType::ZombieG, 11, 10, 1);
+        r.hp = 200;
+        let ridx = gs.monster_manager.add_monster(r).expect("slot");
+        gs.regenerate_monster_hp(ridx);
+        assert_eq!(gs.monster_manager.get_monster(ridx).unwrap().hp, 202);
+
+        // Capped at maxHitPoints.
+        let mut c = Monster::new(3, MonsterType::Zombie, 12, 10, 1);
+        c.hp = c.max_hp - 1;
+        let cidx = gs.monster_manager.add_monster(c).expect("slot");
+        gs.regenerate_monster_hp(cidx);
+        assert_eq!(
+            gs.monster_manager.get_monster(cidx).unwrap().hp,
+            gs.monster_manager.get_monster(cidx).unwrap().max_hp,
+        );
+
+        // Dead monsters do not regen.
+        let mut d = Monster::new(4, MonsterType::Zombie, 13, 10, 1);
+        d.hp = 0;
+        let didx = gs.monster_manager.add_monster(d).expect("slot");
+        gs.regenerate_monster_hp(didx);
+        assert_eq!(gs.monster_manager.get_monster(didx).unwrap().hp, 0);
     }
 
     #[test]
