@@ -1594,6 +1594,9 @@ fn draw_and_blit(
     // same isometric projection as the monsters/player (coloured icons, no art).
     draw_ground_items(window, game_state, cam_tile_x, cam_tile_y, screen_center_x, screen_center_y);
 
+    // Floating damage numbers (C++ qol/floatingnumbers.cpp DrawFloatingNumbers).
+    draw_floating_numbers(window, game_state, cam_tile_x, cam_tile_y, screen_center_x, screen_center_y);
+
     // Draw the player at its tile (camera == player position). Anchored via
     // tile_to_screen so it lands on the pipeline's floor tile for the camera.
     // Prefer the real Warrior town-walk sprite; fall back to the yellow
@@ -2879,6 +2882,54 @@ fn draw_stairs_marker(
 ///
 /// Pure canvas drawing (no textures), so it runs outside any TextureCreator
 /// borrow block. Off-screen items are culled.
+/// Draw floating damage/heal numbers (C++ `qol/floatingnumbers.cpp`
+/// `DrawFloatingNumbers`): projected at the source tile, rising with age.
+/// Expired entries are cleared by `GameState::update` each tick.
+fn draw_floating_numbers(
+    window: &mut GameWindow,
+    game_state: &GameState,
+    cam_tile_x: i32,
+    cam_tile_y: i32,
+    screen_center_x: i32,
+    screen_center_y: i32,
+) {
+    use crate::game::floatingnumbers::{FloatingColor, FontSize};
+    let now = game_state.game_tick as u64;
+    if game_state.floating_numbers.is_empty() {
+        return;
+    }
+    let entries: Vec<_> = game_state.floating_numbers.iter().collect();
+    for entry in entries {
+        let (cx, cy) = tile_to_screen(entry.start_pos.x, entry.start_pos.y, cam_tile_x, cam_tile_y);
+        // C++ endOffset {0,-140} rises over the 2500 ms lifetime; scale to 64 px.
+        let rise = (game_state.floating_numbers.age(entry, now) * 64.0) as i32;
+        let color = match entry.number.color {
+            FloatingColor::Gold => (255, 215, 0),
+            FloatingColor::UiSilver => (200, 200, 210),
+            FloatingColor::Blue => (80, 120, 255),
+            FloatingColor::Orange => (255, 140, 40),
+            FloatingColor::Yellow => (255, 255, 80),
+        };
+        // C++ font size (12/24/30) maps to the PixelFont scales 1/2/3.
+        let scale = match entry.number.font_size {
+            FontSize::Small => 1,
+            FontSize::Medium => 2,
+            FontSize::Large => 3,
+        };
+        let font = crate::engine::font::PixelFont::new(scale);
+        let text = &entry.number.text;
+        let text_w = font.text_width(text);
+        let canvas = window.canvas_mut();
+        font.render_text(
+            canvas,
+            text,
+            cx - text_w / 2,
+            cy - TILE_HEIGHT - rise,
+            sdl2::pixels::Color::RGB(color.0, color.1, color.2),
+        );
+    }
+}
+
 fn draw_ground_items(
     window: &mut GameWindow,
     game_state: &GameState,

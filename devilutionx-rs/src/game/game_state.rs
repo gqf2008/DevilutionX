@@ -368,6 +368,8 @@ pub struct GameState {
     /// audio system. Names map to MPQ files via
     /// [`crate::engine::audio::SfxLibrary`].
     pub pending_sfx: Vec<String>,
+    /// Active floating damage numbers (C++ `qol/floatingnumbers.cpp`).
+    pub floating_numbers: crate::game::floatingnumbers::FloatingNumbers,
 
     /// Tristram NPCs to render in town mode.
     ///
@@ -536,6 +538,7 @@ impl GameState {
             triggers: crate::levels::trigs::TriggerManager::new(),
             monster_sprites: None,
             pending_sfx: Vec::new(),
+            floating_numbers: crate::game::floatingnumbers::FloatingNumbers::new(),
             towners: Self::build_towner_list(),
             player_dead: false,
             shop_open: false,
@@ -857,6 +860,9 @@ impl GameState {
     pub fn update(&mut self, rng: &mut impl Rng) {
         self.game_tick += 1;
 
+        // C++ DrawFloatingNumbers clears expired numbers each frame.
+        self.floating_numbers.clear_expired(self.game_tick as u64);
+
         // Pause normal game processing while the player is dead. The death
         // overlay is shown by the game loop and the player resurrects on
         // Space/Enter. We still advance `game_tick` so the stair cooldown /
@@ -1160,7 +1166,7 @@ impl GameState {
                 if dist <= 1 {
                     // Player attacks this monster
                     match player_attack_monster(&self.player, monster, rng) {
-                        crate::game::combat_integration::AttackResult::Kill { .. } => {
+                        crate::game::combat_integration::AttackResult::Kill { damage } => {
                             // Award monster XP on kill (monster_dat xp reward).
                             xp_gained += monster.experience as i32;
                             // Record the death tile for loot drop.
@@ -1169,10 +1175,31 @@ impl GameState {
                             // Queue the monster-death SFX. The game loop drains
                             // pending_sfx and forwards it to AudioManager.
                             sfx_kills += 1;
+                            // Floating damage number (C++ AddFloatingNumber).
+                            self.floating_numbers.add(
+                                self.game_tick as u64,
+                                mp,
+                                crate::game::floatingnumbers::FloatingNumber::new(
+                                    crate::game::combat_system::DamageType::Physical,
+                                    damage,
+                                ),
+                                monster_id as i32,
+                            );
                         }
-                        crate::game::combat_integration::AttackResult::Hit { .. } => {
+                        crate::game::combat_integration::AttackResult::Hit { damage } => {
                             // Queue the weapon-swing SFX for a non-killing hit.
                             sfx_hits += 1;
+                            // Floating damage number (C++ AddFloatingNumber).
+                            let mp = monster.position();
+                            self.floating_numbers.add(
+                                self.game_tick as u64,
+                                mp,
+                                crate::game::floatingnumbers::FloatingNumber::new(
+                                    crate::game::combat_system::DamageType::Physical,
+                                    damage,
+                                ),
+                                monster_id as i32,
+                            );
                         }
                         _ => {}
                     }
