@@ -1664,22 +1664,52 @@ impl GameState {
                         GroundItemType::ManaPotion => 79, // itemdat.tsv row: Potion of Mana
                         _ => 77, // Potion of Healing
                     }) as i32;
-                    let stored = self
-                        .player
-                        .spd_list
-                        .iter_mut()
-                        .find(|s| s.is_empty());
+                    // C++ AutoPlaceItemInBelt holds consumable potions;
+                    // everything else (real equipment drops) goes to the 40-slot
+                    // inventory grid (AutoPlaceItemInInventory, _pNumInv count).
+                    let is_potion = match &g.item {
+                        Some(item) => matches!(
+                            item.misc_id,
+                            crate::game::items::ItemMiscId::Heal
+                                | crate::game::items::ItemMiscId::FullHeal
+                                | crate::game::items::ItemMiscId::Mana
+                                | crate::game::items::ItemMiscId::FullMana
+                                | crate::game::items::ItemMiscId::Rejuv
+                                | crate::game::items::ItemMiscId::FullRejuv
+                        ),
+                        None => true, // demo potions
+                    };
+                    let stored = if is_potion {
+                        self.player
+                            .spd_list
+                            .iter_mut()
+                            .find(|s| s.is_empty())
+                            .map(|s| (s, "belt"))
+                    } else {
+                        self.player
+                            .inv_list
+                            .iter_mut()
+                            .find(|s| s.is_empty())
+                            .map(|s| (s, "inventory"))
+                    };
                     match stored {
-                        Some(slot) => {
+                        Some((slot, where_)) => {
+                            let itype = crate::game::item_dat::get_item_data(item_id as usize)
+                                .map(|d| d.item_type)
+                                .unwrap_or(crate::game::item_dat::ItemType::Misc);
                             *slot = crate::game::player_exact::PlayerItem {
                                 item_id,
                                 equipped: false,
-                                _itype: crate::game::item_dat::ItemType::Misc,
+                                _itype: itype,
                             };
-                            println!("[Pickup] picked up {} into belt slot", name);
+                            if where_ == "inventory" {
+                                self.player._p_num_inv += 1;
+                            }
+                            println!("[Pickup] picked up {} into {}", name, where_);
                         }
                         None => {
-                            println!("[Pickup] belt full; {} left on the ground", name);
+                            println!("[Pickup] no {} space; {} left on the ground",
+                                     if is_potion { "belt" } else { "inventory" }, name);
                             self.ground_items.push(g);
                         }
                     }
@@ -4648,6 +4678,36 @@ mod tests {
     /// level(difficulty) raw fixed-point units (level / 2 when > 1), capped
     /// at maxHitPoints; the engine stores HP in 32x fixed point like
     /// single-player C++.
+    /// C++ AutoPlaceItemInInventory: real non-potion drops (e.g. a sword)
+    /// go to the first free 40-slot inventory cell and bump `_pNumInv`.
+    #[test]
+    fn test_equipment_drop_goes_to_inventory() {
+        use crate::game::game_state::{GroundItem, GroundItemType};
+        use crate::game::items::{Item, ItemClass, ItemMiscId, ItemQuality};
+        use crate::game::player_exact::Player;
+
+        let mut gs = GameState::new(Player::new(), false, 42);
+        gs.player.position = Point::new(10, 10);
+        let mut sword = Item::empty();
+        sword.item_index = 119; // Short Sword (TSV row)
+        sword.item_class = ItemClass::Weapon;
+        sword.misc_id = ItemMiscId::None;
+        sword.quality = ItemQuality::Normal;
+        sword.name = "Short Sword".to_string();
+        gs.ground_items.push(GroundItem {
+            x: 10,
+            y: 10,
+            item_type: GroundItemType::ManaPotion, // real drops are tagged potion
+            item_index: Some(119),
+            item: Some(sword),
+        });
+        gs.pickup_ground_items();
+        assert_eq!(gs.ground_items.len(), 0, "sword consumed");
+        assert_eq!(gs.player.inv_list[0].item_id, 119, "sword in inventory");
+        assert_eq!(gs.player._p_num_inv, 1, "_pNumInv incremented");
+        assert!(gs.player.spd_list.iter().all(|s| s.is_empty()), "belt untouched");
+    }
+
     /// C++ AutoPlaceItemInBelt: potion pickups land in the first free belt
     /// slot (itemdat.tsv row id), and a full belt leaves the item on the
     /// ground instead of losing it.
