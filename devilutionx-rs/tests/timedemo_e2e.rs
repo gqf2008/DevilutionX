@@ -661,6 +661,68 @@ fn dropped_items_writer_matches_cpp_layout() {
     assert_eq!(h.into_data(), vec![1, 2, 3], "locations are 1-based");
 }
 
+/// A fully generated engine `items::Item` must map onto the C++ `SaveItem`
+/// layout (368 bytes) with its modelled fields at the C++ byte offsets
+/// (loadsave.cpp:1158-1250).
+#[test]
+fn generated_item_maps_to_cpp_saveitem() {
+    use devilutionx_rs::game::item_dat::ItemType;
+    use devilutionx_rs::game::items::{
+        Item, ItemClass, ItemEquipType, ItemMiscId, ItemQuality, ItemSpecialEffect,
+    };
+    use devilutionx_rs::game::loadsave::{SaveHelper, item_to_binary};
+
+    let mut item = Item::empty();
+    item.seed = 0xDEADBEEF;
+    item.create_info = 0x1234;
+    item.item_index = 119; // Short Sword (TSV row)
+    item.quality = ItemQuality::Magic;
+    item.item_class = ItemClass::Weapon;
+    item.equip_loc = ItemEquipType::OneHand;
+    item.misc_id = ItemMiscId::None;
+    item.name = "Short Sword of the Bear".to_string();
+    item.base_name = "Short Sword".to_string();
+    item.min_damage = 2;
+    item.max_damage = 6;
+    item.armor_class = 0;
+    item.special_flags = ItemSpecialEffect::NONE;
+    item.spell = -1;
+    item.charges = 0;
+    item.max_charges = 0;
+    item.durability = 20;
+    item.max_durability = 20;
+    item.bonus_damage = 4;
+    item.bonus_to_hit = 8;
+    item.unique_id = -1;
+    item.cursor = 45;
+    item.buy_value = 200;
+    item.identified_value = 250;
+    item.identified = true;
+
+    let b = item_to_binary(&item);
+    let mut h = SaveHelper::new(512);
+    b.to_binary(&mut h, false);
+    let d = h.into_data();
+    assert_eq!(d.len(), 368, "SaveItem is 368 bytes");
+
+    assert_eq!(&d[0..4], &0xDEADBEEFu32.to_le_bytes(), "seed");
+    assert_eq!(&d[4..6], &0x1234u16.to_le_bytes(), "createInfo");
+    assert_eq!(&d[8..12], &(ItemType::Sword as i32).to_le_bytes(), "itype from itemdat.tsv row");
+    assert_eq!(d[60], ItemQuality::Magic as u8, "magical");
+    assert_eq!(&d[61..72], b"Short Sword", "base name (_iName)");
+    assert_eq!(&d[125..148], b"Short Sword of the Bear", "identified name (_iIName)");
+    assert_eq!(d[189], ItemEquipType::OneHand as u8, "loc");
+    assert_eq!(d[190], ItemClass::Weapon as u8, "class");
+    assert_eq!(&d[192..196], &45i32.to_le_bytes(), "cursor");
+    assert_eq!(&d[196..200], &200i32.to_le_bytes(), "value (_ivalue)");
+    assert_eq!(&d[200..204], &250i32.to_le_bytes(), "identifiedValue (_iIvalue)");
+    assert_eq!(&d[204..208], &2i32.to_le_bytes(), "minDam");
+    assert_eq!(&d[208..212], &6i32.to_le_bytes(), "maxDam");
+    assert_eq!(&d[244..248], &4i32.to_le_bytes(), "plDam (affix bonus)");
+    assert_eq!(&d[248..252], &8i32.to_le_bytes(), "plToHit (affix bonus)");
+    assert_eq!(&d[360..364], &119i32.to_le_bytes(), "IDidx / item index");
+}
+
 /// BinaryMissileData must round-trip the C++ SaveMissile layout
 /// (loadsave.cpp:1614-1662).
 #[test]

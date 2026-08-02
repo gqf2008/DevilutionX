@@ -2283,16 +2283,26 @@ impl GameState {
         );
         let dungeon_body = body.into_data();
 
-        // Dropped items (floor items -> SaveItem).
+        // Dropped items (floor items -> SaveItem). Real generated drops
+        // (C++ SetupAllItems output) map every modelled field; the legacy
+        // demo potion / gold stubs keep the old compact mapping.
         let dropped: Vec<BinaryItemData> = self
-            .capture_floor_items()
+            .ground_items
             .iter()
-            .map(|f| {
-                let mut b = BinaryItemData::default();
-                b.position_x = f.x;
-                b.position_y = f.y;
-                b.item_type = f.kind as i32 + 1;
-                b
+            .map(|gi| match &gi.item {
+                Some(item) => {
+                    let mut b = loadsave::item_to_binary(item);
+                    b.position_x = gi.x;
+                    b.position_y = gi.y;
+                    b
+                }
+                None => {
+                    let mut b = BinaryItemData::default();
+                    b.position_x = gi.x;
+                    b.position_y = gi.y;
+                    b.item_type = gi.item_type as i32 + 1;
+                    b
+                }
             })
             .collect();
         let mut dh = SaveHelper::new(4096);
