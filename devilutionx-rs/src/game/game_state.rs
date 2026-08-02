@@ -2160,7 +2160,8 @@ impl GameState {
         let mut ph = SaveHelper::new(22000);
         loadsave::save_player(&mut ph, &self.player, false);
         let player_pack = ph.into_data();
-        let quests = vec![crate::game::quest_new::Quest::default(); 16];
+        let quests: Vec<crate::game::quest_new::Quest> =
+            self.quests.quests.iter().take(16).cloned().collect();
         let portals = vec![(false, (0, 0), 0, 0, false); 4];
         let kill = vec![0i32; 138];
 
@@ -2243,10 +2244,29 @@ impl GameState {
         loadsave::write_dropped_items(&mut dh, &dropped, false);
         let dropped_items = dh.into_data();
 
-        let grid = vec![0u8; 112 * 112];
+        // Lighting/flag grids: dLight from the light manager, dFlags from the
+        // explored set, dPlayer all-zero (no per-player grid in the engine).
+        let mut dlight = vec![0u8; 112 * 112];
+        for y in 0..112usize {
+            for x in 0..112usize {
+                dlight[y * 112 + x] = self.light_manager.light_buffer[y][x];
+            }
+        }
+        let dflags: Vec<u8> = self
+            .explored
+            .iter()
+            .map(|&b| if b { 1 } else { 0 })
+            .collect();
+        let zero_grid = vec![0u8; 112 * 112];
+        let return_state = (
+            self.quests.return_lvl_position.0,
+            self.quests.return_lvl_position.1,
+            self.quests.return_level,
+            self.quests.return_level_type as i32,
+        );
         loadsave::write_game_data_v3(
-            &header, &seeds, &player_pack, &quests, (0, 0, 0, 0), &portals, &kill,
-            &dungeon_body, &dropped_items, &[], &grid, &grid, &grid, &[], &[], &[],
+            &header, &seeds, &player_pack, &quests, return_state, &portals, &kill,
+            &dungeon_body, &dropped_items, &[], &dlight, &dflags, &zero_grid, &[], &[], &[],
         )
     }
 

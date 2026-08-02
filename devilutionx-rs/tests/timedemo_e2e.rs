@@ -856,6 +856,22 @@ fn engine_state_serialises_cpp_game_entry() {
         entry[name_off..name_off + 32].iter().all(|&b| b == 0),
         "fresh player has an empty name field"
     );
+
+    // Quests segment follows the 21680-byte SavePlayer (current C++ layout):
+    // 16 quest blocks of 44 bytes each; the first quest's header is zero
+    // (inactive) and its _qlog field is zero.
+    let quests_off = 43 + 17 * 8 + 21680;
+    let (q0, next) =
+        devilutionx_rs::game::loadsave::parse_quest(&entry, quests_off).expect("quest 0 parses");
+    assert_eq!(next - quests_off, 44, "quest block is 44 bytes");
+    // The engine quest table is live-initialised, so the level field carries
+    // the quest's real level (e.g. 5 for the Rock quest).
+    assert!(q0._qlevel > 0, "engine quest data present (qlevel {})", q0._qlevel);
+
+    // The entry carries the 112x112 grids: verify a grid-sized suffix exists
+    // past the player/quests/dungeon sections by checking the total length
+    // accounts for at least the three u8 grids (37632 bytes).
+    assert!(entry.len() > 60_000, "entry is long enough for the grids");
 }
 
 /// Tier 3 foundation: the Rust `CppGameHeader` writer must reproduce the
