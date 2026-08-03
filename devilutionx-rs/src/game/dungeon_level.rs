@@ -423,6 +423,14 @@ pub fn build_dungeon_layout(gen: &CathedralGenerator, level: &DungeonLevelData) 
         yy += 2;
     }
 
+    // Keep the 40x40 logical tile grid (C++ `dungeon[x][y]`) for the automap
+    // shape lookup; the generator stores it transposed (`dungeon[row][col]`).
+    for j in 0..DMAXY {
+        for i in 0..DMAXX {
+            layout.dungeon[j * DMAXX + i] = gen.dungeon[j][i] as u8;
+        }
+    }
+
     // 3. Compute dTransVal (C++ `FloodTransparencyValues(13)`) so the renderer
     //    can make doors/arches see-through. The generator's 40x40 logical Tile
     //    grid is read with the same [x][y] indexing as the dPiece stamping

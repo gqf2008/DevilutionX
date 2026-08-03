@@ -414,6 +414,9 @@ pub struct GameState {
     /// Tiles the player's vision rays reached this tick (C++ `DoVision`
     /// sets `activeForTicks` on monsters standing in visible tiles).
     pub last_visible_tiles: Vec<(i32, i32)>,
+    /// Automap exploration grid (C++ `AutomapView[DMAXX][DMAXY]`), written
+    /// into the saved level entry.
+    pub automap_view: [[u8; 40]; 40],
     /// Per-monster-type kill counts (C++ MonsterKillCounts[138]); the Rust
     /// monster set is a 20-type simplification, so counts land in the first
     /// slots.
@@ -513,12 +516,14 @@ pub struct DungeonLayout {
     /// selected theme room; `RndLocOk` / `CanPlaceMonster` (via
     /// `TileContainsSetPiece`) reject those tiles.
     pub populated: Vec<bool>,
+    /// 40x40 logical tile grid (C++ `dungeon[DMAXX][DMAXY]`), kept for the
+    /// automap shape lookup (`GetAutomapTileType`).
+    pub dungeon: Vec<u8>,
 }
 
 impl Default for DungeonLayout {
     fn default() -> Self {
-        use crate::levels::types::MAXDUNX;
-        use crate::levels::types::MAXDUNY;
+        use crate::levels::types::{DMAXX, DMAXY, MAXDUNX, MAXDUNY};
         Self {
             d_piece: vec![0; MAXDUNX * MAXDUNY],
             width: MAXDUNX,
@@ -528,6 +533,7 @@ impl Default for DungeonLayout {
             floor_tiles: Vec::new(),
             sol: Vec::new(),
             populated: vec![false; MAXDUNX * MAXDUNY],
+            dungeon: vec![0; DMAXX * DMAXY],
         }
     }
 }
@@ -631,6 +637,7 @@ impl GameState {
             player_light_index: crate::game::lighting::NO_LIGHT,
             pending_spell: None,
             explored: vec![false; 112 * 112],
+            automap_view: [[0u8; 40]; 40],
             last_visible_tiles: Vec::new(),
             kill_counts: [0; 138],
             dcorpse: vec![0; 112 * 112],
@@ -2827,7 +2834,11 @@ fn find_free_inv_cell(inv_grid: &[i8; 40], width: usize, height: usize) -> Optio
             Some(layout) => dungeon_only.extend_from_slice(&layout.pre_light),
             None => dungeon_only.extend(std::iter::repeat(0u8).take(112 * 112)),
         }
-        dungeon_only.extend(std::iter::repeat(0u8).take(40 * 40)); // AutomapView
+        for y in 0..40usize {
+            for x in 0..40usize {
+                dungeon_only.push(self.automap_view[y][x]); // AutomapView
+            }
+        }
         dungeon_only.extend(std::iter::repeat(0u8).take(112 * 112)); // missile occupancy
         // Premium items + automap state (C++ tail): round-trip the loaded
         // bytes (PremiumItemCount/Level + 6 SaveItems + AutomapActive +

@@ -1953,12 +1953,26 @@ pub fn prepare_dungeon_for_replay(game_state: &mut GameState, level: u8) -> bool
     // Try the real MPQ art first (repo-root devilutionx.mpq / spawn.mpq),
     // then fall back to the synthetic headless layout.
     let mut real_art = None;
+    let mut automap_amp: Option<Vec<u8>> = None;
     for cand in ["devilutionx.mpq", "spawn.mpq", "diabdat.mpq", "DIABDAT.MPQ"] {
         let path = std::path::Path::new(cand);
         if path.exists() {
             if let Ok(mut mpq) = crate::engine::mpq::MpqArchive::open(path) {
                 if let Ok(art) = DungeonLevelData::load_from_mpq(&mut mpq, DungeonType::Cathedral) {
                     real_art = Some(art);
+                    // C++ LoadAutomapData (automap.cpp:1528-1540): per-level
+                    // .amp file mapping logical tiles to automap shapes.
+                    if automap_amp.is_none() {
+                        let amp_path = match level {
+                            2 => "levels\\l2data\\l2.amp",
+                            3 => "levels\\l3data\\l3.amp",
+                            4 => "levels\\l4data\\l4.amp",
+                            5 => "nlevels\\l6data\\l6.amp",
+                            6 => "nlevels\\l5data\\l5.amp",
+                            _ => "levels\\l1data\\l1.amp",
+                        };
+                        automap_amp = mpq.read_file(amp_path).ok();
+                    }
                     break;
                 }
             }
@@ -2132,6 +2146,20 @@ pub fn prepare_dungeon_for_replay(game_state: &mut GameState, level: u8) -> bool
         for tile in &visible {
             game_state.explored[(tile.y as usize) * 112 + tile.x as usize] = true;
         }
+    }
+    // C++ DoVisionFlags (lighting.cpp:99-106) calls SetAutomapView for
+    // explored tiles; build the 40x40 AutomapView grid from the same data.
+    if let (Some(amp), Some(layout)) = (automap_amp, game_state.dungeon_layout.as_ref()) {
+        let tiles = crate::levels::automap::parse_amp(&amp);
+        let table = crate::levels::automap::build_type_tiles(&tiles);
+        let mut dungeon = [[0u8; 40]; 40];
+        for y in 0..40usize {
+            for x in 0..40usize {
+                dungeon[y][x] = layout.dungeon[y * 40 + x];
+            }
+        }
+        game_state.automap_view =
+            crate::levels::automap::compute_automap_view(&dungeon, &table, &game_state.explored);
     }
     // The reference save's monsters all have enemy = player 0 and
     // enemyPosition = the player tile (C++ save snapshot after level entry).
@@ -6147,6 +6175,7 @@ mod tests {
             sol: Vec::new(),
             floor_tiles: Vec::new(),
             populated: vec![false; 112 * 112],
+            dungeon: vec![0; 40 * 40],
         };
 
         // 地牢光照：环境全暗(15) + 玩家光晕（小半径，确保视口有明显暗区）。
@@ -6321,6 +6350,7 @@ mod tests {
                 floor_tiles: Vec::new(),
                 sol: Vec::new(),
                 populated: vec![false; w * h],
+                dungeon: vec![0; 40 * 40],
             }
         }
         // L1 resolves the EntranceStairs TIL mega (index 12) from the art.

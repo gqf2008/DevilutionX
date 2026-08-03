@@ -1,4 +1,5 @@
 // Level generation modules
+pub mod automap;
 pub mod drlg_l1;
 pub mod drlg_l2;
 pub mod drlg_l3;
