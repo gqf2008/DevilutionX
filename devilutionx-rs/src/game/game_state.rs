@@ -278,6 +278,10 @@ pub struct GameState {
     /// the engine does not simulate.
     pub saved_tail: Option<Vec<u8>>,
 
+    /// Loaded C++ `VisionList[0]` SaveLighting body (52B) for round-tripping
+    /// the vision state (old position etc.) the engine does not track.
+    pub saved_vision: Option<Vec<u8>>,
+
     /// Dungeon Map
     pub dungeon: DungeonMap,
 
@@ -603,6 +607,7 @@ impl GameState {
             objects: Vec::new(),
             saved_object_ids: None,
             saved_tail: None,
+            saved_vision: None,
             dungeon,
             logic_step: GameLogicStep::None,
             game_tick: 0,
@@ -1117,6 +1122,17 @@ impl GameState {
             const CLASSIC_TAIL_LEN: usize = 4 + 4 + 6 * 368 + 1 + 4;
             if entry.len() >= CLASSIC_TAIL_LEN {
                 self.saved_tail = Some(entry[entry.len() - CLASSIC_TAIL_LEN..].to_vec());
+            }
+            // Vision body: object bodies end at 59371 (aoc x 120), then the
+            // lights section (4 + 32 ids + cnt x 52) and the vision header.
+            let aoc = header.active_object_count as usize;
+            let lights_start = 49997 + 254 + aoc * 120;
+            if entry.len() >= lights_start + 4 {
+                let light_cnt = u32::from_be_bytes([entry[lights_start], entry[lights_start + 1], entry[lights_start + 2], entry[lights_start + 3]]) as usize;
+                let vision_body = lights_start + 4 + 32 + light_cnt * 52 + 8;
+                if entry.len() >= vision_body + 52 {
+                    self.saved_vision = Some(entry[vision_body..vision_body + 52].to_vec());
+                }
             }
         }
         // Game state: spawn flag (C++ gbIsSpawn from the save magic) + level
@@ -2628,12 +2644,18 @@ fn find_free_inv_cell(inv_grid: &[i8; 40], width: usize, height: usize) -> Optio
             })
             .collect();
         let vision: Vec<BinaryLightData> = if !self.is_town {
-            vec![BinaryLightData {
-                position_x: self.player.position.x,
-                position_y: self.player.position.y,
-                radius: self.player._p_light_rad as i32,
-                ..Default::default()
-            }]
+            if let Some(v) = &self.saved_vision {
+                // Round-trip the loaded VisionList body byte-for-byte.
+                let mut lh = loadsave::LoadHelper::new(v.clone());
+                vec![loadsave::BinaryLightData::from_binary(&mut lh)]
+            } else {
+                vec![BinaryLightData {
+                    position_x: self.player.position.x,
+                    position_y: self.player.position.y,
+                    radius: self.player._p_light_rad as i32,
+                    ..Default::default()
+                }]
+            }
         } else {
             Vec::new()
         };
@@ -2707,7 +2729,13 @@ fn find_free_inv_cell(inv_grid: &[i8; 40], width: usize, height: usize) -> Optio
             .iter()
             .map(|&b| if b { 1 << 7 } else { 0 })
             .collect();
-        let zero_grid = vec![0u8; 112 * 112];
+        // dPlayer grid: 0 except the local player's tile (C++ dPlayer = id+1).
+        let mut dplayer = vec![0u8; 112 * 112];
+        if self.player.position.x >= 0 && self.player.position.x < 112
+            && self.player.position.y >= 0 && self.player.position.y < 112
+        {
+            dplayer[self.player.position.y as usize * 112 + self.player.position.x as usize] = 1;
+        }
         // Dropped-item locations grid (C++ SaveDroppedItemLocations): one u8
         // per tile, 1-based position in the dropped-item list (0 = empty).
         let mut dropped_locations = vec![0u8; 112 * 112];
@@ -2726,11 +2754,19 @@ fn find_free_inv_cell(inv_grid: &[i8; 40], width: usize, height: usize) -> Optio
                 dmonster[m.y as usize * 112 + m.x as usize] = slot as i32 + 1;
             }
         }
-        // dObject: per-tile object index+1 (C++ Objects[abs(dObject)-1]).
+        // dObject: per-tile C++ object slot+1 (C++ Objects[abs(dObject)-1]).
+        // The engine's objects are in ActiveObjects order, so the slot comes
+        // from the round-tripped pool array when available.
         let mut dobject = vec![0i8; 112 * 112];
         for (i, o) in self.objects.iter().enumerate() {
+            let slot = self
+                .saved_object_ids
+                .as_ref()
+                .and_then(|ids| ids.get(i))
+                .map(|&v| v as i32)
+                .unwrap_or(i as i32);
             if o.position.x >= 0 && o.position.x < 112 && o.position.y >= 0 && o.position.y < 112 {
-                dobject[o.position.y as usize * 112 + o.position.x as usize] = (i + 1) as i8;
+                dobject[o.position.y as usize * 112 + o.position.x as usize] = (slot + 1) as i8;
             }
         }
         let mut dungeon_only = Vec::new();
@@ -2758,7 +2794,7 @@ fn find_free_inv_cell(inv_grid: &[i8; 40], width: usize, height: usize) -> Optio
         );
         loadsave::write_game_data_v3(
             &header, &seeds, &player_pack, &quests, return_state, &portals, &kill,
-            &dungeon_body, &dropped_items, &self.unique_flags, &dlight, &dflags, &zero_grid,
+            &dungeon_body, &dropped_items, &self.unique_flags, &dlight, &dflags, &dplayer,
             &dropped_locations, &dungeon_only, &premium, &[],
         )
     }
