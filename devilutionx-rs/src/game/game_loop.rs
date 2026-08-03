@@ -2500,10 +2500,11 @@ fn apply_movement(game_state: &mut GameState, input: &InputSystem) {
 /// `target` is passed by value and `move_target` is a mutable reference back
 /// into `GameLoopState` so we can `None` it on arrival; the caller reads the
 /// current value from `state.move_target` before invoking us.
-/// Game ticks per walked tile (C++ walk animation: one frame per game tick,
-/// 8 frames cross a tile). `StartWalkAnimation` skips two leading frames on
-/// dungeon levels; the exact cadence is tuned against the demo replay.
-const WALK_TICKS_PER_TILE: i32 = 8;
+/// Game ticks per walked tile. C++ walk animation: 8 frames at 1 tick/frame
+/// (Warrior walkingFrames), `StartWalkAnimation` skips two leading frames on
+/// dungeon levels and `processAnimation` advances once in the starting tick,
+/// so crossing a tile takes 9 game ticks.
+const WALK_TICKS_PER_TILE: i32 = 9;
 
 /// Convert a C++ `GetPathDirection` code (path.h:60-67) to a tile delta.
 fn dir_code_delta(code: i8) -> (i32, i32) {
