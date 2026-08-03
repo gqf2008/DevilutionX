@@ -2,7 +2,7 @@
 //! Not part of the crate's public API surface; kept for serialization alignment.
 use devilutionx_rs::engine::demo_reader::{load_save_archive, parse_demo, DemoEventType, DemoPayload, ReplayDriver};
 use devilutionx_rs::game::codec::codec_decode;
-use devilutionx_rs::game::game_loop::{convert_screen_to_tile, tick_move_target};
+use devilutionx_rs::game::game_loop::convert_screen_to_tile;
 use devilutionx_rs::game::game_state::GameState;
 use devilutionx_rs::game::loadsave::CppGameHeader;
 use devilutionx_rs::game::pack::PlayerPack;
@@ -45,19 +45,15 @@ fn main() {
     assert!(devilutionx_rs::game::game_loop::prepare_dungeon_for_replay(&mut gs, 1), "prep");
     let mut rng = rand::rngs::StdRng::seed_from_u64(0);
     let mut driver = ReplayDriver::new(parse_demo(&std::fs::read(fixture("demo_0.dmo")).unwrap()).unwrap());
-    let mut move_target: Option<(i32, i32)> = None;
     while let Some(ev) = driver.peek() {
         match ev.event_type {
             DemoEventType::MouseButtonDown => {
                 if let DemoPayload::MouseButton { x, y, .. } = ev.payload {
                     let cam = gs.camera;
-                    move_target = Some(convert_screen_to_tile(x as i32, y as i32, cam.tile_x, cam.tile_y));
+                    gs.handle_click_tile(convert_screen_to_tile(x as i32, y as i32, cam.tile_x, cam.tile_y));
                 }
             }
             DemoEventType::GameTick => {
-                if let Some(target) = move_target {
-                    tick_move_target(&mut gs, target, &mut move_target);
-                }
                 gs.update(&mut rng);
             }
             _ => {}
