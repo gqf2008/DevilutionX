@@ -921,12 +921,25 @@ fn drop_pregen_gold(game_state: &mut crate::game::game_state::GameState, x: i32,
         // GetItemBonus: ItemType::Gold -> no draws. ItemRndDur: gold dur 0.
     }
     // TryRandomUniqueItem: CF_UNIQUE not set -> no draws.
+    let mut gold = crate::game::items::Item::gold(value);
+    // C++ MakeGoldStack/SetupAllItems: _iSeed = the drawn seed, _iCreateInfo =
+    // level(2) | CF_PREGEN(0x8000) | CF_UPER1(0x100) = 0x8102.
+    gold.seed = iseed;
+    gold.create_info = 0x8102;
+    gold.item_index = 0; // IDI_GOLD
+    gold.name = "Gold".to_string();
+    gold.base_name = "Gold".to_string();
+    gold.identified = false;
+    gold.identified_value = 0;
+    // C++ MakeGoldStack: _iLoc = ILOC_UNEQUIPABLE (7), gold cursor (4).
+    gold.equip_loc = crate::game::items::ItemEquipType::Unequipable;
+    gold.cursor = 4;
     game_state.ground_items.push(GroundItem {
         x,
         y,
         item_type: GroundItemType::Gold,
-        item_index: None,
-        item: Some(crate::game::items::Item::gold(value)),
+        item_index: Some(0),
+        item: Some(gold),
     });
 }
 
@@ -1029,12 +1042,21 @@ fn drop_pregen_random_item(game_state: &mut crate::game::game_state::GameState, 
             _ => GroundItemType::Gold,
         },
     };
+    // Build the real item (C++ GetItemAttrs + _iCreateInfo + SetupItem).
+    let mut item = crate::game::items::Item::empty();
+    crate::game::items::get_item_attrs_by_index(&mut item, idx as i16, 1);
+    item.seed = iseed;
+    // level(2) | CF_PREGEN | CF_UPER1 = 0x8102 (same as the gold drops).
+    item.create_info = 0x8102;
+    item.name = data.name.to_string();
+    item.base_name = data.name.to_string();
+    crate::game::items::setup_item(&mut item);
     game_state.ground_items.push(crate::game::game_state::GroundItem {
         x,
         y,
         item_type,
         item_index: Some(idx),
-        item: None,
+        item: Some(item),
     });
 }
 

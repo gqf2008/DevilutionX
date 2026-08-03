@@ -2225,6 +2225,29 @@ fn cpp_name_bytes(s: &str) -> [u8; 64] {
     out
 }
 
+/// Map `item_dat::ItemType` (the C++ `ItemType` row type) to the C++
+/// `ItemType` discriminant (itemdat.h:290-304).
+fn item_dat_type_to_cpp(v: crate::game::item_dat::ItemType) -> i32 {
+    use crate::game::item_dat::ItemType::*;
+    match v {
+        Misc => 0,
+        Sword => 1,
+        Axe => 2,
+        Bow => 3,
+        Mace => 4,
+        Shield => 5,
+        LightArmor => 6,
+        Helm => 7,
+        MediumArmor => 8,
+        HeavyArmor => 9,
+        Staff => 10,
+        Gold => 11,
+        Ring => 12,
+        Amulet => 13,
+        None => -1,
+    }
+}
+
 /// Map the port's `ItemMiscId` to the C++ `item_misc_id` discriminant
 /// (itemdat.h:512+) used by SaveItem's `_iMiscId` field.
 fn item_misc_id_to_cpp(v: crate::game::items::ItemMiscId) -> i32 {
@@ -2261,20 +2284,30 @@ pub fn item_to_binary(item: &crate::game::items::Item) -> BinaryItemData {
     let mut b = BinaryItemData::default();
     b.seed = item.seed;
     b.create_info = item.create_info;
-    // C++ SaveItem writes `Item::_itype` which GetItemAttrs fills from
-    // `AllItemsList[IDidx].iItemType`; derive it from the authoritative
-    // itemdat.tsv row (the engine's simplified ItemType enum is not the
-    // C++ `ItemType` discriminant set).
-    let itype = crate::game::item_dat::get_item_data(item.item_index as usize)
-        .map(|d| d.item_type)
-        .unwrap_or(crate::game::item_dat::ItemType::None);
-    b.item_type = itype as i32;
+    // C++ SaveItem writes `Item::_itype` (the C++ ItemType discriminant,
+    // itemdat.h:290-304); the port's ItemType enum uses different values, so
+    // map explicitly. Gold is special-cased (item_index 0 with type Gold).
+    b.item_type = if item.item_type == crate::game::items::ItemType::Gold {
+        11 // ItemType::Gold
+    } else {
+        crate::game::item_dat::get_item_data(item.item_index as usize)
+            .map(|d| item_dat_type_to_cpp(d.item_type))
+            .unwrap_or(0)
+    };
     b.position_x = item.position_x;
     b.position_y = item.position_y;
     // C++ ground-item animation: 16 frames, current frame = last (items.cpp
     // AddInitItems sets currentFrame = numberOfFrames - 1).
-    b.anim_frames = 16;
-    b.anim_frame = 15;
+    // C++ ground-item animation frame count comes from the item's cursor
+    // sprite (objcurs.cel): gold = 10, potions/misc = 16. The current frame
+    // is numberOfFrames - 1 (items.cpp ItemNoFlippy / AddInitItems).
+    let (anim_frames, anim_frame) = if item.item_type == crate::game::items::ItemType::Gold {
+        (10, 9)
+    } else {
+        (16, 15)
+    };
+    b.anim_frames = anim_frames;
+    b.anim_frame = anim_frame;
     // C++ ground items use SelectionRegion::Bottom (= 1).
     b.selection_region = 1;
     b.identified = item.identified;
