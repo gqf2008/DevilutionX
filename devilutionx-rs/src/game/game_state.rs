@@ -2514,6 +2514,17 @@ fn find_free_inv_cell(inv_grid: &[i8; 40], width: usize, height: usize) -> Optio
                 return; // asleep: C++ AI functions no-op
             }
 
+            // C++ MonsterDelay (monster.cpp:1542): an AI wait counts down
+            // var2 and stands again when it expires so the AI can re-decide.
+            if monster.mode == crate::game::monster::MonsterMode::Delay {
+                let was_zero = monster.var2 == 0;
+                monster.var2 -= 1;
+                if was_zero {
+                    monster.mode = crate::game::monster::MonsterMode::Stand;
+                }
+                return;
+            }
+
             // C++ ProcessMonsters: run the AI dispatch when standing with a
             // normal goal; the AI sets mode/goal and may start a walk.
             if monster.mode == crate::game::monster::MonsterMode::Stand
