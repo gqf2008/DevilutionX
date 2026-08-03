@@ -943,6 +943,12 @@ pub struct BinaryMonsterData {
     pub future_y: i32,
     pub old_x: i32,
     pub old_y: i32,
+    pub offset_dx: i32,
+    pub offset_dy: i32,
+    pub velocity_dx: i32,
+    pub velocity_dy: i32,
+    pub offset2_dx: i32,
+    pub offset2_dy: i32,
     pub direction: i32,
     pub enemy: i32,
     pub enemy_x: u8,
@@ -1096,12 +1102,10 @@ impl BinaryMonsterData {
         helper.write_le_i32(self.future_y);
         helper.write_le_i32(self.old_x);
         helper.write_le_i32(self.old_y);
-        // offset.deltaX/Y (walking offset — 0 when idle, matching C++ default)
-        helper.write_le_i32(0);
-        helper.write_le_i32(0);
-        // velocity.deltaX/Y
-        helper.write_le_i32(0);
-        helper.write_le_i32(0);
+        helper.write_le_i32(self.offset_dx);
+        helper.write_le_i32(self.offset_dy);
+        helper.write_le_i32(self.velocity_dx);
+        helper.write_le_i32(self.velocity_dy);
         helper.write_le_i32(self.direction);
         helper.write_le_i32(self.enemy);
         helper.write_u8(self.enemy_x);
@@ -1119,9 +1123,8 @@ impl BinaryMonsterData {
         helper.write_le_i32(self.var3 as i32);
         helper.write_le_i32(self.temp_x as i32);
         helper.write_le_i32(self.temp_y as i32);
-        // offset2.deltaX/Y
-        helper.write_le_i32(0);
-        helper.write_le_i32(0);
+        helper.write_le_i32(self.offset2_dx);
+        helper.write_le_i32(self.offset2_dy);
         helper.skip(4); // Skip _mVar8
         helper.write_le_i32(self.max_hp);
         helper.write_le_i32(self.hp);
@@ -4053,6 +4056,12 @@ mod tests {
             future_y: 44,
             old_x: 55,
             old_y: 66,
+            offset_dx: 1,
+            offset_dy: 2,
+            velocity_dx: 3,
+            velocity_dy: 4,
+            offset2_dx: 5,
+            offset2_dy: 6,
             direction: 1,
             enemy: 2,
             enemy_x: 70,

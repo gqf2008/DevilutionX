@@ -2161,6 +2161,69 @@ pub fn prepare_dungeon_for_replay(game_state: &mut GameState, level: u8) -> bool
         game_state.automap_view =
             crate::levels::automap::compute_automap_view(&dungeon, &table, &game_state.explored);
     }
+    // Overlay the original save's per-slot state (C++ SaveMonster/SaveObject
+    // bodies): the old session's mid-animation tick/frame, var1/var3 and any
+    // in-flight movement are not derivable from the level seed, so round-trip
+    // them by slot (the regenerated roster matches the saved order).
+    if !game_state.saved_monster_state.is_empty() {
+        for (i, &(tick, frame, var1, var3, x, y, fx, fy, mode, old_x, old_y, odx, ody, vdx, vdy, dir, tpf, o2dx, o2dy, aft, lx, ly, rnd)) in
+            game_state.saved_monster_state.iter().enumerate()
+        {
+            if let Some(m) = game_state.monster_manager.get_monster_mut(i) {
+                m.anim_tick_counter = tick;
+                m.anim_current_frame = frame;
+                m.var1 = var1 as i16;
+                m.var3 = var3 as i8;
+                m.x = x;
+                m.y = y;
+                m.future_x = fx;
+                m.future_y = fy;
+                m.mode = match mode {
+                    0 => crate::game::monster::MonsterMode::Stand,
+                    1 => crate::game::monster::MonsterMode::MoveNorthwards,
+                    2 => crate::game::monster::MonsterMode::MoveSouthwards,
+                    3 => crate::game::monster::MonsterMode::MoveSideways,
+                    4 => crate::game::monster::MonsterMode::MeleeAttack,
+                    5 => crate::game::monster::MonsterMode::HitRecovery,
+                    6 => crate::game::monster::MonsterMode::Death,
+                    7 => crate::game::monster::MonsterMode::SpecialMeleeAttack,
+                    8 => crate::game::monster::MonsterMode::FadeIn,
+                    9 => crate::game::monster::MonsterMode::FadeOut,
+                    10 => crate::game::monster::MonsterMode::RangedAttack,
+                    11 => crate::game::monster::MonsterMode::SpecialStand,
+                    12 => crate::game::monster::MonsterMode::SpecialRangedAttack,
+                    13 => crate::game::monster::MonsterMode::Delay,
+                    14 => crate::game::monster::MonsterMode::Charge,
+                    15 => crate::game::monster::MonsterMode::Petrified,
+                    16 => crate::game::monster::MonsterMode::Heal,
+                    17 => crate::game::monster::MonsterMode::Talk,
+                    _ => crate::game::monster::MonsterMode::Stand,
+                };
+                m.home_x = old_x;
+                m.home_y = old_y;
+                m.offset_dx = odx;
+                m.offset_dy = ody;
+                m.velocity_dx = vdx;
+                m.velocity_dy = vdy;
+                m.facing = crate::game::types::Direction::ALL[(dir as usize).min(7)];
+                m.anim_ticks_per_frame = tpf;
+                m.offset2_dx = o2dx;
+                m.offset2_dy = o2dy;
+                m.active_for_ticks = aft as u8;
+                m.last_x = lx;
+                m.last_y = ly;
+                m.rnd_item_seed = rnd as u32;
+            }
+        }
+    }
+    if !game_state.saved_object_anim.is_empty() {
+        for (i, &(frame, cnt)) in game_state.saved_object_anim.iter().enumerate() {
+            if let Some(o) = game_state.objects.get_mut(i) {
+                o.anim_frame = frame;
+                o.anim_cnt = cnt;
+            }
+        }
+    }
     // The reference save's monsters all have enemy = player 0 and
     // enemyPosition = the player tile (C++ save snapshot after level entry).
     let player_pos = game_state.player.position;

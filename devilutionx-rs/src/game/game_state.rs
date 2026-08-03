@@ -282,6 +282,19 @@ pub struct GameState {
     /// the vision state (old position etc.) the engine does not track.
     pub saved_vision: Option<Vec<u8>>,
 
+    /// Per-slot state captured from the loaded save's `SaveMonster` bodies:
+    /// `(tickCounter, currentFrame, var1, var3, x, y, futureX, futureY, mode,
+    /// oldX, oldY, offsetDX, offsetDY, velocityDX, velocityDY, direction,
+    /// ticksPerFrame, offset2DX, offset2DY, activeForTicks, lastX, lastY,
+    /// rndItemSeed)`. `prepare_dungeon_for_replay` regenerates the roster from
+    /// the seed and overlays these so the snapshot matches the original save
+    /// (old-session animation/walk state is not derivable from the seed).
+    pub saved_monster_state: Vec<(i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32)>,
+
+    /// Per-object `(_oAnimFrame, _oAnimCnt)` captured from the loaded save's
+    /// `SaveObject` bodies (old-session mid-animation state).
+    pub saved_object_anim: Vec<(i32, i32)>,
+
     /// Dungeon Map
     pub dungeon: DungeonMap,
 
@@ -614,6 +627,8 @@ impl GameState {
             saved_object_ids: None,
             saved_tail: None,
             saved_vision: None,
+            saved_monster_state: Vec::new(),
+            saved_object_anim: Vec::new(),
             dungeon,
             logic_step: GameLogicStep::None,
             game_tick: 0,
@@ -1140,6 +1155,60 @@ impl GameState {
                 if entry.len() >= vision_body + 52 {
                     self.saved_vision = Some(entry[vision_body..vision_body + 52].to_vec());
                 }
+            }
+            // Round-trip the saved SaveMonster/SaveObject animation state so
+            // the regenerated roster can overlay it (the old save's
+            // mid-animation tick/frame values are not derivable from the
+            // level seed). Offsets match C++ SaveMonster (loadsave.cpp:1502)
+            // and SaveObject (loadsave.cpp:1183).
+            let amc = header.active_monster_count as usize;
+            const MONSTER_BODIES: usize = 24259;
+            if entry.len() >= MONSTER_BODIES + amc * 216 {
+                self.saved_monster_state = (0..amc)
+                    .map(|i| {
+                        let b = MONSTER_BODIES + i * 216;
+                        let le_i32 = |off: usize| {
+                            i32::from_le_bytes([entry[b + off], entry[b + off + 1], entry[b + off + 2], entry[b + off + 3]])
+                        };
+                        (
+                            le_i32(92),  // animInfo.tickCounterOfCurrentFrame
+                            le_i32(100) - 1, // animInfo.currentFrame (stored +1)
+                            le_i32(112), // var1
+                            le_i32(120), // var3
+                            le_i32(32),  // position.x
+                            le_i32(36),  // position.y
+                            le_i32(40),  // position.future.x
+                            le_i32(44),  // position.future.y
+                            le_i32(4),   // mode
+                            le_i32(48),  // position.old.x
+                            le_i32(52),  // position.old.y
+                            le_i32(56),  // offset.deltaX
+                            le_i32(60),  // offset.deltaY
+                            le_i32(64),  // velocity.deltaX
+                            le_i32(68),  // velocity.deltaY
+                            le_i32(72),  // direction
+                            le_i32(88),  // animInfo.ticksPerFrame
+                            le_i32(132), // offset2.deltaX
+                            le_i32(136), // offset2.deltaY
+                            le_i32(160), // activeForTicks
+                            le_i32(168), // position.last.x
+                            le_i32(172), // position.last.y
+                            le_i32(176), // rndItemSeed
+                        )
+                    })
+                    .collect();
+            }
+            const OBJECT_BODIES: usize = 50251;
+            if entry.len() >= OBJECT_BODIES + aoc * 120 {
+                self.saved_object_anim = (0..aoc)
+                    .map(|i| {
+                        let b = OBJECT_BODIES + i * 120;
+                        let le = |off: usize| {
+                            i32::from_le_bytes([entry[b + off], entry[b + off + 1], entry[b + off + 2], entry[b + off + 3]])
+                        };
+                        (le(36), le(28)) // (_oAnimFrame, _oAnimCnt)
+                    })
+                    .collect();
             }
         }
         // Game state: spawn flag (C++ gbIsSpawn from the save magic) + level
@@ -2799,6 +2868,13 @@ fn find_free_inv_cell(inv_grid: &[i8; 40], width: usize, height: usize) -> Optio
             if m.x >= 0 && m.x < 112 && m.y >= 0 && m.y < 112 {
                 dmonster[m.y as usize * 112 + m.x as usize] = slot as i32 + 1;
             }
+            // C++ Monster::occupyTile (monster.cpp:5038): a moving monster
+            // also occupies its destination tile with the negative id.
+            if (m.future_x != m.x || m.future_y != m.y)
+                && m.future_x >= 0 && m.future_x < 112 && m.future_y >= 0 && m.future_y < 112
+            {
+                dmonster[m.future_y as usize * 112 + m.future_x as usize] = -(slot as i32 + 1);
+            }
         }
         // dObject: per-tile C++ object slot+1 (C++ Objects[abs(dObject)-1]).
         // The engine's objects are in ActiveObjects order, so the slot comes
@@ -3190,10 +3266,16 @@ impl crate::game::loadsave::LevelSnapshot for GameState {
                 path_count: m.path_count,
                 position_x: m.x,
                 position_y: m.y,
-                future_x: m.x,
-                future_y: m.y,
+                future_x: m.future_x,
+                future_y: m.future_y,
                 old_x: m.home_x,
                 old_y: m.home_y,
+                offset_dx: m.offset_dx,
+                offset_dy: m.offset_dy,
+                velocity_dx: m.velocity_dx,
+                velocity_dy: m.velocity_dy,
+                offset2_dx: m.offset2_dx,
+                offset2_dy: m.offset2_dy,
                 direction: m.facing as i32,
                 enemy: m.enemy as i32,
                 enemy_x: m.enemy_position.x as u8,
@@ -3234,9 +3316,8 @@ impl crate::game::loadsave::LevelSnapshot for GameState {
                 intelligence: m.intelligence,
                 flags: m.flags.0,
                 active_for_ticks: m.active_for_ticks,
-                // C++ position.last is (0,0) for freshly placed monsters.
-                last_x: 0,
-                last_y: 0,
+                last_x: m.last_x,
+                last_y: m.last_y,
                 rnd_item_seed: m.rnd_item_seed,
                 // The reference fixture stores `0x6D000000 | slot` in aiSeed
                 // for every monster (an artifact of the original save); the

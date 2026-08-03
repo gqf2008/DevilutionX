@@ -223,6 +223,21 @@ pub struct Monster {
     /// minimal dungeon-population AI.)
     pub home_x: i32,
     pub home_y: i32,
+    /// Target tile the monster is walking to (C++ `position.future`); written
+    /// into the save and used for the negative dMonster entry while moving.
+    pub future_x: i32,
+    pub future_y: i32,
+    /// Last position (C++ `position.last`), serialised into SaveMonster.
+    pub last_x: i32,
+    pub last_y: i32,
+    /// Walking sub-tile offset (C++ `position.CalculateWalkingOffset`),
+    /// serialised into SaveMonster.
+    pub offset_dx: i32,
+    pub offset_dy: i32,
+    pub velocity_dx: i32,
+    pub velocity_dy: i32,
+    pub offset2_dx: i32,
+    pub offset2_dy: i32,
 
     // === Animation (C++ `animInfo`) ===
     pub anim_ticks_per_frame: i32,
@@ -341,6 +356,16 @@ impl Monster {
             facing: Direction::South,
             home_x: x,
             home_y: y,
+            future_x: x,
+            future_y: y,
+            last_x: 0,
+            last_y: 0,
+            offset_dx: 0,
+            offset_dy: 0,
+            velocity_dx: 0,
+            velocity_dy: 0,
+            offset2_dx: 0,
+            offset2_dy: 0,
             ai_state: MonsterAIState::Idle,
             goal: MonsterGoal::Normal,
             mode: MonsterMode::Stand,
