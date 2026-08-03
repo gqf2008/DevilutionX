@@ -755,6 +755,42 @@ fn trace_walk_divergence_17() {
     assert!(click_no > 0, "demo should contain mouse clicks");
 }
 
+/// Diagnostic for issue #17: histogram of demo event types. The Rust replay
+/// only handles MouseButtonDown + GameTick; any other type (KeyDown/KeyUp for
+/// keyboard movement, MouseMotion, MouseWheel) is ignored. If the demo drives
+/// movement via keyboard, the replay misses it.
+#[test]
+fn demo_event_types_17() {
+    let data = std::fs::read(fixture_path("demo_0.dmo")).unwrap();
+    let mut driver = ReplayDriver::new(parse_demo(&data).unwrap());
+    let mut gt = 0i32;
+    let mut mb_down = 0i32;
+    let mut mb_up = 0i32;
+    let mut mmotion = 0i32;
+    let mut mwheel = 0i32;
+    let mut k_down = 0i32;
+    let mut k_up = 0i32;
+    let mut rendering = 0i32;
+    let mut other = 0i32;
+    while let Some(ev) = driver.peek() {
+        match ev.event_type {
+            DemoEventType::GameTick => gt += 1,
+            DemoEventType::MouseButtonDown => mb_down += 1,
+            DemoEventType::MouseButtonUp => mb_up += 1,
+            DemoEventType::MouseMotion => mmotion += 1,
+            DemoEventType::MouseWheel => mwheel += 1,
+            DemoEventType::KeyDown => k_down += 1,
+            DemoEventType::KeyUp => k_up += 1,
+            DemoEventType::Rendering => rendering += 1,
+            _ => other += 1,
+        }
+        driver.step();
+    }
+    println!("[Hist17] GameTick={} MouseButtonDown={} MouseButtonUp={} MouseMotion={} MouseWheel={} KeyDown={} KeyUp={} Rendering={} other={}",
+        gt, mb_down, mb_up, mmotion, mwheel, k_down, k_up, rendering, other);
+    assert!(gt > 0 && mb_down > 0, "demo has ticks + clicks");
+}
+
 /// Tier 1..3 acceptance: load `spawn_0.sv`, replay `demo_0.dmo` headlessly through
 /// the engine game loop, and byte-compare the final save against the reference.
 ///
