@@ -10,8 +10,8 @@
 #include <fstream>
 #include <memory>
 #include <optional>
+#include <stack>
 #include <string>
-#include <vector>
 
 #include "engine/random.hpp"
 #include "levels/drlg_l1.h"
@@ -131,7 +131,7 @@ void DRLG_InitTrans()
 	Protected.reset();
 	Chamber.reset();
 	memset(dTransVal, 0, sizeof(dTransVal));
-	TransVal = 0;
+	TransVal = 1;
 	TransList = {};
 	MicroTileLen = 0;
 }
@@ -144,13 +144,114 @@ void DRLG_CopyTrans(int sx, int sy, int dx, int dy)
 		TransVal = dTransVal[sx][sy];
 }
 
+bool IsFloor(Point p, uint8_t floorID)
+{
+	const int i = (p.x - 16) / 2;
+	const int j = (p.y - 16) / 2;
+	if (i < 0 || i >= DMAXX)
+		return false;
+	if (j < 0 || j >= DMAXY)
+		return false;
+	return dungeon[i][j] == floorID;
+}
+
+void FillTransparencyValues(Point floor, uint8_t floorID)
+{
+	const Direction allDirections[] = {
+		Direction::North, Direction::South, Direction::East, Direction::West,
+		Direction::NorthEast, Direction::NorthWest, Direction::SouthEast, Direction::SouthWest,
+	};
+	for (const Direction dir : allDirections) {
+		const Point adjacent = floor + dir;
+		if (!IsFloor(adjacent, floorID))
+			dTransVal[adjacent.x][adjacent.y] = TransVal;
+	}
+	dTransVal[floor.x][floor.y] = TransVal;
+}
+
+void FindTransparencyValues(Point floor, uint8_t floorID)
+{
+	struct Seed {
+		int scanStart;
+		int scanEnd;
+		int y;
+		int dy;
+	};
+	std::stack<Seed, std::vector<Seed>> seedStack;
+	seedStack.push({ floor.x, floor.x + 1, floor.y, 1 });
+
+	const auto isInside = [floorID](int x, int y) {
+		if (dTransVal[x][y] != 0)
+			return false;
+		return IsFloor({ x, y }, floorID);
+	};
+
+	const auto set = [floorID](int x, int y) {
+		FillTransparencyValues({ x, y }, floorID);
+	};
+
+	const Displacement left = { -1, 0 };
+	const Displacement right = { 1, 0 };
+	const auto checkDiagonals = [&](Point p, Displacement direction) {
+		const Point up = p + Displacement { 0, -1 };
+		const Point upOver = up + direction;
+		if (!isInside(up.x, up.y) && isInside(upOver.x, upOver.y))
+			seedStack.push({ upOver.x, upOver.x + 1, upOver.y, -1 });
+		const Point down = p + Displacement { 0, 1 };
+		const Point downOver = down + direction;
+		if (!isInside(down.x, down.y) && isInside(downOver.x, downOver.y))
+			seedStack.push(Seed { downOver.x, downOver.x + 1, downOver.y, 1 });
+	};
+
+	while (!seedStack.empty()) {
+		const auto [scanStart, scanEnd, y, dy] = seedStack.top();
+		seedStack.pop();
+
+		int scanLeft = scanStart;
+		if (isInside(scanLeft, y)) {
+			while (isInside(scanLeft - 1, y)) {
+				set(scanLeft - 1, y);
+				scanLeft--;
+			}
+			checkDiagonals({ scanLeft, y }, left);
+		}
+		if (scanLeft < scanStart)
+			seedStack.push(Seed { scanLeft, scanStart - 1, y - dy, -dy });
+
+		int scanRight = scanStart;
+		while (scanRight < scanEnd) {
+			while (isInside(scanRight, y)) {
+				set(scanRight, y);
+				scanRight++;
+			}
+			seedStack.push(Seed { scanLeft, scanRight - 1, y + dy, dy });
+			if (scanRight - 1 > scanEnd)
+				seedStack.push(Seed { scanEnd + 1, scanRight - 1, y - dy, -dy });
+			if (scanLeft < scanRight)
+				checkDiagonals({ scanRight - 1, y }, right);
+
+			while (scanRight < scanEnd && !isInside(scanRight, y))
+				scanRight++;
+			scanLeft = scanRight;
+			if (scanLeft < scanEnd)
+				checkDiagonals({ scanLeft, y }, left);
+		}
+	}
+}
+
 void FloodTransparencyValues(uint8_t floorID)
 {
+	int yy = 16;
 	for (int j = 0; j < DMAXY; j++) {
+		int xx = 16;
 		for (int i = 0; i < DMAXX; i++) {
-			if (dungeon[i][j] == floorID)
-				dTransVal[i][j] = 1;
+			if (dungeon[i][j] == floorID && dTransVal[xx][yy] == 0) {
+				FindTransparencyValues({ xx, yy }, floorID);
+				TransVal++;
+			}
+			xx += 2;
 		}
+		yy += 2;
 	}
 }
 
@@ -251,10 +352,18 @@ int main(int argc, char **argv)
 		if (dumpStages) { printf("\nSTAGE area_ok\n"); for (int y=0;y<DMAXY;y++){for(int x=0;x<DMAXX;x++)printf("%d%c",dungeon[x][y],x==DMAXX-1?'\n':' ');} }
 		if (g_dumpStages) printf("RNGSTATE %u\n", GetLCGEngineState());
 		FloodTransparencyValues(13);
+		if (getenv("DUMP_TRANSVAL") != nullptr) {
+			printf("TRANSVAL %d\n", TransVal);
+			for (int y = 0; y < MAXDUNY; y++) { for (int x = 0; x < MAXDUNX; x++) printf("%d%c", dTransVal[x][y], x == MAXDUNX - 1 ? '\n' : ' '); }
+		}
 		if (PlaceStairs(ENTRY_MAIN))
 			break;
 	}
 	FixTransparency();
+	if (getenv("DUMP_TRANSVAL") != nullptr) {
+		printf("FIXEDTRANSVAL %d\n", TransVal);
+		for (int y = 0; y < MAXDUNY; y++) { for (int x = 0; x < MAXDUNX; x++) printf("%d%c", dTransVal[x][y], x == MAXDUNX - 1 ? '\n' : ' '); }
+	}
 	FixDirtTiles();
 	if (dumpStages) { printf("\nSTAGE fixdirt\n"); for (int y=0;y<DMAXY;y++){for(int x=0;x<DMAXX;x++)printf("%d%c",dungeon[x][y],x==DMAXX-1?'\n':' ');} }
 	FixCornerTiles();

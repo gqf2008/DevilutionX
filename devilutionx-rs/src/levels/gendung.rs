@@ -443,6 +443,16 @@ impl Default for TilePropertyManager {
 /// C++ `IsFloor()` (gendung.cpp:249). Maps a micro-tile coordinate to the
 /// 40x40 logical tile and tests it against `floor_id`.
 #[inline]
+/// A tile is part of the flood region when it is the exact floor id OR one of
+/// the shadow floor-variation ids (Floor12..21). C++ runs
+/// `FloodTransparencyValues(13)` before Substitution/ApplyShadowsPatterns/
+/// FillFloor; shadow variants (139-145/150-152) replace the original Floor(13)
+/// tiles in place, while Floor22/23 (162/163) are *new* floor added by
+/// FillFloor and must NOT count (they would enlarge the region vs C++).
+fn is_floor_like_id(t: u8) -> bool {
+    matches!(t, 139..=145 | 150..=152)
+}
+
 pub fn is_floor(tiles: &[[u8; DMAXY]; DMAXX], p: Point, floor_id: u8) -> bool {
     let i = (p.x - 16) / 2;
     let j = (p.y - 16) / 2;
@@ -452,7 +462,8 @@ pub fn is_floor(tiles: &[[u8; DMAXY]; DMAXX], p: Point, floor_id: u8) -> bool {
     if j < 0 || j >= DMAXY as i32 {
         return false;
     }
-    tiles[i as usize][j as usize] == floor_id
+    let t = tiles[i as usize][j as usize];
+    t == floor_id || is_floor_like_id(t)
 }
 
 /// All eight C++ `Direction`s as (dx, dy).

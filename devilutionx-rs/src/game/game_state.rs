@@ -440,6 +440,9 @@ pub struct GameState {
     /// dialogue state machines (e.g. the Mushroom quest TalkToWitch).
     pub quests: crate::game::quest_new::QuestManager,
 
+    /// Theme rooms for the current dungeon level (C++ `themes[]`/`numthemes`).
+    pub theme_manager: crate::levels::themes::ThemeManager,
+
     /// Loaded towner CL2 sprites (C++ LoadTownerAnimations); empty set
     /// keeps the coloured-marker fallback.
     pub towner_sprites: crate::game::towner_sprites::TownerSpriteSet,
@@ -617,6 +620,7 @@ impl GameState {
                 q.init_quests(false, seed as u32);
                 q
             },
+            theme_manager: crate::levels::themes::ThemeManager::new(),
             towner_sprites: crate::game::towner_sprites::TownerSpriteSet::new(),
             towners: Self::build_towner_list(),
             player_dead: false,

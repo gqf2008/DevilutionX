@@ -910,6 +910,8 @@ pub fn descend_to_level(game_state: &mut GameState, level: u8) -> Result<(), Str
     // from the clean seed, then place objects (sarcophagi + doors/lights +
     // barrels) and finally the scatter monster packs.
     let level_types = crate::game::monster::get_level_m_types(level, game_state.is_spawn);
+    // C++ InitThemes: pick the theme rooms on the reset#1 stream.
+    crate::levels::themes::init_themes(game_state, &level_types);
     crate::engine::random::seed_gameplay_rng(seed);
     // C++ InitGolems runs first in LoadGameLevelDungeon (diablo.cpp:3145).
     game_state.monster_manager.clear();
@@ -918,7 +920,9 @@ pub fn descend_to_level(game_state: &mut GameState, level: u8) -> Result<(), Str
     // C++ AddDoor: doors start closed (closed micros baked into dPiece).
     game_state.init_doors_closed();
     // Place monsters from the C++ PlaceMonsters algorithm.
-    place_dungeon_monsters(game_state, center_x, center_y, level_types);
+    place_dungeon_monsters(game_state, center_x, center_y, level_types.clone());
+    // C++ CreateThemeRooms: theme-room objects/monsters/items.
+    crate::levels::themes::create_theme_rooms(game_state, &level_types);
 
     Ok(())
 }
@@ -1510,6 +1514,9 @@ pub fn prepare_dungeon_for_replay(game_state: &mut GameState, level: u8) -> bool
     // We mirror that: build the roster, re-seed, place objects, then place
     // monsters from the precomputed roster.
     let level_types = crate::game::monster::get_level_m_types(level, game_state.is_spawn);
+    // C++ InitThemes (themes.cpp): pick the theme rooms on the reset#1 stream;
+    // the draws are wiped by the re-seed below but the selection persists.
+    crate::levels::themes::init_themes(game_state, &level_types);
     crate::engine::random::seed_gameplay_rng(seed);
     // C++ InitGolems runs first in LoadGameLevelDungeon (diablo.cpp:3145).
     game_state.monster_manager.clear();
@@ -1537,8 +1544,11 @@ pub fn prepare_dungeon_for_replay(game_state: &mut GameState, level: u8) -> bool
         game_state,
         game_state.player.position.x,
         game_state.player.position.y,
-        level_types,
+        level_types.clone(),
     );
+    // C++ CreateThemeRooms: place theme-room objects/monsters/items after the
+    // scatter monsters (their RNG draws do not affect monster placement).
+    crate::levels::themes::create_theme_rooms(game_state, &level_types);
     true
 }
 

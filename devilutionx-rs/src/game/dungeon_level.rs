@@ -426,9 +426,10 @@ pub fn build_dungeon_layout(gen: &CathedralGenerator, level: &DungeonLevelData) 
     //    grid is read with the same [x][y] indexing as the dPiece stamping
     //    above; Tile::Floor == 13 matches the C++ floor id.
     let mut tiles = [[0u8; DMAXY]; DMAXX];
+    let flood_src = gen.pre_variation_dungeon.as_ref().unwrap_or(&gen.dungeon);
     for y in 0..DMAXY {
         for x in 0..DMAXX {
-            tiles[x][y] = gen.dungeon[x][y] as u8;
+            tiles[x][y] = flood_src[x][y] as u8;
         }
     }
     let mut trans_val = [[0i8; MAXDUNY]; MAXDUNX];

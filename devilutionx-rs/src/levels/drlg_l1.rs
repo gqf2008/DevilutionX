@@ -700,6 +700,13 @@ pub struct CathedralGenerator {
     /// Dungeon tile array (40x40 logical tiles)
     pub dungeon: [[Tile; DUNGEON_SIZE]; DUNGEON_SIZE],
 
+    /// Snapshot of the dungeon right after `AddWall` and *before*
+    /// `Substitution`/`FillFloor` (C++ runs `FloodTransparencyValues(13)` at
+    /// exactly that point, when every floor tile is still `Tile::Floor`).
+    /// The post-variation grid has shadow/FillFloor tiles that fragment the
+    /// flood regions, so the transparency regions must come from this state.
+    pub pre_variation_dungeon: Option<[[Tile; DUNGEON_SIZE]; DUNGEON_SIZE]>,
+
     /// Dungeon mask (tracks which tiles are part of rooms)
     /// C++ equivalent: DungeonMask bitset
     pub dungeon_mask: [[bool; DUNGEON_SIZE]; DUNGEON_SIZE],
@@ -739,6 +746,7 @@ pub struct CathedralGenerator {
     fn default() -> Self {
         CathedralGenerator {
             dungeon: [[Tile::Invalid; DUNGEON_SIZE]; DUNGEON_SIZE],
+        pre_variation_dungeon: None,
             dungeon_mask: [[false; DUNGEON_SIZE]; DUNGEON_SIZE],
             protected: [[false; DUNGEON_SIZE]; DUNGEON_SIZE],
             chamber: [[false; DUNGEON_SIZE]; DUNGEON_SIZE],
@@ -1892,6 +1900,9 @@ impl CathedralGenerator {
             self.fill_chambers();
             self.fix_tiles_patterns();
             self.add_wall();
+            // C++ FloodTransparencyValues(13) runs here, before the stairs are
+            // placed and before any tile variation; snapshot for the layout.
+            self.pre_variation_dungeon = Some(self.dungeon);
             // FloodTransparencyValues(13) only touches dTransVal; skip.
                         let ok = self.place_stairs();
                         if ok {

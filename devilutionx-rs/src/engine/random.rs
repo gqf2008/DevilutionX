@@ -413,6 +413,15 @@ pub fn gameplay_rng_state() -> u32 {
     GAMEPLAY_RNG.with(|r| r.borrow().state())
 }
 
+/// C++ `FlipCoin(frequency)` on the gameplay RNG: `GenerateRnd(f) == 0`,
+/// which is true when `f <= 0` (GenerateRnd returns 0 for non-positive input).
+pub fn gameplay_flip_coin(frequency: i32) -> bool {
+    if frequency <= 0 {
+        return true;
+    }
+    gameplay_rnd(0, frequency - 1) == 0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
