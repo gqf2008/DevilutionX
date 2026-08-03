@@ -2225,6 +2225,34 @@ fn cpp_name_bytes(s: &str) -> [u8; 64] {
     out
 }
 
+/// Map the port's `ItemMiscId` to the C++ `item_misc_id` discriminant
+/// (itemdat.h:512+) used by SaveItem's `_iMiscId` field.
+fn item_misc_id_to_cpp(v: crate::game::items::ItemMiscId) -> i32 {
+    use crate::game::items::ItemMiscId::*;
+    match v {
+        None => 0,
+        Usable => 1,          // IMISC_USEFIRST
+        FullHeal => 2,
+        Heal => 3,
+        Mana => 6,
+        FullMana => 7,
+        Elixir | ElixStr => 10, // IMISC_ELIXSTR
+        ElixMag => 11,
+        ElixDex => 12,
+        ElixVit => 13,
+        Rejuv => 18,
+        FullRejuv => 19,
+        Scroll => 21,
+        ScrollT => 22,
+        Staff => 23,
+        Book => 24,
+        Ring => 25,
+        Amulet => 26,
+        Unique => 27,
+        _ => 0,
+    }
+}
+
 /// Map a fully generated engine `items::Item` (C++ `SetupAllItems` output) to
 /// the C++ `SaveItem` structure (loadsave.cpp:1158-1250). Every field the
 /// engine models maps to its C++ twin; animation fields use C++-ish defaults
@@ -2243,22 +2271,33 @@ pub fn item_to_binary(item: &crate::game::items::Item) -> BinaryItemData {
     b.item_type = itype as i32;
     b.position_x = item.position_x;
     b.position_y = item.position_y;
-    b.anim_frames = 8; // C++ ground-item animation default
+    // C++ ground-item animation: 16 frames, current frame = last (items.cpp
+    // AddInitItems sets currentFrame = numberOfFrames - 1).
+    b.anim_frames = 16;
+    b.anim_frame = 15;
+    // C++ ground items use SelectionRegion::Bottom (= 1).
+    b.selection_region = 1;
     b.identified = item.identified;
     b.magical = item.quality as i8;
     b.name = cpp_name_bytes(&item.base_name).to_vec();
     b.iname = cpp_name_bytes(&item.name).to_vec();
-    b.loc = item.equip_loc as i8;
+    // C++ _iLoc (item_equip_type, items.h): the port's ItemEquipType values
+    // are shifted by one (None = -1), so map to the C++ ILOC discriminant.
+    b.loc = match item.equip_loc {
+        crate::game::items::ItemEquipType::None => 0,
+        v => v as i8 + 1,
+    };
     b.class = item.item_class as u8;
     b.cursor = item.cursor as i32;
-    b.value = item.buy_value;
+    b.value = item.value;
     b.ivalue = item.identified_value;
     b.min_dam = item.min_damage as i32;
     b.max_dam = item.max_damage as i32;
     b.ac = item.armor_class as i32;
     b.flags = item.special_flags.0;
-    b.misc_id = item.misc_id as i32;
-    b.spell = item.spell as i32;
+    b.misc_id = item_misc_id_to_cpp(item.misc_id);
+    // C++ SaveItem writes _iSpell as int8_t; SPL_NULL = 0 (spelldat.h).
+    b.spell = if item.spell <= 0 { 0 } else { item.spell as i32 };
     b.charges = item.charges;
     b.max_charges = item.max_charges;
     b.durability = item.durability;
@@ -2280,7 +2319,8 @@ pub fn item_to_binary(item: &crate::game::items::Item) -> BinaryItemData {
     b.pl_light = item.bonus_light as i32;
     b.spl_lvl_add = item.spell_level_add;
     b.request = item.request;
-    b.unique_id = item.unique_id;
+    // C++ writes UniqueItems[_iUid].mappingId; _iUid < 0 (no unique) => 0.
+    b.unique_id = if item.unique_id < 0 { 0 } else { item.unique_id };
     b.f_min_dam = item.fire_min_dam as i32;
     b.f_max_dam = item.fire_max_dam as i32;
     b.l_min_dam = item.lightning_min_dam as i32;

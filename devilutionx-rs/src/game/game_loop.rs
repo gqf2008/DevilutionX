@@ -1721,8 +1721,9 @@ fn init_items_rng(game_state: &mut GameState) {
     use crate::game::game_state::GroundItemType;
     // InitItems: DiscardRandomValues(1)
     gameplay_advance_rnd_seed();
-    // AddInitItems: rnd = GenerateRnd(3) + 3
+    // AddInitItems: rnd = GenerateRnd(3) + 3 (C++ ItemsGetCurrlevel()).
     let num = gameplay_generate_rnd(3) + 3;
+    let curlv = game_state.current_dungeon_level as i32;
     for _ in 0..num {
         // GetRandomAvailableItemPosition
         let (x, y) = loop {
@@ -1739,6 +1740,17 @@ fn init_items_rng(game_state: &mut GameState) {
         let pick = gameplay_generate_rnd(2);
         // GetItemAttrs potion AC roll: GenerateRnd(1) (iMinAC == iMaxAC == 0).
         let _ac = gameplay_generate_rnd(1);
+        // Build the real potion (C++ GetItemAttrs + _iCreateInfo + SetupItem,
+        // items.cpp:465-476). The item RNG (GLOBAL_DIABLO_RNG) is separate
+        // from the gameplay LCG, so this does not disturb the placement
+        // stream. PickRandomlyAmong({IDI_MANA, IDI_HEAL}) -> IDI_MANA = 25,
+        // IDI_HEAL = 24 (itemdat.h / ITEMS_DATA).
+        let item_index: i16 = if pick == 0 { 25 } else { 24 };
+        let mut item = crate::game::items::Item::empty();
+        crate::game::items::get_item_attrs_by_index(&mut item, item_index, curlv);
+        item.seed = iseed;
+        item.create_info = (curlv as u16) | crate::game::items::CreateInfoFlag::CF_PREGEN;
+        crate::game::items::setup_item(&mut item);
         game_state.ground_items.push(crate::game::game_state::GroundItem {
             x,
             y,
@@ -1747,8 +1759,8 @@ fn init_items_rng(game_state: &mut GameState) {
             } else {
                 GroundItemType::HealingPotion
             },
-            item_index: None,
-            item: None,
+            item_index: Some(item_index as usize),
+            item: Some(item),
         });
     }
 }

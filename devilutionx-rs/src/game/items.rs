@@ -1299,19 +1299,21 @@ pub const GOLD_MAX_LIMIT: i32 = 5000;
 
 /// Item creation info flags (C++: _icreateinfo_flag)
 pub mod CreateInfoFlag {
-    pub const CF_LEVEL: u16 = 0x007F;      // Level mask
-    pub const CF_ONLYGOOD: u16 = 0x0080;   // Only good affixes
-    pub const CF_UPER15: u16 = 0x0100;     // Unique chance 15%
-    pub const CF_UPER1: u16 = 0x0200;      // Unique chance 1%
-    pub const CF_UNIQUE: u16 = 0x0400;     // Is unique
-    pub const CF_SMITH: u16 = 0x0800;      // From smith
-    pub const CF_SMITHPREMIUM: u16 = 0x1000; // Premium item
-    pub const CF_BOY: u16 = 0x2000;        // From Wirt
-    pub const CF_WITCH: u16 = 0x4000;      // From witch
-    pub const CF_HEALER: u16 = 0x8000;     // From healer
-    pub const CF_PREGEN: u16 = 0x0040;     // Pre-generated
-    pub const CF_USEFUL: u16 = 0x0020;     // Useful item
-    pub const CF_TOWN: u16 = 0x0010;       // From town
+    // Values match C++ `icreateinfo_flag` (items.h:156-171) so the
+    // serialised _iCreateInfo matches byte-for-byte.
+    pub const CF_LEVEL: u16 = (1 << 6) - 1;
+    pub const CF_ONLYGOOD: u16 = 1 << 6;
+    pub const CF_UPER15: u16 = 1 << 7;
+    pub const CF_UPER1: u16 = 1 << 8;
+    pub const CF_UNIQUE: u16 = 1 << 9;
+    pub const CF_SMITH: u16 = 1 << 10;
+    pub const CF_SMITHPREMIUM: u16 = 1 << 11;
+    pub const CF_BOY: u16 = 1 << 12;
+    pub const CF_WITCH: u16 = 1 << 13;
+    pub const CF_HEALER: u16 = 1 << 14;
+    pub const CF_PREGEN: u16 = 1 << 15;
+    pub const CF_USEFUL: u16 = CF_UPER15 | CF_UPER1;
+    pub const CF_TOWN: u16 = CF_SMITH | CF_SMITHPREMIUM | CF_BOY | CF_WITCH | CF_HEALER;
     pub const CF_HELLFIRE: u32 = 0x00010000; // Hellfire item (in dwBuff)
 }
 
@@ -1584,6 +1586,7 @@ pub fn get_item_attrs_by_index(item: &mut Item, item_idx: i16, level: i32) {
         ItemDatEquipType::Ring => ItemEquipType::Ring,
         ItemDatEquipType::Amulet => ItemEquipType::Amulet,
         ItemDatEquipType::Belt => ItemEquipType::Belt,
+        ItemDatEquipType::Unequipable => ItemEquipType::Unequipable,
         _ => ItemEquipType::None,
     };
 
