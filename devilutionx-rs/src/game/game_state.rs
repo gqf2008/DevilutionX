@@ -1487,6 +1487,12 @@ impl GameState {
         self.logic_step = GameLogicStep::ProcessPlayers;
         self.process_player_internal(rng);
 
+        // Stair/level-transition check (C++ CheckTriggers runs in the game
+        // loop after movement). The headless replay needs this so the player
+        // descends when it reaches a stair (issue #17 multi-level replay).
+        // Cooldown-gated and Err-tolerant inside check_stairs_transition.
+        crate::game::game_loop::check_stairs_transition(self);
+
         // Process monsters (C++ line 1520)
         if !self.is_town {
             // C++ DoVision marks dFlags::Explored each tick (vision.cpp); the

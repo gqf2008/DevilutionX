@@ -690,6 +690,17 @@ fn trace_walk_divergence_17() {
         gs.player.position.x, gs.player.position.y,
         gs.camera.tile_x, gs.camera.tile_y,
         header.view_position_x, header.view_position_y);
+    println!("[Trace17] triggers: numtrigs={} up_stairs={:?} in_dungeon={}",
+        gs.triggers.numtrigs, gs.dungeon_up_stairs, gs.in_dungeon);
+    for i in 0..gs.triggers.numtrigs {
+        let t = &gs.triggers.trigs[i];
+        let msg = match t.tmsg {
+            devilutionx_rs::levels::trigs::TriggerMessage::NextLevel => "Next(down)",
+            devilutionx_rs::levels::trigs::TriggerMessage::PrevLevel => "Prev(up)",
+            _ => "other",
+        };
+        println!("[Trace17]   trig#{} pos=({},{}) {}", i, t.position.x, t.position.y, msg);
+    }
 
     let mut ref_save = load_save_archive(fixture_path("demo_0_reference_spawn_0.sv")).expect("open ref");
     let reference = codec_decode(&ref_save.read_entry("game").unwrap(), PASSWORD_SPAWN_SINGLE);

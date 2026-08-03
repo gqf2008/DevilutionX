@@ -2728,7 +2728,7 @@ fn init_dungeon_triggers(
     init_dungeon_triggers_grid(game_state, level, &grid);
 }
 
-fn check_stairs_transition(game_state: &mut GameState) {
+pub fn check_stairs_transition(game_state: &mut GameState) {
     // Cooldown gate: a transition fired too recently — do nothing this tick.
     if !game_state.stairs_cooldown_ready() {
         return;
