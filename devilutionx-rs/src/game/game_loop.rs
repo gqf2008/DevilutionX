@@ -2002,6 +2002,10 @@ pub fn prepare_dungeon_for_replay(game_state: &mut GameState, level: u8) -> bool
     //   3. InitMonsters()               (scatter placement)
     // We mirror that: build the roster, re-seed, place objects, then place
     // monsters from the precomputed roster.
+    // C++ re-seeds between CreateLevel and GetLevelMTypes/InitThemes
+    // (diablo.cpp:3321-3325), so the scatter roster and theme selection are
+    // drawn from the fresh level seed, not the post-levelgen stream.
+    crate::engine::random::seed_gameplay_rng(seed);
     let level_types = crate::game::monster::get_level_m_types(level, game_state.is_spawn);
     // C++ InitThemes (themes.cpp): pick the theme rooms on the reset#1 stream;
     // the draws are wiped by the re-seed below but the selection persists.

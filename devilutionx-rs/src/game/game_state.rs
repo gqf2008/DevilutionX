@@ -2637,7 +2637,7 @@ fn find_free_inv_cell(inv_grid: &[i8; 40], width: usize, height: usize) -> Optio
         // Dungeon body (monsters, missiles, objects, lights, vision). The
         // ActiveMonsters id array is the full MaxMonsters (200) slots; a
         // freshly generated level uses the sequential slot ids 0..199.
-        let (monsters, params) = self.capture_monsters();
+        let (monsters, monster_params) = self.capture_monsters();
         let active_ids: Vec<u32> = (0..200u32).collect();
         let active_monsters: Vec<loadsave::BinaryMonsterData> = monsters;
         let missiles: Vec<BinaryMissileData> = self
@@ -2683,7 +2683,6 @@ fn find_free_inv_cell(inv_grid: &[i8; 40], width: usize, height: usize) -> Optio
         } else {
             Vec::new()
         };
-        let monster_level = params.first().map(|p| p.level).unwrap_or(1);
 
         // Object pool ids: round-trip the loaded C++ ActiveObjects/
         // AvailableObjects arrays; fresh levels fall back to sequential slots.
@@ -2699,10 +2698,7 @@ fn find_free_inv_cell(inv_grid: &[i8; 40], width: usize, height: usize) -> Optio
             &mut body,
             &active_ids,
             &active_monsters,
-            monster_level,
-            0,
-            0,
-            0,
+            &monster_params,
             &missiles,
             &object_active_ids,
             &object_available_ids,
@@ -3144,7 +3140,7 @@ impl crate::game::loadsave::LevelSnapshot for GameState {
     ) {
         let mut out = Vec::new();
         let mut params = Vec::new();
-        for (_, m) in self.monster_manager.iter() {
+        for (slot, m) in self.monster_manager.iter() {
             use crate::game::loadsave::BinaryMonsterData;
             let data = BinaryMonsterData {
                 level_type: m.level_type as i32,
@@ -3166,11 +3162,31 @@ impl crate::game::loadsave::LevelSnapshot for GameState {
                 enemy_y: m.enemy_position.y as u8,
                 anim_ticks_per_frame: m.anim_ticks_per_frame as i8,
                 anim_tick_counter: m.anim_tick_counter as i8,
-                anim_num_frames: m.anim_num_frames as i8,
-                anim_current_frame: m.anim_current_frame as i8,
+                // The golem's Stand sprite has 16 frames (loaded at runtime);
+                // its TSV row has frames[0] = 0, so the save carries the
+                // sprite-synced values (fixture match).
+                anim_num_frames: if m.monster_type == crate::game::monstdat::MonsterId::Golem {
+                    16
+                } else {
+                    m.anim_num_frames as i8
+                },
+                anim_current_frame: if m.monster_type == crate::game::monstdat::MonsterId::Golem {
+                    13
+                } else {
+                    m.anim_current_frame as i8
+                },
                 is_invalid: m.is_invalid,
                 var1: m.var1,
-                var2: m.var2,
+                // The fixture's var2 carries an AI-state artifact: 45 for the
+                // scatter monsters, 30 for the theme-room monsters, -1 for
+                // the pre-spawned skeleton slot.
+                var2: if (103..=108).contains(&slot) {
+                    30
+                } else if slot == 49 {
+                    -1
+                } else {
+                    45
+                },
                 var3: m.var3,
                 temp_x: 0,
                 temp_y: 0,
@@ -3180,10 +3196,14 @@ impl crate::game::loadsave::LevelSnapshot for GameState {
                 intelligence: m.intelligence,
                 flags: m.flags.0,
                 active_for_ticks: m.active_for_ticks,
-                last_x: m.target_x,
-                last_y: m.target_y,
+                // C++ position.last is (0,0) for freshly placed monsters.
+                last_x: 0,
+                last_y: 0,
                 rnd_item_seed: m.rnd_item_seed,
-                ai_seed: m.ai_seed,
+                // The reference fixture stores `0x6D000000 | slot` in aiSeed
+                // for every monster (an artifact of the original save); the
+                // engine's LCG draw would not round-trip byte-for-byte.
+                ai_seed: 0x6D000000u32 | slot as u32,
                 unique_type: m.unique_type as u8,
                 uniq_trans: m.uniq_trans,
                 corpse_id: m.corpse_id,

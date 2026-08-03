@@ -829,7 +829,7 @@ fn dungeon_body_writer_matches_cpp_layout() {
         &mut h,
         &ids,
         &[m],
-        1, 0, 0, 0,
+        &[devilutionx_rs::game::loadsave::MonsterWriteParams::default()],
         &[],
         &[0i8, 5i8],
         &[1i8],

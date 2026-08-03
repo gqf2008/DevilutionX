@@ -2141,10 +2141,7 @@ pub fn write_dungeon_body(
     helper: &mut SaveHelper,
     active_ids: &[u32],
     active_monsters: &[BinaryMonsterData],
-    monster_level: i8,
-    experience: u16,
-    to_hit: u8,
-    to_hit_special: u8,
+    monster_params: &[MonsterWriteParams],
     missiles: &[BinaryMissileData],
     active_object_ids: &[i8],
     available_object_ids: &[i8],
@@ -2157,8 +2154,11 @@ pub fn write_dungeon_body(
     for id in active_ids {
         helper.write_be_u32(*id);
     }
-    for m in active_monsters {
-        m.to_binary(helper, monster_level, experience, to_hit, to_hit_special);
+    for (i, m) in active_monsters.iter().enumerate() {
+        // C++ SaveMonster writes each monster's own level/exp/toHit
+        // (loadsave.cpp:1593-1607); pass the per-monster params.
+        let p = monster_params.get(i).copied().unwrap_or_default();
+        m.to_binary(helper, p.level, p.experience, p.to_hit, p.to_hit_special);
     }
     // Missile index arrays + bodies (C++ loadsave.cpp:2822-2837): the active
     // array is 0..125, the available tail runs from the saved count to 125,
