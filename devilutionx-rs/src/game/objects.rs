@@ -82,8 +82,8 @@ pub struct Object {
     pub anim_delay: i32,
     /// Animation width (`_oAnimWidth`)
     pub anim_width: i32,
-    /// Selection region for interaction
-    pub selection_region: SelectionRegion,
+    /// Selection region flags for interaction (C++ bitmask)
+    pub selection_region: u8,
     /// Is this a trap? (`_oTrapFlag` — true means an armed trap)
     pub is_trap: bool,
     /// Random seed for this object (`_oRndSeed`)
@@ -145,12 +145,12 @@ impl Object {
             anim_cnt: 0,
             anim_delay: 0,
             anim_width: 0,
-            selection_region: SelectionRegion::None,
+            selection_region: crate::game::objdat::SEL_NONE,
             is_trap: false,
             rnd_seed: 0,
             ovar1: 0,
             ovar2: 0,
-            book_message: 0,
+            book_message: -1, // C++ TEXT_NONE
             is_quest_item: false,
             solid: false,
             breakable: 0,
@@ -381,7 +381,7 @@ impl Object {
 
     /// Check if object can be interacted with
     pub fn can_interact_with(&self) -> bool {
-        self.selection_region != SelectionRegion::None
+        self.selection_region != crate::game::objdat::SEL_NONE
     }
 
     /// Get door state as enum (uses ovar4 matching C++ _oVar4)
@@ -666,7 +666,7 @@ pub fn open_door(door: &mut Object) {
     door.ovar4 = DOOR_OPEN;
     door.pre_flag = 1;
     door.miss_flag = true;
-    door.selection_region = SelectionRegion::Middle;
+    door.selection_region = crate::game::objdat::SEL_MIDDLE;
     // Jump to the fully-open frame (visual state after the door's opened).
     door.anim_frame = door.anim_len;
 }
@@ -680,7 +680,7 @@ pub fn close_door(door: &mut Object) {
     door.ovar4 = DOOR_CLOSED;
     door.pre_flag = 0;
     door.miss_flag = false;
-    door.selection_region = SelectionRegion::Bottom;
+    door.selection_region = crate::game::objdat::SEL_BOTTOM;
     // Reset to the closed-position frame.
     door.anim_frame = 1;
 }
@@ -742,7 +742,7 @@ pub fn operate_chest(chest: &mut Object, _player_pos: Point, _send_loot_msg: boo
         return false;
     }
     // C++: PlaySfxLoc(SfxID::ChestOpen, chest.position);
-    chest.selection_region = SelectionRegion::None;
+    chest.selection_region = crate::game::objdat::SEL_NONE;
     chest.anim_frame += 2;
     // C++: SetRndSeed(chest._oRndSeed); then spawn `oVar1` items via
     // CreateRndItem / CreateRndUseful depending on `oVar2`. Handled by caller.
@@ -793,7 +793,7 @@ pub fn operate_chest_full(chest: &mut Object, _player_pos: Point) -> ChestOpenRe
     let loot_magic = chest.ovar2 != 0;
 
     // C++: PlaySfxLoc(SfxID::ChestOpen, chest.position);
-    chest.selection_region = SelectionRegion::None;
+    chest.selection_region = crate::game::objdat::SEL_NONE;
     chest.anim_frame += 2;
     // C++: SetRndSeed(chest._oRndSeed); loot spawning is the caller's job.
 
@@ -860,7 +860,7 @@ pub fn update_lever_state(lever: &mut Object) {
     if !lever.can_interact_with() {
         return;
     }
-    lever.selection_region = SelectionRegion::None;
+    lever.selection_region = crate::game::objdat::SEL_NONE;
     lever.anim_frame = lever.anim_frame.saturating_add(1);
     // C++ then calls ObjChangeMap(oVar1, oVar2, oVar3, oVar4) — that requires
     // the dungeon tile grid and is invoked by the caller's `map_change`.
@@ -891,7 +891,7 @@ pub fn operate_book(book: &mut Object, _send_network_msg: bool) -> bool {
         book.otype,
         ObjectId::BlindBook | ObjectId::BloodBook | ObjectId::SteelTome
     ) {
-        book.selection_region = SelectionRegion::None;
+        book.selection_region = crate::game::objdat::SEL_NONE;
         book.anim_frame += 1;
         // TODO(quest): activate Q_BLIND / Q_BLOOD / Q_WARLORD quest state,
         //   spawn quest item (e.g. IDI_BLINDOPTICAL, IDI_BLDSTONE), ObjChangeMap.
@@ -903,7 +903,7 @@ pub fn operate_book(book: &mut Object, _send_network_msg: bool) -> bool {
     // `OperateBook` path it does `_oAnimFrame++`. We default to the `++` path
     // here — `operate_book_lever` / `operate_book_stand` handle the other
     // variants.
-    book.selection_region = SelectionRegion::None;
+    book.selection_region = crate::game::objdat::SEL_NONE;
     book.anim_frame += 1;
     // TODO(text/network): InitQTextMsg(book.book_message);
     //   NetSendCmdLoc(MyPlayerId, false, CMD_OPERATEOBJ, book.position);
@@ -1115,7 +1115,7 @@ pub fn operate_shrine(shrine: &mut Object, _player_pos: Point, _send_network_msg
 
     // C++ sets up the shrine animation: PlaySfxLoc, _oAnimFlag=true,
     // _oAnimDelay=1, and selectionRegion=None (objects.cpp:3000-3005).
-    shrine.selection_region = SelectionRegion::None;
+    shrine.selection_region = crate::game::objdat::SEL_NONE;
     shrine.anim_flag = true;
     shrine.anim_delay = 1;
 
@@ -1300,12 +1300,12 @@ pub fn operate_fountain(fountain: &mut Object, _player_pos: Point, _send_network
             true
         }
         ObjectId::MurkyFtn => {
-            fountain.selection_region = SelectionRegion::None;
+            fountain.selection_region = crate::game::objdat::SEL_NONE;
             fountain.ovar1 = 1;
             true
         }
         ObjectId::TearFtn => {
-            fountain.selection_region = SelectionRegion::None;
+            fountain.selection_region = crate::game::objdat::SEL_NONE;
             let random_value = (fountain.rnd_seed >> 16) % 12;
             let from_stat = random_value / 3;
             let mut to_stat = random_value % 3;
@@ -1339,7 +1339,7 @@ pub fn operate_sarcophagus(sarc: &mut Object, _send_network_msg: bool, _send_loo
     }
 
     // PlaySfxLoc(SfxID::Sarcophagus, ...) — sound system not ported.
-    sarc.selection_region = SelectionRegion::None;
+    sarc.selection_region = crate::game::objdat::SEL_NONE;
     sarc.anim_flag = true;
     sarc.anim_delay = 3;
     sarc.ovar2 = 1;
@@ -1356,7 +1356,7 @@ pub fn operate_weapon_rack(rack: &mut Object, _send_network_msg: bool, _send_loo
         return false;
     }
 
-    rack.selection_region = SelectionRegion::None;
+    rack.selection_region = crate::game::objdat::SEL_NONE;
     rack.anim_frame += 1;
     rack.ovar1 = 1;
     true
@@ -1369,7 +1369,7 @@ pub fn operate_armor_stand(stand: &mut Object, current_level: i32, _send_network
         return false;
     }
 
-    stand.selection_region = SelectionRegion::None;
+    stand.selection_region = crate::game::objdat::SEL_NONE;
     stand.anim_frame += 1;
     stand.ovar1 = current_level;
     true
@@ -1382,7 +1382,7 @@ pub fn operate_bookcase(bookcase: &mut Object, _send_network_msg: bool, _send_lo
         return false;
     }
 
-    bookcase.selection_region = SelectionRegion::None;
+    bookcase.selection_region = crate::game::objdat::SEL_NONE;
     bookcase.anim_frame -= 2;
     bookcase.ovar1 = 1;
     true
@@ -1395,7 +1395,7 @@ pub fn operate_decapitated_body(corpse: &mut Object, _send_network_msg: bool, _s
         return false;
     }
 
-    corpse.selection_region = SelectionRegion::None;
+    corpse.selection_region = crate::game::objdat::SEL_NONE;
     corpse.ovar1 = 1;
     true
 }
@@ -1408,7 +1408,7 @@ pub fn operate_mushroom_patch(patch: &mut Object, _player_pos: Point) -> bool {
         return false;
     }
 
-    patch.selection_region = SelectionRegion::None;
+    patch.selection_region = crate::game::objdat::SEL_NONE;
     patch.ovar1 = 1;
     // In C++: Creates IMISC_FUNGALTM item at player position
     true
@@ -1422,7 +1422,7 @@ pub fn operate_slain_hero(corpse: &mut Object, _send_network_msg: bool, _send_lo
         return false;
     }
 
-    corpse.selection_region = SelectionRegion::None;
+    corpse.selection_region = crate::game::objdat::SEL_NONE;
     corpse.ovar1 = 1;
     // In C++: Spawns random equipment based on item type
     true
@@ -1480,7 +1480,7 @@ pub fn sync_nakrul_lever(lever: &mut Object, current_level: i32) -> bool {
     }
     // Mirror the `UpdateLeverState()` side-effects the C++ lever path performs
     // (disable selection + advance animation frame).
-    lever.selection_region = SelectionRegion::None;
+    lever.selection_region = crate::game::objdat::SEL_NONE;
     lever.anim_frame = lever.anim_frame.saturating_add(1);
     // Caller responsibilities (require quest/sound/network subsystems):
     //   PlaySfxLoc(SfxID::CryptDoorOpen, { UberRow, UberCol });
@@ -1539,7 +1539,7 @@ pub fn operate_pedestal(pedestal: &mut Object, player_has_blood_stone: bool) -> 
         3 => {
             // ObjChangeMap(ovar1, ovar2, ovar3, ovar4) — full reveal
             // LoadMapObjects("blood2.dun"); SpawnUnique(UITEM_ARMOFVAL, ...)
-            pedestal.selection_region = SelectionRegion::None;
+            pedestal.selection_region = crate::game::objdat::SEL_NONE;
         }
         _ => {}
     }
@@ -1554,7 +1554,7 @@ pub fn operate_inn_sign_chest(chest: &mut Object, _send_network_msg: bool) -> bo
         return false;
     }
 
-    chest.selection_region = SelectionRegion::None;
+    chest.selection_region = crate::game::objdat::SEL_NONE;
     chest.ovar1 = 1;
     // In C++: Spawns IMISC_NOTE item
     true
@@ -1581,7 +1581,7 @@ pub fn operate_tortured_body(body: &mut Object, _send_loot_msg: bool) -> bool {
         return false;
     }
 
-    body.selection_region = SelectionRegion::None;
+    body.selection_region = crate::game::objdat::SEL_NONE;
     body.ovar1 = 1;
     // May drop gold or items
     true
@@ -1608,7 +1608,7 @@ pub fn operate_barrel(barrel: &mut Object, _send_network_msg: bool) -> bool {
         return false;
     }
 
-    barrel.selection_region = SelectionRegion::None;
+    barrel.selection_region = crate::game::objdat::SEL_NONE;
     barrel.ovar1 = 1;
     barrel.mark_broken();
 
@@ -1625,7 +1625,7 @@ pub fn operate_goat_shrine(shrine: &mut Object) -> bool {
         return false;
     }
 
-    shrine.selection_region = SelectionRegion::None;
+    shrine.selection_region = crate::game::objdat::SEL_NONE;
     shrine.ovar1 = 1;
 
     // Goat shrine drops random scroll
@@ -1640,7 +1640,7 @@ pub fn operate_cauldron(cauldron: &mut Object) -> bool {
         return false;
     }
 
-    cauldron.selection_region = SelectionRegion::None;
+    cauldron.selection_region = crate::game::objdat::SEL_NONE;
     cauldron.ovar1 = 1;
 
     // Cauldron gives random potion effect
@@ -1904,7 +1904,7 @@ pub fn operate_book_stand(stand: &mut Object, _send_msg: bool, _send_loot_msg: b
     if stand.ovar1 != 0 {
         return false;
     }
-    stand.selection_region = SelectionRegion::None;
+    stand.selection_region = crate::game::objdat::SEL_NONE;
     stand.ovar1 = 1;
     // Spawns book item
     true
@@ -1917,7 +1917,7 @@ pub fn operate_laz_stand(stand: &mut Object) -> bool {
     if stand.ovar1 != 0 {
         return false;
     }
-    stand.selection_region = SelectionRegion::None;
+    stand.selection_region = crate::game::objdat::SEL_NONE;
     stand.ovar1 = 1;
     // Quest-related: part of Lazarus quest
     true
@@ -1974,7 +1974,7 @@ pub fn break_crux(
     crux.solid = true;
     crux.miss_flag = true;
     crux.mark_broken();
-    crux.selection_region = SelectionRegion::None;
+    crux.selection_region = crate::game::objdat::SEL_NONE;
 
     // sendmsg branch is informational; the network send itself is handled
     // by the caller in C++. We accept it for API parity.
@@ -2023,7 +2023,7 @@ pub fn break_barrel(
     barrel.solid = false;
     barrel.miss_flag = true;
     barrel.mark_broken();
-    barrel.selection_region = SelectionRegion::None;
+    barrel.selection_region = crate::game::objdat::SEL_NONE;
     barrel.pre_flag = 1;
 
     if barrel.is_explosive() {
@@ -2095,7 +2095,7 @@ pub fn delta_sync_break_obj(object: &mut Object, all_objects: &[&Object]) {
 
     object.miss_flag = true;
     object.mark_broken();
-    object.selection_region = SelectionRegion::None;
+    object.selection_region = crate::game::objdat::SEL_NONE;
     object.pre_flag = 1;
     object.anim_flag = false;
     object.anim_frame = object.anim_len;
@@ -2157,7 +2157,7 @@ pub fn update_state(object: &mut Object, frame: i32) {
     if !object.can_interact_with() {
         return;
     }
-    object.selection_region = SelectionRegion::None;
+    object.selection_region = crate::game::objdat::SEL_NONE;
     object.anim_frame = frame;
     object.anim_flag = false;
 }
@@ -2172,12 +2172,12 @@ pub fn sync_door(door: &mut Object) {
         DOOR_CLOSED => {
             door.pre_flag = 0;
             door.miss_flag = false;
-            door.selection_region = SelectionRegion::Bottom;
+            door.selection_region = crate::game::objdat::SEL_BOTTOM;
         }
         DOOR_OPEN => {
             door.pre_flag = 1;
             door.miss_flag = true;
-            door.selection_region = SelectionRegion::Middle;
+            door.selection_region = crate::game::objdat::SEL_MIDDLE;
         }
         DOOR_BLOCKED => {
             // Blocked doors keep their current selection region.
@@ -2254,7 +2254,7 @@ pub fn update_pedestal_state(
     pedestal.ovar6 += added_stones;
     sync_pedestal(pedestal, set_piece, map_change_resync);
     if pedestal.ovar6 >= 3 {
-        pedestal.selection_region = SelectionRegion::None;
+        pedestal.selection_region = crate::game::objdat::SEL_NONE;
     }
 }
 
@@ -2704,7 +2704,7 @@ pub fn add_door(door: &mut Object, current_tile: i32, adjacent_tile: i32) {
     door.ovar4 = DOOR_CLOSED;
     door.pre_flag = 0;
     door.miss_flag = false;
-    door.selection_region = SelectionRegion::Bottom;
+    door.selection_region = crate::game::objdat::SEL_BOTTOM;
 }
 
 /// Add a sarcophagus: randomise the loot/skeleton index.
@@ -2832,7 +2832,7 @@ pub fn add_large_fountain(fountain: &mut Object) {
 pub fn add_armor_stand(stand: &mut Object, armor_flag: bool) {
     if !armor_flag {
         stand.anim_flag = true;
-        stand.selection_region = SelectionRegion::None;
+        stand.selection_region = crate::game::objdat::SEL_NONE;
     }
     stand.rnd_seed = next_seed();
 }
@@ -2902,7 +2902,7 @@ fn story_text_for_level(_var1: i32, _currlevel: i32) -> i32 {
 pub fn add_weapon_rack(rack: &mut Object, weapon_flag: bool) {
     if !weapon_flag {
         rack.anim_flag = true;
-        rack.selection_region = SelectionRegion::None;
+        rack.selection_region = crate::game::objdat::SEL_NONE;
     }
     rack.rnd_seed = next_seed();
 }
@@ -3244,12 +3244,12 @@ mod tests {
         door.otype = ObjectId::L1LDoor;
         door.set_door_state(DoorState::Closed);
         door.anim_len = 5;
-        door.selection_region = SelectionRegion::Bottom;
+        door.selection_region = crate::game::objdat::SEL_BOTTOM;
 
         open_door(&mut door);
         assert_eq!(door.get_door_state(), DoorState::Open);
-        // C++ SetDoorStateOpen sets selectionRegion = SelectionRegion::Middle.
-        assert_eq!(door.selection_region, SelectionRegion::Middle);
+        // C++ SetDoorStateOpen sets selectionRegion = crate::game::objdat::SEL_MIDDLE.
+        assert_eq!(door.selection_region, crate::game::objdat::SEL_MIDDLE);
         assert_eq!(door.anim_frame, 5); // Jump to fully open
         assert_eq!(door.ovar4, DOOR_OPEN);
         assert_eq!(door.pre_flag, 1);
@@ -3260,7 +3260,7 @@ mod tests {
         assert_eq!(door.anim_frame, 1); // Back to closed
         // C++ SetDoorStateClosed sets Bottom|Middle; our enum can't express the
         // union, so we collapse to the primary region (Bottom).
-        assert_eq!(door.selection_region, SelectionRegion::Bottom);
+        assert_eq!(door.selection_region, crate::game::objdat::SEL_BOTTOM);
         assert_eq!(door.ovar4, DOOR_CLOSED);
         assert_eq!(door.pre_flag, 0);
         assert!(!door.miss_flag);
@@ -3272,7 +3272,7 @@ mod tests {
         door.otype = ObjectId::L2RDoor;
         door.set_door_state(DoorState::Closed);
         door.anim_len = 5;
-        door.selection_region = SelectionRegion::Bottom;
+        door.selection_region = crate::game::objdat::SEL_BOTTOM;
 
         let result = operate_door(&mut door, false);
         assert!(result);
@@ -3283,29 +3283,29 @@ mod tests {
     fn test_operate_chest() {
         let mut chest = Object::new(ObjectId::L1Light, Point::new(0, 0));
         chest.otype = ObjectId::Chest2;
-        chest.selection_region = SelectionRegion::Bottom;
+        chest.selection_region = crate::game::objdat::SEL_BOTTOM;
 
         let result = operate_chest(&mut chest, Point::new(1, 1), false);
         assert!(result);
-        assert_eq!(chest.selection_region, SelectionRegion::None);
+        assert_eq!(chest.selection_region, crate::game::objdat::SEL_NONE);
     }
 
     #[test]
     fn test_operate_lever() {
         let mut lever = Object::new(ObjectId::L1Light, Point::new(0, 0));
         lever.otype = ObjectId::SwitchSkl;
-        lever.selection_region = SelectionRegion::Middle;
+        lever.selection_region = crate::game::objdat::SEL_MIDDLE;
 
         let result = operate_lever(&mut lever, false);
         assert!(result);
-        assert_eq!(lever.selection_region, SelectionRegion::None);
+        assert_eq!(lever.selection_region, crate::game::objdat::SEL_NONE);
     }
 
     #[test]
     fn test_operate_book() {
         let mut book = Object::new(ObjectId::L1Light, Point::new(0, 0));
         book.otype = ObjectId::StoryBook;
-        book.selection_region = SelectionRegion::Bottom;
+        book.selection_region = crate::game::objdat::SEL_BOTTOM;
         book.book_message = 100;
 
         let result = operate_book(&mut book, false);
@@ -3316,13 +3316,13 @@ mod tests {
     fn test_operate_shrine() {
         let mut shrine = Object::new(ObjectId::L1Light, Point::new(0, 0));
         shrine.otype = ObjectId::ShrineL;
-        shrine.selection_region = SelectionRegion::Bottom;
+        shrine.selection_region = crate::game::objdat::SEL_BOTTOM;
         shrine.ovar1 = 20;
 
         let mut player = Player::new();
         let result = operate_shrine(&mut shrine, Point::new(0, 0), false, &mut player);
         assert!(result);
-        assert_eq!(shrine.selection_region, SelectionRegion::None);
+        assert_eq!(shrine.selection_region, crate::game::objdat::SEL_NONE);
         assert_eq!(shrine.ovar2, 1);
     }
 
@@ -3330,7 +3330,7 @@ mod tests {
     fn test_operate_fountain_blood() {
         let mut fountain = Object::new(ObjectId::L1Light, Point::new(0, 0));
         fountain.otype = ObjectId::BloodFtn;
-        fountain.selection_region = SelectionRegion::Bottom;
+        fountain.selection_region = crate::game::objdat::SEL_BOTTOM;
 
         let result = operate_fountain(&mut fountain, Point::new(0, 0), false);
         assert!(result);
@@ -3341,23 +3341,23 @@ mod tests {
     fn test_operate_fountain_tear() {
         let mut fountain = Object::new(ObjectId::L1Light, Point::new(0, 0));
         fountain.otype = ObjectId::TearFtn;
-        fountain.selection_region = SelectionRegion::Bottom;
+        fountain.selection_region = crate::game::objdat::SEL_BOTTOM;
         fountain.rnd_seed = 0x12345678;
 
         let result = operate_fountain(&mut fountain, Point::new(0, 0), false);
         assert!(result);
-        assert_eq!(fountain.selection_region, SelectionRegion::None);
+        assert_eq!(fountain.selection_region, crate::game::objdat::SEL_NONE);
     }
 
     #[test]
     fn test_operate_sarcophagus() {
         let mut sarc = Object::new(ObjectId::L1Light, Point::new(0, 0));
         sarc.otype = ObjectId::Sarc;
-        sarc.selection_region = SelectionRegion::Bottom;
+        sarc.selection_region = crate::game::objdat::SEL_BOTTOM;
 
         let result = operate_sarcophagus(&mut sarc, false, false);
         assert!(result);
-        assert_eq!(sarc.selection_region, SelectionRegion::None);
+        assert_eq!(sarc.selection_region, crate::game::objdat::SEL_NONE);
         assert_eq!(sarc.ovar2, 1);
     }
 
@@ -3365,12 +3365,12 @@ mod tests {
     fn test_operate_weapon_rack() {
         let mut rack = Object::new(ObjectId::L1Light, Point::new(0, 0));
         rack.otype = ObjectId::WeaponRack;
-        rack.selection_region = SelectionRegion::Bottom;
+        rack.selection_region = crate::game::objdat::SEL_BOTTOM;
         rack.anim_frame = 0;
 
         let result = operate_weapon_rack(&mut rack, false, false);
         assert!(result);
-        assert_eq!(rack.selection_region, SelectionRegion::None);
+        assert_eq!(rack.selection_region, crate::game::objdat::SEL_NONE);
         assert_eq!(rack.anim_frame, 1);
         assert_eq!(rack.ovar1, 1);
     }
@@ -3379,12 +3379,12 @@ mod tests {
     fn test_operate_armor_stand() {
         let mut stand = Object::new(ObjectId::L1Light, Point::new(0, 0));
         stand.otype = ObjectId::ArmorStand;
-        stand.selection_region = SelectionRegion::Bottom;
+        stand.selection_region = crate::game::objdat::SEL_BOTTOM;
         stand.anim_frame = 0;
 
         let result = operate_armor_stand(&mut stand, 5, false, false);
         assert!(result);
-        assert_eq!(stand.selection_region, SelectionRegion::None);
+        assert_eq!(stand.selection_region, crate::game::objdat::SEL_NONE);
         assert_eq!(stand.anim_frame, 1);
         assert_eq!(stand.ovar1, 5);
     }
@@ -3393,12 +3393,12 @@ mod tests {
     fn test_operate_bookcase() {
         let mut bookcase = Object::new(ObjectId::L1Light, Point::new(0, 0));
         bookcase.otype = ObjectId::BookcaseL;
-        bookcase.selection_region = SelectionRegion::Bottom;
+        bookcase.selection_region = crate::game::objdat::SEL_BOTTOM;
         bookcase.anim_frame = 10;
 
         let result = operate_bookcase(&mut bookcase, false, false);
         assert!(result);
-        assert_eq!(bookcase.selection_region, SelectionRegion::None);
+        assert_eq!(bookcase.selection_region, crate::game::objdat::SEL_NONE);
         assert_eq!(bookcase.anim_frame, 8);
         assert_eq!(bookcase.ovar1, 1);
     }
@@ -3407,11 +3407,11 @@ mod tests {
     fn test_operate_decapitated_body() {
         let mut corpse = Object::new(ObjectId::L1Light, Point::new(0, 0));
         corpse.otype = ObjectId::Decap;
-        corpse.selection_region = SelectionRegion::Bottom;
+        corpse.selection_region = crate::game::objdat::SEL_BOTTOM;
 
         let result = operate_decapitated_body(&mut corpse, false, false);
         assert!(result);
-        assert_eq!(corpse.selection_region, SelectionRegion::None);
+        assert_eq!(corpse.selection_region, crate::game::objdat::SEL_NONE);
         assert_eq!(corpse.ovar1, 1);
     }
 
@@ -3419,7 +3419,7 @@ mod tests {
     fn test_operate_object_door() {
         let mut door = Object::new(ObjectId::L1Light, Point::new(0, 0));
         door.otype = ObjectId::L3LDoor;
-        door.selection_region = SelectionRegion::Bottom;
+        door.selection_region = crate::game::objdat::SEL_BOTTOM;
         door.anim_len = 5;
 
         let result = operate_object(&mut door, Point::new(0, 0), false);
@@ -3431,23 +3431,23 @@ mod tests {
     fn test_operate_object_shrine() {
         let mut shrine = Object::new(ObjectId::L1Light, Point::new(0, 0));
         shrine.otype = ObjectId::GoatShrine;
-        shrine.selection_region = SelectionRegion::Bottom;
+        shrine.selection_region = crate::game::objdat::SEL_BOTTOM;
         shrine.ovar1 = 5;
 
         let result = operate_object(&mut shrine, Point::new(0, 0), false);
         assert!(result);
-        assert_eq!(shrine.selection_region, SelectionRegion::None);
+        assert_eq!(shrine.selection_region, crate::game::objdat::SEL_NONE);
     }
 
     #[test]
     fn test_operate_object_fountain() {
         let mut fountain = Object::new(ObjectId::L1Light, Point::new(0, 0));
         fountain.otype = ObjectId::MurkyFtn;
-        fountain.selection_region = SelectionRegion::Bottom;
+        fountain.selection_region = crate::game::objdat::SEL_BOTTOM;
 
         let result = operate_object(&mut fountain, Point::new(0, 0), false);
         assert!(result);
-        assert_eq!(fountain.selection_region, SelectionRegion::None);
+        assert_eq!(fountain.selection_region, crate::game::objdat::SEL_NONE);
     }
 
     // ========================================================================
@@ -3659,7 +3659,7 @@ mod tests {
     fn test_door_opening_sequence() {
         let mut door = Object::new(ObjectId::L2RDoor, Point::new(5, 5));
         door.set_animation(2, 6, 1); // delay=2, len=6
-        door.selection_region = SelectionRegion::Bottom;
+        door.selection_region = crate::game::objdat::SEL_BOTTOM;
 
         // Door starts closed
         assert_eq!(door.get_door_state(), DoorState::Closed);
@@ -3902,7 +3902,7 @@ mod tests {
     fn test_break_crux_marks_broken_and_disables_selection() {
         let mut crux = Object::new(ObjectId::Crux1, Point::new(5, 5));
         crux.breakable = 1;
-        crux.selection_region = SelectionRegion::Bottom;
+        crux.selection_region = crate::game::objdat::SEL_BOTTOM;
         crux.ovar8 = 0;
         // Pass an empty all_objects slice — break_crux still mutates the crux
         // and (since no intact sibling exists) still fires map_change. This
@@ -3913,7 +3913,7 @@ mod tests {
             changed = true;
         });
         assert!(crux.is_broken());
-        assert_eq!(crux.selection_region, SelectionRegion::None);
+        assert_eq!(crux.selection_region, crate::game::objdat::SEL_NONE);
         assert!(crux.anim_flag);
         assert_eq!(crux.anim_delay, 1);
         assert!(crux.solid);
@@ -3983,7 +3983,7 @@ mod tests {
     fn test_break_barrel_non_explosive_no_chain() {
         let mut barrel = Object::new(ObjectId::Barrel, Point::new(10, 10));
         barrel.breakable = 1;
-        barrel.selection_region = SelectionRegion::Bottom;
+        barrel.selection_region = crate::game::objdat::SEL_BOTTOM;
         let refs: Vec<&Object> = vec![];
         let mut monster_hits = 0;
         let mut player_hits = 0;
@@ -4000,7 +4000,7 @@ mod tests {
             },
         );
         assert!(barrel.is_broken());
-        assert_eq!(barrel.selection_region, SelectionRegion::None);
+        assert_eq!(barrel.selection_region, crate::game::objdat::SEL_NONE);
         assert_eq!(barrel.pre_flag, 1);
         assert!(!barrel.solid);
         // Non-explosive barrels don't deal area damage.
@@ -4013,7 +4013,7 @@ mod tests {
     fn test_break_barrel_explosive_damages_and_chains() {
         let mut barrel = Object::new(ObjectId::BarrelEx, Point::new(20, 20));
         barrel.breakable = 1;
-        barrel.selection_region = SelectionRegion::Bottom;
+        barrel.selection_region = crate::game::objdat::SEL_BOTTOM;
         // An adjacent explosive barrel to chain into. We pass ONLY the
         // adjacent barrel in the all_objects slice — break_barrel consults it
         // solely to find chain-detonation targets at neighbouring positions,
@@ -4049,7 +4049,7 @@ mod tests {
         // Barrel dispatch returns empty chain for plain barrel.
         let mut barrel = Object::new(ObjectId::Barrel, Point::new(0, 0));
         barrel.breakable = 1;
-        barrel.selection_region = SelectionRegion::Bottom;
+        barrel.selection_region = crate::game::objdat::SEL_BOTTOM;
         let refs: Vec<&Object> = vec![];
         let chain = break_object(
             &mut barrel,
@@ -4065,7 +4065,7 @@ mod tests {
         // Crux dispatch returns empty Vec (no chain) and marks broken.
         let mut crux = Object::new(ObjectId::Crux3, Point::new(1, 1));
         crux.breakable = 1;
-        crux.selection_region = SelectionRegion::Bottom;
+        crux.selection_region = crate::game::objdat::SEL_BOTTOM;
         crux.ovar8 = 1;
         let chain2 = break_object(
             &mut crux,
@@ -4084,11 +4084,11 @@ mod tests {
         let mut barrel = Object::new(ObjectId::Barrel, Point::new(0, 0));
         barrel.breakable = 1;
         barrel.anim_len = 5;
-        barrel.selection_region = SelectionRegion::Bottom;
+        barrel.selection_region = crate::game::objdat::SEL_BOTTOM;
         let refs: Vec<&Object> = vec![];
         delta_sync_break_obj(&mut barrel, &refs);
         assert!(barrel.is_broken());
-        assert_eq!(barrel.selection_region, SelectionRegion::None);
+        assert_eq!(barrel.selection_region, crate::game::objdat::SEL_NONE);
         assert_eq!(barrel.pre_flag, 1);
         assert!(!barrel.anim_flag);
         assert_eq!(barrel.anim_frame, 5);
@@ -4099,7 +4099,7 @@ mod tests {
     fn test_sync_break_obj_forced_break() {
         let mut barrel = Object::new(ObjectId::Barrel, Point::new(0, 0));
         barrel.breakable = 1;
-        barrel.selection_region = SelectionRegion::Bottom;
+        barrel.selection_region = crate::game::objdat::SEL_BOTTOM;
         let refs: Vec<&Object> = vec![];
         let chain = sync_break_obj(
             &mut barrel,
@@ -4116,7 +4116,7 @@ mod tests {
     fn test_break_object_missile_breaks_crux() {
         let mut crux = Object::new(ObjectId::Crux1, Point::new(0, 0));
         crux.breakable = 1;
-        crux.selection_region = SelectionRegion::Bottom;
+        crux.selection_region = crate::game::objdat::SEL_BOTTOM;
         crux.ovar8 = 0;
         let refs: Vec<&Object> = vec![];
         break_object_missile(&mut crux, &refs, &mut |_| {}, &mut |_| {}, &mut |_| {});
@@ -4126,7 +4126,7 @@ mod tests {
     #[test]
     fn test_update_state_sets_frame_and_stops_anim() {
         let mut obj = Object::new(ObjectId::Chest1, Point::new(0, 0));
-        obj.selection_region = SelectionRegion::Bottom;
+        obj.selection_region = crate::game::objdat::SEL_BOTTOM;
         obj.anim_flag = true;
         update_state(&mut obj, 7);
         assert_eq!(obj.anim_frame, 7);
@@ -4143,7 +4143,7 @@ mod tests {
         // OpenDoor/CloseDoor in the operate path.
         assert!(door.miss_flag);
         assert_eq!(door.pre_flag, 1);
-        assert_eq!(door.selection_region, SelectionRegion::Middle);
+        assert_eq!(door.selection_region, crate::game::objdat::SEL_MIDDLE);
     }
 
     #[test]
@@ -4151,7 +4151,7 @@ mod tests {
         // sync_lever fires map_change only for levers that have already been
         // operated (selectionRegion == None => can_interact_with() == false).
         let lever = Object::new(ObjectId::Lever, Point::new(0, 0));
-        assert_eq!(lever.selection_region, SelectionRegion::None);
+        assert_eq!(lever.selection_region, crate::game::objdat::SEL_NONE);
         let mut fired = false;
         sync_lever(&lever, &mut |_| {
             fired = true;
@@ -4272,7 +4272,7 @@ mod tests {
         assert_eq!(door.ovar4, DOOR_CLOSED);
         assert_eq!(door.pre_flag, 0);
         assert!(!door.miss_flag);
-        assert_eq!(door.selection_region, SelectionRegion::Bottom);
+        assert_eq!(door.selection_region, crate::game::objdat::SEL_BOTTOM);
     }
 
     #[test]
@@ -4307,9 +4307,9 @@ mod tests {
     #[test]
     fn test_operate_sarcophagus_sets_open_animation() {
         let mut sarc = Object::new(ObjectId::Sarc, Point::new(0, 0));
-        sarc.selection_region = SelectionRegion::Bottom;
+        sarc.selection_region = crate::game::objdat::SEL_BOTTOM;
         assert!(operate_sarcophagus(&mut sarc, false, false));
-        assert_eq!(sarc.selection_region, SelectionRegion::None);
+        assert_eq!(sarc.selection_region, crate::game::objdat::SEL_NONE);
         assert!(sarc.anim_flag);
         assert_eq!(sarc.anim_delay, 3);
         assert_eq!(sarc.ovar2, 1);
@@ -4318,21 +4318,21 @@ mod tests {
     #[test]
     fn test_operate_sarcophagus_refuses_when_not_interactable() {
         let mut sarc = Object::new(ObjectId::Sarc, Point::new(0, 0));
-        sarc.selection_region = SelectionRegion::None;
+        sarc.selection_region = crate::game::objdat::SEL_NONE;
         assert!(!operate_sarcophagus(&mut sarc, false, false));
     }
 
     #[test]
     fn test_operate_pedestal_advances_and_disables_at_three() {
         let mut pedestal = Object::new(ObjectId::Pedestal, Point::new(0, 0));
-        pedestal.selection_region = SelectionRegion::Bottom;
+        pedestal.selection_region = crate::game::objdat::SEL_BOTTOM;
         pedestal.anim_frame = 1;
 
         // First stone.
         assert!(operate_pedestal(&mut pedestal, true));
         assert_eq!(pedestal.ovar6, 1);
         assert_eq!(pedestal.anim_frame, 2);
-        assert_eq!(pedestal.selection_region, SelectionRegion::Bottom);
+        assert_eq!(pedestal.selection_region, crate::game::objdat::SEL_BOTTOM);
 
         // Second stone.
         assert!(operate_pedestal(&mut pedestal, true));
@@ -4341,7 +4341,7 @@ mod tests {
         // Third stone: reveal complete, selection disabled.
         assert!(operate_pedestal(&mut pedestal, true));
         assert_eq!(pedestal.ovar6, 3);
-        assert_eq!(pedestal.selection_region, SelectionRegion::None);
+        assert_eq!(pedestal.selection_region, crate::game::objdat::SEL_NONE);
 
         // Fourth stone refused.
         assert!(!operate_pedestal(&mut pedestal, true));
@@ -4350,62 +4350,62 @@ mod tests {
     #[test]
     fn test_operate_book_advances_frame_and_disables_selection() {
         let mut book = Object::new(ObjectId::StoryBook, Point::new(0, 0));
-        book.selection_region = SelectionRegion::Bottom;
+        book.selection_region = crate::game::objdat::SEL_BOTTOM;
         book.anim_frame = 1;
         assert!(operate_book(&mut book, false));
-        assert_eq!(book.selection_region, SelectionRegion::None);
+        assert_eq!(book.selection_region, crate::game::objdat::SEL_NONE);
         assert_eq!(book.anim_frame, 2);
     }
 
     #[test]
     fn test_operate_book_quest_variants() {
         let mut book = Object::new(ObjectId::BlindBook, Point::new(0, 0));
-        book.selection_region = SelectionRegion::Bottom;
+        book.selection_region = crate::game::objdat::SEL_BOTTOM;
         book.anim_frame = 1;
         assert!(operate_book(&mut book, false));
-        assert_eq!(book.selection_region, SelectionRegion::None);
+        assert_eq!(book.selection_region, crate::game::objdat::SEL_NONE);
         assert_eq!(book.anim_frame, 2);
 
         let mut steel = Object::new(ObjectId::SteelTome, Point::new(0, 0));
-        steel.selection_region = SelectionRegion::Bottom;
+        steel.selection_region = crate::game::objdat::SEL_BOTTOM;
         assert!(operate_book(&mut steel, false));
-        assert_eq!(steel.selection_region, SelectionRegion::None);
+        assert_eq!(steel.selection_region, crate::game::objdat::SEL_NONE);
     }
 
     #[test]
     fn test_operate_book_refuses_when_not_interactable() {
         let mut book = Object::new(ObjectId::StoryBook, Point::new(0, 0));
-        book.selection_region = SelectionRegion::None;
+        book.selection_region = crate::game::objdat::SEL_NONE;
         assert!(!operate_book(&mut book, false));
     }
 
     #[test]
     fn test_update_lever_state_disables_selection_and_advances_frame() {
         let mut lever = Object::new(ObjectId::Lever, Point::new(0, 0));
-        lever.selection_region = SelectionRegion::Bottom;
+        lever.selection_region = crate::game::objdat::SEL_BOTTOM;
         lever.anim_frame = 1;
         update_lever_state(&mut lever);
-        assert_eq!(lever.selection_region, SelectionRegion::None);
+        assert_eq!(lever.selection_region, crate::game::objdat::SEL_NONE);
         assert_eq!(lever.anim_frame, 2);
     }
 
     #[test]
     fn test_operate_lever_invokes_update_lever_state() {
         let mut lever = Object::new(ObjectId::Lever, Point::new(0, 0));
-        lever.selection_region = SelectionRegion::Bottom;
+        lever.selection_region = crate::game::objdat::SEL_BOTTOM;
         lever.anim_frame = 1;
         assert!(operate_lever(&mut lever, false));
-        assert_eq!(lever.selection_region, SelectionRegion::None);
+        assert_eq!(lever.selection_region, crate::game::objdat::SEL_NONE);
         assert_eq!(lever.anim_frame, 2);
     }
 
     #[test]
     fn test_operate_chest_advances_two_frames() {
         let mut chest = Object::new(ObjectId::Chest1, Point::new(0, 0));
-        chest.selection_region = SelectionRegion::Bottom;
+        chest.selection_region = crate::game::objdat::SEL_BOTTOM;
         chest.anim_frame = 1;
         assert!(operate_chest(&mut chest, Point::new(0, 0), false));
-        assert_eq!(chest.selection_region, SelectionRegion::None);
+        assert_eq!(chest.selection_region, crate::game::objdat::SEL_NONE);
         // C++ advances by 2 frames.
         assert_eq!(chest.anim_frame, 3);
     }
@@ -4472,7 +4472,7 @@ mod tests {
     fn test_delta_sync_op_object_opens_door() {
         let mut door = Object::new(ObjectId::L1LDoor, Point::new(0, 0));
         door.anim_len = 5;
-        door.selection_region = SelectionRegion::Bottom;
+        door.selection_region = crate::game::objdat::SEL_BOTTOM;
         delta_sync_op_object(&mut door);
         assert_eq!(door.ovar4, DOOR_OPEN);
         assert_eq!(door.anim_frame, door.anim_len);
@@ -4483,7 +4483,7 @@ mod tests {
         let mut chest = Object::new(ObjectId::Chest1, Point::new(0, 0));
         chest.anim_frame = 2;
         chest.anim_flag = true;
-        chest.selection_region = SelectionRegion::Bottom;
+        chest.selection_region = crate::game::objdat::SEL_BOTTOM;
         delta_sync_op_object(&mut chest);
         // C++ delta-loads chest to anim_frame + 2.
         assert_eq!(chest.anim_frame, 4);
@@ -4503,7 +4503,7 @@ mod tests {
         let mut door = Object::new(ObjectId::L1LDoor, Point::new(0, 0));
         door.set_door_state(DoorState::Closed);
         door.anim_len = 5;
-        door.selection_region = SelectionRegion::Bottom;
+        door.selection_region = crate::game::objdat::SEL_BOTTOM;
         let applied = sync_op_object(
             &mut door,
             SyncCmd::OpenDoor,
@@ -4548,7 +4548,7 @@ mod tests {
         // touch anim_frame.
         assert!(door.miss_flag);
         assert_eq!(door.pre_flag, 1);
-        assert_eq!(door.selection_region, SelectionRegion::Middle);
+        assert_eq!(door.selection_region, crate::game::objdat::SEL_MIDDLE);
     }
 
     #[test]
@@ -4571,7 +4571,7 @@ mod tests {
     fn test_update_pedestal_state_advances_by_added_stones() {
         let mut pedestal = Object::new(ObjectId::Pedestal, Point::new(0, 0));
         pedestal.anim_frame = 1;
-        pedestal.selection_region = SelectionRegion::Bottom;
+        pedestal.selection_region = crate::game::objdat::SEL_BOTTOM;
         let mut rect_calls = 0;
         update_pedestal_state(
             &mut pedestal,
@@ -4591,7 +4591,7 @@ mod tests {
             &mut |_, _, _, _| {},
         );
         assert_eq!(pedestal.ovar6, 3);
-        assert_eq!(pedestal.selection_region, SelectionRegion::None);
+        assert_eq!(pedestal.selection_region, crate::game::objdat::SEL_NONE);
     }
 
     #[test]
@@ -4634,26 +4634,26 @@ mod tests {
     #[test]
     fn test_sync_nakrul_lever_wrong_level() {
         let mut lever = Object::new(ObjectId::L5Lever, Point::new(10, 10));
-        lever.selection_region = SelectionRegion::Bottom;
+        lever.selection_region = crate::game::objdat::SEL_BOTTOM;
         // Not level 24 → no-op.
         assert!(!sync_nakrul_lever(&mut lever, 16));
-        assert_ne!(lever.selection_region, SelectionRegion::None);
+        assert_ne!(lever.selection_region, crate::game::objdat::SEL_NONE);
     }
 
     #[test]
     fn test_sync_nakrul_lever_level24() {
         let mut lever = Object::new(ObjectId::L5Lever, Point::new(10, 10));
-        lever.selection_region = SelectionRegion::Bottom;
+        lever.selection_region = crate::game::objdat::SEL_BOTTOM;
         lever.anim_frame = 1;
         assert!(sync_nakrul_lever(&mut lever, 24));
-        assert_eq!(lever.selection_region, SelectionRegion::None);
+        assert_eq!(lever.selection_region, crate::game::objdat::SEL_NONE);
         assert_eq!(lever.anim_frame, 2);
     }
 
     #[test]
     fn test_sync_nakrul_lever_not_interactive() {
         let mut lever = Object::new(ObjectId::L5Lever, Point::new(10, 10));
-        lever.selection_region = SelectionRegion::None; // not selectable
+        lever.selection_region = crate::game::objdat::SEL_NONE; // not selectable
         assert!(!sync_nakrul_lever(&mut lever, 24));
     }
 
@@ -4669,7 +4669,7 @@ mod tests {
     #[test]
     fn test_operate_chest_full_un_trapped() {
         let mut chest = Object::new(ObjectId::Chest1, Point::new(5, 5));
-        chest.selection_region = SelectionRegion::Bottom;
+        chest.selection_region = crate::game::objdat::SEL_BOTTOM;
         chest.ovar1 = 2; // two loot items
         chest.ovar2 = 1; // magic loot
         chest.is_trap = false;
@@ -4678,13 +4678,13 @@ mod tests {
         assert!(res.trap_missile_id.is_none());
         assert_eq!(res.loot_count, 2);
         assert!(res.loot_magic);
-        assert_eq!(chest.selection_region, SelectionRegion::None);
+        assert_eq!(chest.selection_region, crate::game::objdat::SEL_NONE);
     }
 
     #[test]
     fn test_operate_chest_full_trapped_arrow() {
         let mut chest = Object::new(ObjectId::Chest1, Point::new(5, 5));
-        chest.selection_region = SelectionRegion::Bottom;
+        chest.selection_region = crate::game::objdat::SEL_BOTTOM;
         chest.is_trap = true;
         chest.ovar4 = 0; // Arrow trap
         chest.ovar1 = 1;
@@ -4702,7 +4702,7 @@ mod tests {
         let trap_ids = [(1, MISSILE_FIRE_ARROW), (2, MISSILE_NOVA), (3, MISSILE_RING_OF_FIRE), (4, MISSILE_STEAL_POTIONS), (5, MISSILE_STEAL_MANA)];
         for (var4, expected) in trap_ids {
             let mut chest = Object::new(ObjectId::Chest1, Point::new(5, 5));
-            chest.selection_region = SelectionRegion::Bottom;
+            chest.selection_region = crate::game::objdat::SEL_BOTTOM;
             chest.is_trap = true;
             chest.ovar4 = var4;
             let res = operate_chest_full(&mut chest, Point::new(6, 6));
@@ -4713,7 +4713,7 @@ mod tests {
     #[test]
     fn test_operate_chest_full_not_interactive() {
         let mut chest = Object::new(ObjectId::Chest1, Point::new(5, 5));
-        chest.selection_region = SelectionRegion::None; // not selectable
+        chest.selection_region = crate::game::objdat::SEL_NONE; // not selectable
         let res = operate_chest_full(&mut chest, Point::new(6, 6));
         assert!(!res.opened);
         assert!(res.trap_missile_id.is_none());

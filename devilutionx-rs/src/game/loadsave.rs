@@ -1361,10 +1361,9 @@ impl BinaryObjectData {
         helper.write_le_u32(self.anim_len);
         helper.write_le_u32(self.anim_frame);
         helper.write_le_i32(self.anim_width as i32);
-        // _oAnimWidth2 — vanilla-compat derived value; C++ uses
-        // CalculateSpriteTileCenterX(animWidth). We mirror that with the same
-        // formula (animWidth / 2 rounded to the tile-centre offset).
-        helper.write_le_i32((self.anim_width as i32) / 2);
+        // _oAnimWidth2 = CalculateSpriteTileCenterX(animWidth) =
+        // (animWidth - TILE_WIDTH 64) / 2 (levels/dun_tile.hpp:137).
+        helper.write_le_i32((self.anim_width as i32 - 64) / 2);
         helper.write_bool32(self.del_flag);
         helper.write_i8(self.break_flag);
         helper.skip(3); // Alignment

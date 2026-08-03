@@ -1321,6 +1321,7 @@ pub fn place_dungeon_objects(
             }
         };
         let mut obj = crate::game::objects::Object::new(ObjectId::Sarc, Point::new(xp, yp));
+        crate::game::objects::setup_object(&mut obj, Point::new(xp, yp), ObjectId::Sarc);
         // C++ AddObject -> AddSarcophagus (objects.cpp:1197-1206): the body
         // RNG draws are part of the placement stream.
         obj.ovar1 = crate::engine::random::gameplay_generate_rnd(10);
@@ -1342,10 +1343,19 @@ pub fn place_dungeon_objects(
         let layout = game_state.dungeon_layout.as_ref().expect("dungeon layout");
         for (x, y, otype) in crate::game::dungeon_level::scan_level_doors(level, layout) {
             if otype == ObjectId::L1Light {
-                crate::engine::random::gameplay_generate_rnd(1);
-                crate::engine::random::gameplay_generate_rnd(25);
+                // C++ SetupObject animated draws, stored on the object.
+                let mut obj = crate::game::objects::Object::new(otype, Point::new(x, y));
+                crate::game::objects::setup_object(&mut obj, Point::new(x, y), otype);
+                obj.anim_cnt = crate::engine::random::gameplay_generate_rnd(1);
+                obj.anim_frame = crate::engine::random::gameplay_generate_rnd(25) + 1;
+                // C++ AddObjectLight (objects.cpp:1244-1277): var1 = -1.
+                obj.ovar1 = -1;
+                game_state.objects.push(obj);
+                continue;
             }
-            game_state.objects.push(crate::game::objects::Object::new(otype, Point::new(x, y)));
+            let mut obj = crate::game::objects::Object::new(otype, Point::new(x, y));
+            crate::game::objects::setup_object(&mut obj, Point::new(x, y), otype);
+            game_state.objects.push(obj);
         }
     }
 
@@ -1367,6 +1377,11 @@ pub fn place_dungeon_objects(
         let mut obj = crate::game::objects::Object::new(
             if explosive { ObjectId::BarrelEx } else { ObjectId::Barrel },
             Point::new(xp, yp),
+        );
+        crate::game::objects::setup_object(
+            &mut obj,
+            Point::new(xp, yp),
+            if explosive { ObjectId::BarrelEx } else { ObjectId::Barrel },
         );
         add_barrel_body(&mut obj);
         if obj.ovar2 >= 8 {
@@ -1398,6 +1413,11 @@ pub fn place_dungeon_objects(
                 let mut obj = crate::game::objects::Object::new(
                     if explosive { ObjectId::BarrelEx } else { ObjectId::Barrel },
                     Point::new(xp, yp),
+                );
+                crate::game::objects::setup_object(
+                    &mut obj,
+                    Point::new(xp, yp),
+                    if explosive { ObjectId::BarrelEx } else { ObjectId::Barrel },
                 );
                 add_barrel_body(&mut obj);
                 if obj.ovar2 >= 8 {
@@ -1431,6 +1451,7 @@ pub fn place_dungeon_objects(
                 }
             };
             let mut obj = crate::game::objects::Object::new(otype, Point::new(xp, yp));
+            crate::game::objects::setup_object(&mut obj, Point::new(xp, yp), otype);
             // C++ AddChest (objects.cpp:934-963).
             if gameplay_flip_coin(2) {
                 obj.anim_frame += 3;
@@ -1522,6 +1543,7 @@ pub fn place_dungeon_objects(
             }
             drop(layout);
             let mut obj = crate::game::objects::Object::new(trap_oid, Point::new(tx, ty));
+            crate::game::objects::setup_object(&mut obj, Point::new(tx, ty), trap_oid);
             // C++ AddObject -> AddTrap (objects.cpp:1229-1243): missile roll.
             let missile_type = crate::engine::random::gameplay_generate_rnd((level as i32) / 3 + 1);
             obj.ovar3 = match missile_type {

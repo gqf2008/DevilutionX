@@ -302,6 +302,7 @@ fn add_object(game_state: &mut crate::game::game_state::GameState, level_types: 
     use crate::engine::random::{gameplay_advance_rnd_seed, gameplay_generate_rnd};
     use crate::game::objdat::ObjectId;
     let mut obj = crate::game::objects::Object::new(otype, crate::game::types::Point::new(x, y));
+    crate::game::objects::setup_object(&mut obj, crate::game::types::Point::new(x, y), otype);
     // C++ AddObject -> SetupObject (objects.cpp:679-708): animated objects
     // consume GenerateRnd(animDelay) + GenerateRnd(animLen-1).
     match otype {
@@ -1087,7 +1088,7 @@ fn theme_library(game_state: &mut crate::game::game_state::GameState, level_type
                 add_object(game_state, level_types, ObjectId::Bookstand, x, y);
                 if !crate::engine::random::gameplay_flip_coin((2 * librnd[level - 1]) as i32) {
                     if let Some(o) = game_state.objects.last_mut() {
-                        o.selection_region = crate::game::objdat::SelectionRegion::None;
+                        o.selection_region = crate::game::objdat::SEL_NONE;
                         o.anim_frame += 2;
                     }
                 }

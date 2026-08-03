@@ -2386,7 +2386,31 @@ fn find_free_inv_cell(inv_grid: &[i8; 40], width: usize, height: usize) -> Optio
                     l.d_piece[o.position.y as usize * l.width + o.position.x as usize]
                 })
                 .unwrap_or(0);
-            self.objects[i].ovar1 = original as i32;
+            // C++ AddDoor + SetDoorStateClosed (objects.cpp:1175-1195,
+            // 1100-1105): _oVar1 = dPiece+1, _oVar2 = adjacent dPiece+1,
+            // door/miss/pre flags and the Bottom|Middle selection region.
+            let o = &self.objects[i];
+            let adj = match o.otype {
+                crate::game::objdat::ObjectId::L1RDoor => (o.position.x - 1, o.position.y),
+                _ => (o.position.x, o.position.y - 1),
+            };
+            let adjacent = self
+                .dungeon_layout
+                .as_ref()
+                .map(|l| {
+                    if adj.0 >= 0 && adj.1 >= 0 && adj.0 < l.width as i32 && adj.1 < l.height as i32 {
+                        l.d_piece[adj.1 as usize * l.width + adj.0 as usize]
+                    } else {
+                        0
+                    }
+                })
+                .unwrap_or(0);
+            self.objects[i].ovar1 = original as i32 + 1;
+            self.objects[i].ovar2 = adjacent as i32 + 1;
+            self.objects[i].door_flag = true;
+            self.objects[i].miss_flag = false;
+            self.objects[i].pre_flag = 0;
+            self.objects[i].selection_region = crate::game::objdat::SEL_BOTTOM_MIDDLE;
             self.objects[i].door_state = crate::game::objects::DOOR_CLOSED;
             self.objects[i].ovar4 = crate::game::objects::DOOR_CLOSED;
             self.set_door_micros(i, false);
@@ -3196,7 +3220,7 @@ impl crate::game::loadsave::LevelSnapshot for GameState {
                 object_type: o.otype as i32,
                 position_x: o.position.x,
                 position_y: o.position.y,
-                apply_lighting: true,
+                apply_lighting: o.apply_lighting,
                 anim_flag: o.anim_flag,
                 anim_delay: o.anim_delay,
                 anim_cnt: o.anim_cnt,
@@ -3206,12 +3230,12 @@ impl crate::game::loadsave::LevelSnapshot for GameState {
                 del_flag: o.del_flag,
                 break_flag: o.breakable as i8,
                 solid_flag: o.solid,
-                miss_flag: true,
+                miss_flag: o.miss_flag,
                 selection_region: o.selection_region as i8,
                 pre_flag: o.pre_flag != 0,
                 trap_flag: o.is_trap,
-                door_flag: o.door_state != 0,
-                light_id: -1,
+                door_flag: o.door_flag,
+                light_id: 0,
                 rnd_seed: o.rnd_seed,
                 var1: o.ovar1,
                 var2: o.ovar2,
@@ -3625,7 +3649,7 @@ mod tests {
         gs.dungeon_layout = Some(layout);
         let mut door = Object::new(ObjectId::L2LDoor, crate::game::types::Point::new(20, 10));
         // Placed doors are interactive (C++ AddDoor sets the selection region).
-        door.selection_region = crate::game::objdat::SelectionRegion::Bottom;
+        door.selection_region = crate::game::objdat::SEL_BOTTOM;
         gs.objects.push(door);
         gs.init_doors_closed();
         assert_eq!(gs.objects[0].door_state, DOOR_CLOSED);
