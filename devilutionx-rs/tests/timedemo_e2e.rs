@@ -724,9 +724,15 @@ fn trace_walk_divergence_17() {
                     let tgt = convert_screen_to_tile(x as i32, y as i32, cam.tile_x, cam.tile_y, 768, 480);
                     gs.handle_click_tile(tgt);
                     click_no += 1;
-                    println!("[Trace17] click#{} @tick{} screen=({},{}) target=({},{}) player=({},{}) camera=({},{}) path_len={}",
-                        click_no, tick_no, x, y, tgt.0, tgt.1,
-                        gs.player.position.x, gs.player.position.y,
+                    // dPiece at player + target (0 = void / outside generated region).
+                    let dp_at = |px: i32, py: i32| -> i32 {
+                        gs.dungeon_layout.as_ref()
+                            .and_then(|l| l.d_piece.get(py as usize * l.width + px as usize))
+                            .copied().map(|v| v as i32).unwrap_or(-1)
+                    };
+                    println!("[Trace17] click#{} @tick{} screen=({},{}) target=({},{}) dP_tg={} player=({},{}) dP_pl={} camera=({},{}) path_len={}",
+                        click_no, tick_no, x, y, tgt.0, tgt.1, dp_at(tgt.0, tgt.1),
+                        gs.player.position.x, gs.player.position.y, dp_at(gs.player.position.x, gs.player.position.y),
                         gs.camera.tile_x, gs.camera.tile_y,
                         gs.player_walk_path.len());
                 }
