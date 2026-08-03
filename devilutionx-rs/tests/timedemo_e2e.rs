@@ -909,7 +909,7 @@ fn generated_item_maps_to_cpp_saveitem() {
     item.bonus_to_hit = 8;
     item.unique_id = -1;
     item.cursor = 45;
-    item.buy_value = 200;
+    item.value = 200; // C++ _iValue (current value; buy_value is the shop price)
     item.identified_value = 250;
     item.identified = true;
 
@@ -925,7 +925,9 @@ fn generated_item_maps_to_cpp_saveitem() {
     assert_eq!(d[60], ItemQuality::Magic as u8, "magical");
     assert_eq!(&d[61..72], b"Short Sword", "base name (_iName)");
     assert_eq!(&d[125..148], b"Short Sword of the Bear", "identified name (_iIName)");
-    assert_eq!(d[189], ItemEquipType::OneHand as u8, "loc");
+    // C++ ILOC_ONEHAND = 1 (itemdat.h:98-100); the port's ItemEquipType
+    // None=-1/OneHand=0 maps to ILOC via +1 in item_to_binary.
+    assert_eq!(d[189], 1, "loc (C++ ILOC_ONEHAND)");
     assert_eq!(d[190], ItemClass::Weapon as u8, "class");
     assert_eq!(&d[192..196], &45i32.to_le_bytes(), "cursor");
     assert_eq!(&d[196..200], &200i32.to_le_bytes(), "value (_ivalue)");

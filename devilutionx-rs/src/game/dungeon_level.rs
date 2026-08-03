@@ -480,6 +480,10 @@ pub fn build_dungeon_layout(gen: &CathedralGenerator, level: &DungeonLevelData) 
     }
     layout.sol = sol;
 
+    // Bake the level's static lights (L1Lights etc.) into dPreLight, matching
+    // the C++ DoLighting during level generation (dungeon_level.rs:112-114).
+    apply_static_lights(level, &mut layout);
+
     layout
 }
 

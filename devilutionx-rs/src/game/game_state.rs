@@ -2742,12 +2742,24 @@ fn find_free_inv_cell(inv_grid: &[i8; 40], width: usize, height: usize) -> Optio
                 dlight[y * 112 + x] = self.light_manager.light_buffer[y][x];
             }
         }
-        // C++ writes dFlags & SavedFlags; the engine only tracks the
-        // Explored bit (DungeonFlag::Explored = 1 << 7, gendung.h:73).
+        // C++ writes dFlags & SavedFlags (gendung.h:74): Populated(1<<3) |
+        // Lit(1<<6) | Explored(1<<7). The engine tracks explored micro-tiles
+        // and the theme-room populated marker in the layout.
+        let populated = self.dungeon_layout.as_ref().map(|l| &l.populated);
         let dflags: Vec<u8> = self
             .explored
             .iter()
-            .map(|&b| if b { 1 << 7 } else { 0 })
+            .enumerate()
+            .map(|(i, &b)| {
+                let mut v = 0u8;
+                if populated.map_or(false, |p| p[i]) {
+                    v |= 1 << 3;
+                }
+                if b {
+                    v |= (1 << 6) | (1 << 7);
+                }
+                v
+            })
             .collect();
         // dPlayer grid: 0 except the local player's tile (C++ dPlayer = id+1).
         let mut dplayer = vec![0u8; 112 * 112];

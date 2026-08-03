@@ -1994,6 +1994,27 @@ pub fn prepare_dungeon_for_replay(game_state: &mut GameState, level: u8) -> bool
         init_dungeon_triggers_grid(game_state, level, &grid);
     }
 
+    // C++ CreateLevel ends with Freeupstairs() (diablo.cpp:1474): mark a 5x5
+    // block around every trigger Populated so monsters/objects avoid the
+    // stair tiles (dFlags |= DungeonFlag::Populated, trigs.cpp:705-718).
+    if let Some(layout) = game_state.dungeon_layout.as_mut() {
+        for t in 0..game_state.triggers.numtrigs {
+            let (tx, ty) = {
+                let p = game_state.triggers.trigs[t].position;
+                (p.x, p.y)
+            };
+            for yy in -2..=2i32 {
+                for xx in -2..=2i32 {
+                    let x = tx + xx;
+                    let y = ty + yy;
+                    if x >= 0 && x < 112 && y >= 0 && y < 112 {
+                        layout.populated[(y as usize) * 112 + x as usize] = true;
+                    }
+                }
+            }
+        }
+    }
+
     // C++ `LoadGameLevelStandardLevel` RNG flow (diablo.cpp:3310-3332):
     //   1. SetRndSeedForDungeonLevel()  -> GetLevelMTypes()  (scatter roster)
     //   2. SetRndSeedForDungeonLevel()  -> InitObjects()     (this re-seed
@@ -2021,21 +2042,6 @@ pub fn prepare_dungeon_for_replay(game_state: &mut GameState, level: u8) -> bool
     place_dungeon_objects(game_state, &level_types);
     game_state.init_doors_closed();
 
-    // C++ InitLevels: light table + dLight = dPreLight + player light.
-    game_state.light_manager.init();
-    game_state.light_manager.make_light_table(crate::game::lighting::DungeonLevelType::Cathedral);
-    if let Some(l) = &game_state.dungeon_layout {
-        for y in 0..112usize {
-            for x in 0..112usize {
-                game_state.light_manager.light_buffer[y][x] = l.pre_light[y * 112 + x];
-            }
-        }
-    }
-    game_state.player_light_index = game_state.light_manager.add_light(
-        game_state.player.position,
-        game_state.player._p_light_rad as u8,
-    );
-
     // Place monsters from the C++ PlaceMonsters algorithm.
     place_dungeon_monsters(
         game_state,
@@ -2049,6 +2055,80 @@ pub fn prepare_dungeon_for_replay(game_state: &mut GameState, level: u8) -> bool
     // C++ CreateThemeRooms: place theme-room objects/monsters/items after the
     // scatter monsters.
     crate::levels::themes::create_theme_rooms(game_state, &level_types);
+    // C++ AddObjectLight (objects.cpp:1482) registers light-casting objects
+    // while InitObjects/CreateThemeRooms place them, and SavePreLighting()
+    // (diablo.cpp:3161) snapshots the resulting dLight into dPreLight. Bake
+    // those object lights into the layout's pre_light before the dLight copy.
+    bake_object_lights(game_state);
+
+    // C++ LoadGameLevelLightVision: memcpy(dLight, dPreLight) then
+    // ProcessLightList applies every registered light. First copy the baked
+    // pre_light into the light buffer, then apply the player's light on top.
+    game_state.light_manager.init();
+    game_state.light_manager.make_light_table(crate::game::lighting::DungeonLevelType::Cathedral);
+    if let Some(l) = &game_state.dungeon_layout {
+        for y in 0..112usize {
+            for x in 0..112usize {
+                game_state.light_manager.light_buffer[y][x] = l.pre_light[y * 112 + x];
+            }
+        }
+    }
+    game_state.player_light_index = game_state.light_manager.add_light(
+        game_state.player.position,
+        game_state.player._p_light_rad as u8,
+    );
+    // C++ DoLighting (lighting.cpp:126) with the player's radius: the save's
+    // dLight snapshot includes the player halo over the baked pre-light.
+    {
+        let mut flat = vec![0u8; 112 * 112];
+        for y in 0..112usize {
+            for x in 0..112usize {
+                flat[y * 112 + x] = game_state.light_manager.light_buffer[y][x];
+            }
+        }
+        crate::engine::lighting::LightManager::new().do_lighting(
+            &mut flat,
+            112,
+            crate::engine::lighting::Point::new(game_state.player.position.x, game_state.player.position.y),
+            game_state.player._p_light_rad as u8,
+        );
+        for y in 0..112usize {
+            for x in 0..112usize {
+                game_state.light_manager.light_buffer[y][x] = flat[y * 112 + x];
+            }
+        }
+    }
+    // C++ LoadGameLevelLightVision: ProcessVisionList runs DoVision at the
+    // player's tile, setting dFlags Visible|Lit|Explored (SavedFlags keeps
+    // Lit|Explored). Reproduce the explored set for the save snapshot with
+    // the same wall-blocking vision rays the per-tick loop uses.
+    if let Some(layout) = game_state.dungeon_layout.as_ref() {
+        // The layout carries the per-piece SOL table (C++ SOLData); wrap it
+        // in the engine type so the vision rays apply the same wall
+        // occlusion as the C++ DoVision.
+        let sol = crate::engine::dungeon::SolData {
+            properties: layout.sol.clone(),
+        };
+        let visible = crate::game::lighting::LightManager::cast_vision_rays(
+            game_state.player.position,
+            game_state.player._p_light_rad as u8,
+            |p| p.x >= 0 && p.x < 112 && p.y >= 0 && p.y < 112,
+            |p| {
+                if p.x < 0 || p.y < 0 || p.x >= 112 || p.y >= 112 {
+                    return false;
+                }
+                let piece = layout
+                    .d_piece
+                    .get((p.y as usize) * layout.width + (p.x as usize))
+                    .copied()
+                    .unwrap_or(0);
+                crate::game::lighting::tile_allows_light(piece, &sol)
+            },
+        );
+        for tile in &visible {
+            game_state.explored[(tile.y as usize) * 112 + tile.x as usize] = true;
+        }
+    }
     // The reference save's monsters all have enemy = player 0 and
     // enemyPosition = the player tile (C++ save snapshot after level entry).
     let player_pos = game_state.player.position;
@@ -2057,6 +2137,37 @@ pub fn prepare_dungeon_for_replay(game_state: &mut GameState, level: u8) -> bool
         m.enemy_position = player_pos;
     }
     true
+}
+
+/// C++ `AddObjectLight` (objects.cpp:1482): light-casting objects bake a
+/// static light into `dLight` when placed; `SavePreLighting` snapshots it into
+/// `dPreLight`. Scan the placed objects and apply their lights.
+fn bake_object_lights(game_state: &mut GameState) {
+    use crate::engine::lighting::LightManager;
+    use crate::game::objdat::ObjectId;
+    let Some(layout) = game_state.dungeon_layout.as_mut() else { return };
+    let objects = game_state.objects.clone();
+    let mut lm = LightManager::new();
+    for o in &objects {
+        let radius = match o.otype {
+            ObjectId::StoryCandle | ObjectId::L5Candle => 3,
+            ObjectId::L1Light
+            | ObjectId::SkFire
+            | ObjectId::Candle1
+            | ObjectId::Candle2
+            | ObjectId::BookCandle
+            | ObjectId::BCross
+            | ObjectId::TBCross => 5,
+            ObjectId::TorchL | ObjectId::TorchR | ObjectId::TorchL2 | ObjectId::TorchR2 => 8,
+            _ => continue,
+        };
+        lm.do_lighting(
+            &mut layout.pre_light,
+            crate::levels::types::MAXDUNX,
+            crate::engine::lighting::Point::new(o.position.x, o.position.y),
+            radius,
+        );
+    }
 }
 
 /// Open the local game MPQ (spawn.mpq shareware, or diabdat.mpq full) and load
