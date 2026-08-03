@@ -1528,6 +1528,9 @@ impl GameState {
                     self.explored[(tile.y as usize) * 112 + tile.x as usize] = true;
                 }
                 self.last_visible_tiles = visible.iter().map(|p| (p.x, p.y)).collect();
+                if self.game_tick <= 200 && self.game_tick % 50 == 0 {
+                    println!("[DBG] vision tick={} player=({},{}) visible={}", self.game_tick, self.player.position.x, self.player.position.y, visible.len());
+                }
             }
             self.logic_step = GameLogicStep::ProcessMonsters;
             self.process_monsters(rng);
@@ -2520,24 +2523,49 @@ fn find_free_inv_cell(inv_grid: &[i8; 40], width: usize, height: usize) -> Optio
             }
 
             // Translate the AI's chosen Move* mode into a real step (C++
-            // MonsterWalk). The direction comes from the monster's facing
-            // (set by the AI / WalkInDirection).
+            // MonsterWalk). The monster navigates with FindPath toward its
+            // enemy and takes the first path step (monster.cpp:1822), so it
+            // routes around walls instead of getting stuck on a blocked tile.
             if matches!(
                 monster.mode,
                 crate::game::monster::MonsterMode::MoveNorthwards
                     | crate::game::monster::MonsterMode::MoveSouthwards
                     | crate::game::monster::MonsterMode::MoveSideways
             ) {
-                let dir = monster.facing;
-                let nx = monster.x + crate::game::monster::direction_dx(dir);
-                let ny = monster.y + crate::game::monster::direction_dy(dir);
-                let ok = walkable_set.contains(&(nx, ny))
-                    && (nx != player_pos.x || ny != player_pos.y)
-                    && !occupied.contains(&(nx, ny));
+                let start = crate::engine::types::Point::new(monster.x, monster.y);
+                let dest = crate::engine::types::Point::new(
+                    monster.enemy_position.x,
+                    monster.enemy_position.y,
+                );
+                let can_step = |s: crate::engine::types::Point, d: crate::engine::types::Point| {
+                    let code = crate::engine::path::get_path_direction(s, d);
+                    let walkable = |x: i32, y: i32| walkable_set.contains(&(x, y));
+                    match code {
+                        // C++ CanStep corner checks (tile_properties.cpp:66).
+                        5 => walkable(d.x, d.y + 1) && walkable(d.x + 1, d.y),
+                        6 => walkable(d.x, d.y + 1) && walkable(d.x - 1, d.y),
+                        7 => walkable(d.x, d.y - 1) && walkable(d.x - 1, d.y),
+                        8 => walkable(d.x + 1, d.y) && walkable(d.x, d.y - 1),
+                        _ => true,
+                    }
+                };
+                let pos_ok = |p: crate::engine::types::Point| {
+                    walkable_set.contains(&(p.x, p.y))
+                        && !occupied.contains(&(p.x, p.y))
+                        && (p.x != player_pos.x || p.y != player_pos.y)
+                };
+                let path = crate::engine::path::find_path(
+                    can_step,
+                    pos_ok,
+                    start,
+                    dest,
+                    crate::engine::path::MAX_PATH_LENGTH_MONSTERS,
+                );
                 monster.mode = crate::game::monster::MonsterMode::Stand;
-                if ok {
-                    monster.x = nx;
-                    monster.y = ny;
+                if let Some(&code) = path.first() {
+                    let (dx, dy) = crate::game::game_loop::dir_code_delta(code);
+                    monster.x += dx;
+                    monster.y += dy;
                 }
             }
         }
