@@ -852,7 +852,9 @@ impl BinaryItemData {
         helper.write_le_i32(self.anim_frames as i32);
         helper.write_le_i32(self.anim_frame as i32 + 1);
         helper.write_le_i32(96); // _iAnimWidth for vanilla compatibility
-        helper.write_le_i32(48); // _iAnimWidth2
+        // _iAnimWidth2 = CalculateSpriteTileCenterX(ItemAnimWidth) =
+        // (96 - TILE_WIDTH 64) / 2 = 16 (levels/dun_tile.hpp:137).
+        helper.write_le_i32(16);
         helper.skip(4); // Unused
         helper.write_u8(self.selection_region);
         helper.skip(3); // Alignment
@@ -2137,7 +2139,8 @@ pub fn simple_missile_to_binary(m: &SimpleMissileData) -> BinaryMissileData {
 /// light list (`SaveLighting`) and vision list.
 pub fn write_dungeon_body(
     helper: &mut SaveHelper,
-    active_monsters: &[(u32, BinaryMonsterData)],
+    active_ids: &[u32],
+    active_monsters: &[BinaryMonsterData],
     monster_level: i8,
     experience: u16,
     to_hit: u8,
@@ -2149,11 +2152,12 @@ pub fn write_dungeon_body(
     lights: &[(u8, BinaryLightData)],
     vision: &[BinaryLightData],
 ) {
-    // ActiveMonsters (BE u32 ids) + SaveMonster bodies.
-    for (id, _) in active_monsters {
+    // ActiveMonsters (BE u32 ids): C++ writes the full MaxMonsters (200)
+    // array (loadsave.cpp:2819); the caller supplies all 200 entries.
+    for id in active_ids {
         helper.write_be_u32(*id);
     }
-    for (_, m) in active_monsters {
+    for m in active_monsters {
         m.to_binary(helper, monster_level, experience, to_hit, to_hit_special);
     }
     // Missile index arrays + bodies (C++ loadsave.cpp:2822-2837): the active
@@ -2337,21 +2341,22 @@ fn player_item_to_binary(item: &crate::game::player_exact::PlayerItem) -> Binary
 /// player; the remainder use C++ defaults so the byte offsets and total size
 /// match, letting callers slice the correct segments out of a real save.
 pub fn save_player(helper: &mut SaveHelper, player: &crate::game::player_exact::Player, is_hellfire: bool) {
-    use crate::game::player_exact::PlayerItem;
+    use crate::game::player_exact::{Direction, PlayerItem};
+    let ex = &player.save_extra;
 
     // Mode + walk path + flags.
     helper.write_le_i32(player._p_mode as u8 as i32);
     for i in 0..25 {
         // C++ walkpath default is WALK_NONE = -1 (player.h:56); the port's
         // Direction::None = 8 serialises as -1 for the save.
-        let v = player.walk_path.get(i).copied().unwrap_or(crate::game::player_exact::Direction::None);
-        helper.write_i8(if v == crate::game::player_exact::Direction::None {
+        let v = player.walk_path.get(i).copied().unwrap_or(Direction::None);
+        helper.write_i8(if v == Direction::None {
             -1
         } else {
             v as u8 as i8
         });
     }
-    helper.write_u8(1); // plractive
+    helper.write_u8(if player.plr_active { 1 } else { 0 }); // plractive
     helper.skip(2);
     helper.write_le_i32(player.dest_action as i32);
     helper.write_le_i32(player.dest_param1);
@@ -2362,45 +2367,45 @@ pub fn save_player(helper: &mut SaveHelper, player: &crate::game::player_exact::
     // Position (tile, future, target, last, old).
     helper.write_le_i32(player.position.x);
     helper.write_le_i32(player.position.y);
-    helper.write_le_i32(player.position.x);
-    helper.write_le_i32(player.position.y);
-    helper.write_le_i32(player.position.x);
-    helper.write_le_i32(player.position.y);
-    helper.write_le_i32(player.position.x);
-    helper.write_le_i32(player.position.y);
-    helper.write_le_i32(player.position.x);
-    helper.write_le_i32(player.position.y);
-    // Offset / velocity (not walking in the save snapshot: zeros).
-    helper.write_le_i32(0);
-    helper.write_le_i32(0);
-    helper.write_le_i32(0);
-    helper.write_le_i32(0);
+    helper.write_le_i32(ex.position_future.x);
+    helper.write_le_i32(ex.position_future.y);
+    helper.write_le_i32(ex.position_target.x);
+    helper.write_le_i32(ex.position_target.y);
+    helper.write_le_i32(ex.position_last.x);
+    helper.write_le_i32(ex.position_last.y);
+    helper.write_le_i32(ex.position_old.x);
+    helper.write_le_i32(ex.position_old.y);
+    // Offset / velocity (C++ CalculateWalkingOffset etc.; zero when idle).
+    helper.write_le_i32(ex.offset_dx);
+    helper.write_le_i32(ex.offset_dy);
+    helper.write_le_i32(ex.velocity_dx);
+    helper.write_le_i32(ex.velocity_dy);
     helper.write_le_i32(player._p_dir as u8 as i32); // _pdir
     helper.skip(4);
-    helper.write_le_u32(0); // _pgfxnum
+    helper.write_le_u32(ex.pgfxnum); // _pgfxnum
     helper.skip(4); // _pAnimData pointer
-    helper.write_le_i32(3); // ticksPerFrame - 1 (C++ default anim)
-    helper.write_le_i32(0); // tickCounter
-    helper.write_le_i32(8); // numberOfFrames
-    helper.write_le_i32(1); // currentFrame + 1
-    helper.write_le_i32(96); // anim width
-    helper.write_le_i32(48); // width2
+    helper.write_le_i32(ex.ticks_per_frame); // ticksPerFrame - 1
+    helper.write_le_i32(ex.tick_counter);
+    helper.write_le_i32(ex.number_of_frames);
+    helper.write_le_i32(ex.current_frame); // currentFrame + 1
+    helper.write_le_i32(ex.anim_width);
+    helper.write_le_i32(ex.width2);
     helper.skip(4); // _peflag
     helper.write_le_i32(player.light_id);
     helper.write_le_i32(1); // _pvid
 
-    // Spells.
-    helper.write_le_i32(0); // queuedSpell.spellId
-    helper.write_i8(0); // queuedSpell.spellType
-    helper.write_i8(0); // queuedSpell.spellFrom
+    // Spells (raw C++ SpellID values so a loaded save round-trips).
+    helper.write_le_i32(ex.queued_spell_id);
+    helper.write_i8(ex.queued_spell_type as i8);
+    helper.write_i8(ex.queued_spell_from as i8);
     helper.skip(2);
-    helper.write_le_i32(0); // inventorySpell
+    helper.write_le_i32(ex.inventory_spell);
     helper.skip(1); // _pTSplType
     helper.skip(3);
-    helper.write_le_i32(0); // _pRSpell
-    helper.write_i8(0); // _pRSplType
+    helper.write_le_i32(ex.r_spell); // _pRSpell
+    helper.write_i8(ex.r_spl_type as i8); // _pRSplType
     helper.skip(3);
-    helper.write_le_i32(0); // _pSBkSpell
+    helper.write_le_i32(ex.sbk_spell); // _pSBkSpell
     helper.skip(1); // _pSBkSplType
 
     for &lvl in player._p_spl_lvl.iter() {
@@ -2408,22 +2413,22 @@ pub fn save_player(helper: &mut SaveHelper, player: &crate::game::player_exact::
     }
     helper.skip(7);
     helper.write_le_u64(player._p_mem_spells);
-    helper.write_le_u64(0); // _pAblSpells
-    helper.write_le_u64(0); // _pScrlSpells
-    helper.write_u8(0); // _pSpellFlags
+    helper.write_le_u64(player._p_abl_spells);
+    helper.write_le_u64(player._p_scrl_spells);
+    helper.write_u8(ex.spell_flags); // _pSpellFlags
     helper.skip(3);
-    for _ in 0..4 {
-        helper.write_le_i32(0); // hotkey
+    for &hk in ex.hotkeys.iter() {
+        helper.write_le_i32(hk);
     }
-    for _ in 0..4 {
-        helper.write_u8(0); // hotkey type
+    for &t in ex.hotkey_types.iter() {
+        helper.write_u8(t);
     }
 
-    helper.write_le_i32(0); // UsesRangedWeapon
+    helper.write_le_i32(if ex.uses_ranged_weapon { 1 } else { 0 });
     helper.write_u8(if player._p_block_flag { 1 } else { 0 });
     helper.write_u8(if player._p_invincible { 1 } else { 0 });
     helper.write_i8(player._p_light_rad);
-    helper.write_u8(0); // _pLvlChanging
+    helper.write_u8(if ex.lvl_changing { 1 } else { 0 }); // _pLvlChanging
 
     helper.write_bytes(&player._p_name);
     helper.write_i8(player._p_class as i8);
@@ -2439,7 +2444,7 @@ pub fn save_player(helper: &mut SaveHelper, player: &crate::game::player_exact::
     helper.write_le_i32(player._p_stat_pts);
     helper.write_le_i32(player._p_damage_mod);
 
-    helper.write_le_i32(0); // baseToBlock
+    helper.write_le_i32(ex.base_to_block); // baseToBlock
     helper.write_le_i32(player._p_hp_base);
     helper.write_le_i32(player._p_max_hp_base);
     helper.write_le_i32(player._p_hit_points);
@@ -2455,21 +2460,21 @@ pub fn save_player(helper: &mut SaveHelper, player: &crate::game::player_exact::
     helper.skip(2);
     helper.write_le_u32(player._p_experience);
     helper.skip(4); // _pMaxExp
-    helper.write_le_u32(0); // nextExperienceThreshold
+    helper.write_le_u32(ex.next_exp_threshold); // getNextExperienceThreshold
     helper.write_i8(player._p_armor_class);
     helper.write_i8(player._p_mag_resist);
     helper.write_i8(player._p_fire_resist);
     helper.write_i8(player._p_lght_resist);
     helper.write_le_i32(player._p_gold);
-    helper.write_le_u32(0); // _pInfraFlag
+    helper.write_le_u32(if ex.infra_flag { 1 } else { 0 }); // _pInfraFlag
 
-    helper.write_le_i32(0); // temp x
-    helper.write_le_i32(0); // temp y
-    helper.write_le_i32(0); // tempDirection
-    helper.write_le_i32(0); // queuedSpell.spellLevel
+    helper.write_le_i32(ex.position_temp.x); // tempPositionX
+    helper.write_le_i32(ex.position_temp.y); // tempPositionY
+    helper.write_le_i32(player._p_temp_direction as u8 as i32); // tempDirection
+    helper.write_le_i32(ex.queued_spell_level);
     helper.skip(4); // _pVar5
-    helper.write_le_i32(0); // offset2 x
-    helper.write_le_i32(0); // offset2 y
+    helper.write_le_i32(ex.offset2_dx);
+    helper.write_le_i32(ex.offset2_dy);
     helper.skip(4); // _pVar8
 
     // Visited levels: 17 classic levels.
@@ -2484,37 +2489,40 @@ pub fn save_player(helper: &mut SaveHelper, player: &crate::game::player_exact::
     // Animation pointer blocks (C++ skips pointers, writes frame counts).
     helper.skip(4); // _pGFXLoad
     helper.skip(32); // _pNAnim pointers (8)
-    helper.write_le_i32(8); // _pNFrames
+    helper.write_le_i32(ex.n_frames); // _pNFrames
     helper.skip(4); // _pNWidth
     helper.skip(32); // _pWAnim
-    helper.write_le_i32(8); // _pWFrames
+    helper.write_le_i32(ex.w_frames); // _pWFrames
     helper.skip(4); // _pWWidth
     helper.skip(32); // _pAAnim
-    helper.write_le_i32(8); // _pAFrames
+    helper.write_le_i32(ex.a_frames); // _pAFrames
     helper.skip(4); // _pAWidth
-    helper.write_le_i32(0); // _pAFNum
+    helper.write_le_i32(ex.a_fnum); // _pAFNum
     helper.skip(32); // _pLAnim
     helper.skip(32); // _pFAnim
     helper.skip(32); // _pTAnim
-    helper.write_le_i32(8); // _pSFrames
+    helper.write_le_i32(ex.s_frames); // _pSFrames
     helper.skip(4); // _pSWidth
-    helper.write_le_i32(0); // _pSFNum
+    helper.write_le_i32(ex.s_fnum); // _pSFNum
     helper.skip(32); // _pHAnim
-    helper.write_le_i32(8); // _pHFrames
+    helper.write_le_i32(ex.h_frames); // _pHFrames
     helper.skip(4); // _pHWidth
     helper.skip(32); // _pDAnim
-    helper.write_le_i32(8); // _pDFrames
+    helper.write_le_i32(ex.d_frames); // _pDFrames
     helper.skip(4); // _pDWidth
     helper.skip(32); // _pBAnim
-    helper.write_le_i32(8); // _pBFrames
+    helper.write_le_i32(ex.b_frames); // _pBFrames
     helper.skip(4); // _pBWidth
 
     // Items: InvBody (7) + InvList (40) + SpdList (8) + HoldItem (1).
+    let mut slot = 0usize;
     for item in player.inv_body.iter() {
-        player_item_to_binary(item).to_binary(helper, is_hellfire);
+        save_player_item(helper, ex, slot, item, is_hellfire);
+        slot += 1;
     }
     for item in player.inv_list.iter() {
-        player_item_to_binary(item).to_binary(helper, is_hellfire);
+        save_player_item(helper, ex, slot, item, is_hellfire);
+        slot += 1;
     }
     helper.write_le_i32(player._p_num_inv);
     // C++ SavePlayer writes InvGrid[40]: each cell is the InvList slot + 1
@@ -2524,9 +2532,10 @@ pub fn save_player(helper: &mut SaveHelper, player: &crate::game::player_exact::
         helper.write_i8(cell);
     }
     for item in player.spd_list.iter() {
-        player_item_to_binary(item).to_binary(helper, is_hellfire);
+        save_player_item(helper, ex, slot, item, is_hellfire);
+        slot += 1;
     }
-    player_item_to_binary(&player.hold_item).to_binary(helper, is_hellfire);
+    save_player_item(helper, ex, slot, &player.hold_item, is_hellfire);
 
     // Item bonus fields.
     helper.write_le_i32(player._p_i_min_dam);
@@ -2538,9 +2547,9 @@ pub fn save_player(helper: &mut SaveHelper, player: &crate::game::player_exact::
     helper.write_le_i32(player._p_i_bonus_dam_mod);
     helper.skip(4);
     helper.write_le_u64(player._p_i_spells);
-    helper.write_le_i32(0); // _pIFlags
+    helper.write_le_i32(ex.i_flags); // _pIFlags
     helper.write_le_i32(player._p_i_get_hit);
-    helper.write_i8(0); // _pISplLvlAdd (engine does not track)
+    helper.write_i8(ex.i_spl_lvl_add); // _pISplLvlAdd
     helper.skip(1); // _pISplCost
     helper.skip(2);
     helper.skip(4); // _pISplDur
@@ -2549,22 +2558,269 @@ pub fn save_player(helper: &mut SaveHelper, player: &crate::game::player_exact::
     helper.write_le_i32(player._p_i_f_max_dam);
     helper.write_le_i32(player._p_i_l_min_dam);
     helper.write_le_i32(player._p_i_l_max_dam);
-    helper.write_le_i32(0); // _pOilType
-    helper.write_u8(0); // pTownWarps
-    helper.write_u8(0); // pDungMsgs
-    helper.write_u8(0); // pLvlLoad
-    helper.write_u8(if is_hellfire { 0 } else { 0 }); // pDungMsgs2 / 0
-    helper.write_u8(0); // pManaShield
-    helper.write_u8(0); // pOriginalCathedral
+    helper.write_le_i32(ex.oil_type); // _pOilType
+    helper.write_u8(ex.town_warps);
+    helper.write_u8(ex.dung_msgs);
+    helper.write_u8(ex.lvl_load);
+    helper.write_u8(if is_hellfire { ex.dung_msgs2 } else { 0 });
+    helper.write_u8(if ex.mana_shield { 1 } else { 0 });
+    helper.write_u8(if ex.original_cathedral { 1 } else { 0 });
     helper.skip(2);
-    helper.write_le_u16(0); // wReflections
+    helper.write_le_u16(ex.w_reflections);
     helper.skip(14);
-    helper.write_le_u32(0); // pDiabloKillLevel
-    helper.write_le_u32(0); // difficulty
-    helper.write_le_u32(0); // pDamAcFlags
+    helper.write_le_u32(ex.diablo_kill_level);
+    helper.write_le_u32(ex.difficulty);
+    helper.write_le_u32(ex.dam_ac_flags);
     helper.skip(20);
 }
 
+/// Write one SaveItem slot. Prefers the loaded C++ binary body so a loaded
+/// save round-trips byte-for-byte; falls back to the engine-modelled item.
+fn save_player_item(
+    helper: &mut SaveHelper,
+    ex: &crate::game::player_exact::PlayerSaveExtra,
+    slot: usize,
+    item: &crate::game::player_exact::PlayerItem,
+    is_hellfire: bool,
+) {
+    match ex.save_items.get(slot).and_then(|o| o.as_ref()) {
+        Some(b) => b.to_binary(helper, is_hellfire),
+        None => player_item_to_binary(item).to_binary(helper, is_hellfire),
+    }
+}
+
+/// C++ `LoadPlayer` (loadsave.cpp:391-467): reads the 21680-byte player block
+/// from the `game` entry into the engine `Player` (modelled fields) and the
+/// `PlayerSaveExtra` round-trip state (everything else, kept raw so
+/// `save_player` reproduces the bytes). Must stay in lock-step with
+/// `save_player` above.
+pub fn load_player_from_game(helper: &mut LoadHelper, player: &mut crate::game::player_exact::Player) {
+    use crate::game::player_exact::{Direction, HeroClass, PlayerMode};
+    let ex = &mut player.save_extra;
+
+    player._p_mode = PlayerMode::try_from(helper.next_le_i32() as u8).unwrap_or(PlayerMode::Stand);
+    for i in 0..25 {
+        let v = helper.next_i8();
+        player.walk_path[i] = if v == -1 { Direction::None } else { Direction::try_from(v as u8).unwrap_or(Direction::None) };
+    }
+    player.plr_active = helper.next_bool8();
+    helper.skip(2);
+    player.dest_action = crate::game::player_exact::ActionType::try_from(helper.next_le_i32()).unwrap_or(crate::game::player_exact::ActionType::None);
+    player.dest_param1 = helper.next_le_i32();
+    player.dest_param2 = helper.next_le_i32();
+    player.dest_param3 = helper.next_le_i32();
+    player.dest_param4 = helper.next_le_i32();
+    player.plr_level = helper.next_le_u32() as u8;
+    player.position.x = helper.next_le_i32();
+    player.position.y = helper.next_le_i32();
+    ex.position_future = crate::game::types::Point::new(helper.next_le_i32(), helper.next_le_i32());
+    ex.position_target = crate::game::types::Point::new(helper.next_le_i32(), helper.next_le_i32());
+    ex.position_last = crate::game::types::Point::new(helper.next_le_i32(), helper.next_le_i32());
+    ex.position_old = crate::game::types::Point::new(helper.next_le_i32(), helper.next_le_i32());
+    ex.offset_dx = helper.next_le_i32();
+    ex.offset_dy = helper.next_le_i32();
+    ex.velocity_dx = helper.next_le_i32();
+    ex.velocity_dy = helper.next_le_i32();
+    player._p_dir = Direction::try_from(helper.next_le_i32() as u8).unwrap_or(Direction::South);
+    helper.skip(4);
+    ex.pgfxnum = helper.next_le_u32();
+    helper.skip(4); // _pAnimData pointer
+    ex.ticks_per_frame = helper.next_le_i32();
+    ex.tick_counter = helper.next_le_i32();
+    ex.number_of_frames = helper.next_le_i32();
+    ex.current_frame = helper.next_le_i32();
+    ex.anim_width = helper.next_le_i32();
+    ex.width2 = helper.next_le_i32();
+    helper.skip(4); // _peflag
+    player.light_id = helper.next_le_i32();
+    helper.skip(4); // _pvid
+
+    ex.queued_spell_id = helper.next_le_i32();
+    ex.queued_spell_type = helper.next_u8();
+    ex.queued_spell_from = helper.next_u8();
+    helper.skip(2);
+    ex.inventory_spell = helper.next_le_i32();
+    helper.skip(1); // _pTSplType
+    helper.skip(3);
+    ex.r_spell = helper.next_le_i32();
+    ex.r_spl_type = helper.next_u8();
+    helper.skip(3);
+    ex.sbk_spell = helper.next_le_i32();
+    helper.skip(1); // _pSBkSplType
+
+    for lvl in player._p_spl_lvl.iter_mut() {
+        *lvl = helper.next_u8();
+    }
+    helper.skip(7);
+    player._p_mem_spells = helper.next_le_u64();
+    player._p_abl_spells = helper.next_le_u64();
+    player._p_scrl_spells = helper.next_le_u64();
+    ex.spell_flags = helper.next_u8();
+    helper.skip(3);
+    for hk in ex.hotkeys.iter_mut() {
+        *hk = helper.next_le_i32();
+    }
+    for t in ex.hotkey_types.iter_mut() {
+        *t = helper.next_u8();
+    }
+
+    ex.uses_ranged_weapon = helper.next_le_i32() != 0;
+    player._p_block_flag = helper.next_bool8();
+    player._p_invincible = helper.next_bool8();
+    player._p_light_rad = helper.next_i8();
+    ex.lvl_changing = helper.next_bool8();
+
+    let name = helper.next_bytes(crate::game::player_exact::PLAYER_NAME_LENGTH);
+    player._p_name[..name.len().min(crate::game::player_exact::PLAYER_NAME_LENGTH)].copy_from_slice(&name[..name.len().min(crate::game::player_exact::PLAYER_NAME_LENGTH)]);
+    player._p_class = HeroClass::try_from(helper.next_i8() as u8).unwrap_or(HeroClass::Warrior);
+    helper.skip(3);
+    player._p_strength = helper.next_le_i32();
+    player._p_base_str = helper.next_le_i32();
+    player._p_magic = helper.next_le_i32();
+    player._p_base_mag = helper.next_le_i32();
+    player._p_dexterity = helper.next_le_i32();
+    player._p_base_dex = helper.next_le_i32();
+    player._p_vitality = helper.next_le_i32();
+    player._p_base_vit = helper.next_le_i32();
+    player._p_stat_pts = helper.next_le_i32();
+    player._p_damage_mod = helper.next_le_i32();
+
+    ex.base_to_block = helper.next_le_i32();
+    player._p_hp_base = helper.next_le_i32();
+    player._p_max_hp_base = helper.next_le_i32();
+    player._p_hit_points = helper.next_le_i32();
+    player._p_max_hp = helper.next_le_i32();
+    helper.skip(4); // _pHPPer
+    player._p_mana_base = helper.next_le_i32();
+    player._p_max_mana_base = helper.next_le_i32();
+    player._p_mana = helper.next_le_i32();
+    player._p_max_mana = helper.next_le_i32();
+    helper.skip(4); // _pManaPer
+    player._p_level = helper.next_u8();
+    ex.max_level = helper.next_u8();
+    helper.skip(2);
+    player._p_experience = helper.next_le_u32();
+    ex.max_exp = helper.next_le_u32();
+    ex.next_exp_threshold = helper.next_le_u32();
+    player._p_armor_class = helper.next_i8();
+    player._p_mag_resist = helper.next_i8();
+    player._p_fire_resist = helper.next_i8();
+    player._p_lght_resist = helper.next_i8();
+    player._p_gold = helper.next_le_i32();
+    ex.infra_flag = helper.next_le_u32() != 0;
+
+    ex.position_temp = crate::game::types::Point::new(helper.next_le_i32(), helper.next_le_i32());
+    player._p_temp_direction = Direction::try_from(helper.next_le_i32() as u8).unwrap_or(Direction::South);
+    ex.queued_spell_level = helper.next_le_i32();
+    ex.var5 = helper.next_le_i32();
+    ex.offset2_dx = helper.next_le_i32();
+    ex.offset2_dy = helper.next_le_i32();
+    ex.var8 = helper.next_le_i32();
+
+    for i in 0..17 {
+        if let Some(v) = player._p_lvl_visited.get_mut(i) {
+            *v = helper.next_bool8();
+        } else {
+            helper.skip(1);
+        }
+    }
+    for i in 0..17 {
+        if let Some(v) = player._p_set_lvl_visited.get_mut(i) {
+            *v = helper.next_bool8();
+        } else {
+            helper.skip(1);
+        }
+    }
+    helper.skip(2);
+
+    helper.skip(4); // _pGFXLoad
+    helper.skip(32); // _pNAnim
+    ex.n_frames = helper.next_le_i32();
+    helper.skip(4); // _pNWidth
+    helper.skip(32); // _pWAnim
+    ex.w_frames = helper.next_le_i32();
+    helper.skip(4); // _pWWidth
+    helper.skip(32); // _pAAnim
+    ex.a_frames = helper.next_le_i32();
+    helper.skip(4); // _pAWidth
+    ex.a_fnum = helper.next_le_i32();
+    helper.skip(32); // _pLAnim
+    helper.skip(32); // _pFAnim
+    helper.skip(32); // _pTAnim
+    ex.s_frames = helper.next_le_i32();
+    helper.skip(4); // _pSWidth
+    ex.s_fnum = helper.next_le_i32();
+    helper.skip(32); // _pHAnim
+    ex.h_frames = helper.next_le_i32();
+    helper.skip(4); // _pHWidth
+    helper.skip(32); // _pDAnim
+    ex.d_frames = helper.next_le_i32();
+    helper.skip(4); // _pDWidth
+    helper.skip(32); // _pBAnim
+    ex.b_frames = helper.next_le_i32();
+    helper.skip(4); // _pBWidth
+
+    // Items: InvBody (7) + InvList (40) + SpdList (8) + HoldItem (1).
+    let mut slot = 0usize;
+    let mut read_item = |helper: &mut LoadHelper, ex: &mut crate::game::player_exact::PlayerSaveExtra, slot: usize| {
+        let item = BinaryItemData::from_binary(helper, false);
+        if let Some(cell) = ex.save_items.get_mut(slot) {
+            *cell = Some(item);
+        }
+    };
+    for _ in 0..7 {
+        read_item(helper, ex, slot);
+        slot += 1;
+    }
+    for _ in 0..40 {
+        read_item(helper, ex, slot);
+        slot += 1;
+    }
+    player._p_num_inv = helper.next_le_i32();
+    for cell in player.inv_grid.iter_mut() {
+        *cell = helper.next_i8();
+    }
+    for _ in 0..8 {
+        read_item(helper, ex, slot);
+        slot += 1;
+    }
+    read_item(helper, ex, slot); // HoldItem
+
+    player._p_i_min_dam = helper.next_le_i32();
+    player._p_i_max_dam = helper.next_le_i32();
+    player._p_i_ac = helper.next_le_i32();
+    player._p_i_bonus_dam = helper.next_le_i32();
+    player._p_i_bonus_to_hit = helper.next_le_i32();
+    player._p_i_bonus_ac = helper.next_le_i32();
+    player._p_i_bonus_dam_mod = helper.next_le_i32();
+    helper.skip(4);
+    player._p_i_spells = helper.next_le_u64();
+    ex.i_flags = helper.next_le_i32();
+    player._p_i_get_hit = helper.next_le_i32();
+    ex.i_spl_lvl_add = helper.next_i8();
+    ex.i_spl_cost = helper.next_u8();
+    helper.skip(2);
+    ex.i_spl_dur = helper.next_le_i32();
+    player._p_i_en_ac = helper.next_le_i32();
+    player._p_i_f_min_dam = helper.next_le_i32();
+    player._p_i_f_max_dam = helper.next_le_i32();
+    player._p_i_l_min_dam = helper.next_le_i32();
+    player._p_i_l_max_dam = helper.next_le_i32();
+    ex.oil_type = helper.next_le_i32();
+    ex.town_warps = helper.next_u8();
+    ex.dung_msgs = helper.next_u8();
+    ex.lvl_load = helper.next_u8();
+    ex.dung_msgs2 = helper.next_u8();
+    ex.mana_shield = helper.next_bool8();
+    ex.original_cathedral = helper.next_bool8();
+    helper.skip(2);
+    ex.w_reflections = helper.next_le_u16();
+    helper.skip(14);
+    ex.diablo_kill_level = helper.next_le_u32();
+    ex.difficulty = helper.next_le_u32();
+    ex.dam_ac_flags = helper.next_le_u32();
+    helper.skip(20);
+}
 // ============================================================================
 // SaveGameData orchestration (C++ loadsave.cpp:2762-2935)
 // ============================================================================

@@ -216,6 +216,70 @@ pub enum Direction {
     None = 8,
 }
 
+impl TryFrom<u8> for PlayerMode {
+    type Error = ();
+
+    fn try_from(v: u8) -> Result<Self, Self::Error> {
+        Ok(match v {
+            0 => PlayerMode::Stand,
+            1 => PlayerMode::WalkNorthwards,
+            2 => PlayerMode::WalkSouthwards,
+            3 => PlayerMode::WalkSideways,
+            4 => PlayerMode::Attack,
+            5 => PlayerMode::AttackBow,
+            6 => PlayerMode::Block,
+            7 => PlayerMode::GotHit,
+            8 => PlayerMode::Death,
+            9 => PlayerMode::Spell,
+            10 => PlayerMode::Targeting,
+            11 => PlayerMode::RangeAttack,
+            _ => return Err(()),
+        })
+    }
+}
+
+impl TryFrom<u8> for Direction {
+    type Error = ();
+
+    fn try_from(v: u8) -> Result<Self, Self::Error> {
+        Ok(match v {
+            0 => Direction::South,
+            1 => Direction::SouthWest,
+            2 => Direction::West,
+            3 => Direction::NorthWest,
+            4 => Direction::North,
+            5 => Direction::NorthEast,
+            6 => Direction::East,
+            7 => Direction::SouthEast,
+            8 => Direction::None,
+            _ => return Err(()),
+        })
+    }
+}
+
+impl TryFrom<i32> for ActionType {
+    type Error = ();
+
+    fn try_from(v: i32) -> Result<Self, Self::Error> {
+        Ok(match v {
+            -1 => ActionType::None,
+            0 => ActionType::Walk,
+            1 => ActionType::AttackMonster,
+            2 => ActionType::AttackPlayer,
+            3 => ActionType::RangeAttackMonster,
+            4 => ActionType::RangeAttackPlayer,
+            5 => ActionType::SpellMonster,
+            6 => ActionType::SpellPlayer,
+            7 => ActionType::SpellTarget,
+            8 => ActionType::Operate,
+            9 => ActionType::OperateTelekinesis,
+            10 => ActionType::PickupItem,
+            11 => ActionType::Talk,
+            _ => return Err(()),
+        })
+    }
+}
+
 /// Action type for destination
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[repr(i8)]
@@ -347,6 +411,214 @@ impl PlayerItem {
         self.item_id == 0 && self.full.is_none()
     }
 }
+
+/// C++ `SavePlayer`-only state (loadsave.cpp:1251-1485) that the engine's
+/// gameplay model does not simulate yet. Kept so the save writer can
+/// round-trip a loaded save byte-for-byte and future gameplay ports can fill
+/// these in. Mirrors the C++ field names; animation values are stored as
+/// written (ticksPerFrame - 1, currentFrame + 1, width2 = tile centre).
+#[derive(Debug, Clone)]
+pub struct PlayerSaveExtra {
+    /// `position.future`
+    pub position_future: Point,
+    /// `GetTargetPosition()` (computed target)
+    pub position_target: Point,
+    /// `position.last`
+    pub position_last: Point,
+    /// `position.old`
+    pub position_old: Point,
+    /// `position.temp`
+    pub position_temp: Point,
+    /// Walking offset deltaX / deltaY (0 when not walking)
+    pub offset_dx: i32,
+    pub offset_dy: i32,
+    /// Shifted walking offset deltaX / deltaY
+    pub offset2_dx: i32,
+    pub offset2_dy: i32,
+    /// Walking velocity deltaX / deltaY (shifted 8)
+    pub velocity_dx: i32,
+    pub velocity_dy: i32,
+    /// `_pgfxnum`
+    pub pgfxnum: u32,
+    /// `AnimInfo.ticksPerFrame - 1` (as written)
+    pub ticks_per_frame: i32,
+    /// `AnimInfo.tickCounterOfCurrentFrame`
+    pub tick_counter: i32,
+    /// `AnimInfo.numberOfFrames`
+    pub number_of_frames: i32,
+    /// `AnimInfo.currentFrame + 1` (as written)
+    pub current_frame: i32,
+    /// `getSpriteWidth()` (`_pAnimWidth`)
+    pub anim_width: i32,
+    /// `CalculateSpriteTileCenterX(animWidth)` (`_pAnimWidth2`)
+    pub width2: i32,
+    /// `queuedSpell.spellId` (written as i8)
+    pub queued_spell_id: i32,
+    /// `queuedSpell.spellType`
+    pub queued_spell_type: u8,
+    /// `queuedSpell.spellFrom`
+    pub queued_spell_from: u8,
+    /// `queuedSpell.spellLevel`
+    pub queued_spell_level: i32,
+    /// `inventorySpell`
+    pub inventory_spell: i32,
+    /// `_pSBkSpell` (written as i8)
+    pub sbk_spell: i32,
+    /// `_pSBkSplType` (skip-written in C++)
+    pub sbk_spl_type: u8,
+    /// `_pRSpell` (C++ SpellID value, written as i8)
+    pub r_spell: i32,
+    /// `_pRSplType`
+    pub r_spl_type: u8,
+    /// `_pSpellFlags`
+    pub spell_flags: u8,
+    /// `_pSplHotKey[4]` (written as i8 each)
+    pub hotkeys: [i32; 4],
+    /// `_pSplTHotKey[4]`
+    pub hotkey_types: [u8; 4],
+    /// `UsesRangedWeapon()`
+    pub uses_ranged_weapon: bool,
+    /// `_pLvlChanging`
+    pub lvl_changing: bool,
+    /// `getBaseToBlock()` (stored back to `_pBaseToBlk`)
+    pub base_to_block: i32,
+    /// `_pMaxLevel` (skip-written in C++)
+    pub max_level: u8,
+    /// `_pMaxExp`
+    pub max_exp: u32,
+    /// `getNextExperienceThreshold()`
+    pub next_exp_threshold: u32,
+    /// `_pInfraFlag`
+    pub infra_flag: bool,
+    /// `_pVar5`
+    pub var5: i32,
+    /// `_pVar8`
+    pub var8: i32,
+    /// `_pNFrames`
+    pub n_frames: i32,
+    /// `_pWFrames`
+    pub w_frames: i32,
+    /// `_pAFrames`
+    pub a_frames: i32,
+    /// `_pAFNum`
+    pub a_fnum: i32,
+    /// `_pSFrames`
+    pub s_frames: i32,
+    /// `_pSFNum`
+    pub s_fnum: i32,
+    /// `_pHFrames`
+    pub h_frames: i32,
+    /// `_pDFrames`
+    pub d_frames: i32,
+    /// `_pBFrames`
+    pub b_frames: i32,
+    /// `_pIFlags`
+    pub i_flags: i32,
+    /// `_pISplLvlAdd`
+    pub i_spl_lvl_add: i8,
+    /// `_pISplCost` (skip-written in C++)
+    pub i_spl_cost: u8,
+    /// `_pISplDur` (skip-written in C++)
+    pub i_spl_dur: i32,
+    /// `_pOilType`
+    pub oil_type: i32,
+    /// `pTownWarps`
+    pub town_warps: u8,
+    /// `pDungMsgs`
+    pub dung_msgs: u8,
+    /// `pLvlLoad`
+    pub lvl_load: u8,
+    /// `pDungMsgs2` (Hellfire only)
+    pub dung_msgs2: u8,
+    /// `pManaShield`
+    pub mana_shield: bool,
+    /// `pOriginalCathedral`
+    pub original_cathedral: bool,
+    /// `wReflections`
+    pub w_reflections: u16,
+    /// `pDiabloKillLevel`
+    pub diablo_kill_level: u32,
+    /// `sgGameInitInfo.nDifficulty`
+    pub difficulty: u32,
+    /// `pDamAcFlags`
+    pub dam_ac_flags: u32,
+    /// Loaded C++ `SaveItem` bodies for the player's inventory (InvBody +
+    /// InvList + SpdList + HoldItem, 56 slots). `None` slots fall back to the
+    /// engine-modelled `PlayerItem` when serialising.
+    pub save_items: [Option<crate::game::loadsave::BinaryItemData>; 56],
+}
+
+impl Default for PlayerSaveExtra {
+    fn default() -> Self {
+        Self {
+            position_future: Default::default(),
+            position_target: Default::default(),
+            position_last: Default::default(),
+            position_old: Default::default(),
+            position_temp: Default::default(),
+            offset_dx: Default::default(),
+            offset_dy: Default::default(),
+            offset2_dx: Default::default(),
+            offset2_dy: Default::default(),
+            velocity_dx: Default::default(),
+            velocity_dy: Default::default(),
+            pgfxnum: Default::default(),
+            ticks_per_frame: Default::default(),
+            tick_counter: Default::default(),
+            number_of_frames: Default::default(),
+            current_frame: Default::default(),
+            anim_width: Default::default(),
+            width2: Default::default(),
+            queued_spell_id: Default::default(),
+            queued_spell_type: Default::default(),
+            queued_spell_from: Default::default(),
+            queued_spell_level: Default::default(),
+            inventory_spell: Default::default(),
+            sbk_spell: Default::default(),
+            sbk_spl_type: Default::default(),
+            r_spell: Default::default(),
+            r_spl_type: Default::default(),
+            spell_flags: Default::default(),
+            hotkeys: [0; 4],
+            hotkey_types: [0; 4],
+            uses_ranged_weapon: Default::default(),
+            lvl_changing: Default::default(),
+            base_to_block: Default::default(),
+            max_level: Default::default(),
+            max_exp: Default::default(),
+            next_exp_threshold: Default::default(),
+            infra_flag: Default::default(),
+            var5: Default::default(),
+            var8: Default::default(),
+            n_frames: Default::default(),
+            w_frames: Default::default(),
+            a_frames: Default::default(),
+            a_fnum: Default::default(),
+            s_frames: Default::default(),
+            s_fnum: Default::default(),
+            h_frames: Default::default(),
+            d_frames: Default::default(),
+            b_frames: Default::default(),
+            i_flags: Default::default(),
+            i_spl_lvl_add: Default::default(),
+            i_spl_cost: Default::default(),
+            i_spl_dur: Default::default(),
+            oil_type: Default::default(),
+            town_warps: Default::default(),
+            dung_msgs: Default::default(),
+            lvl_load: Default::default(),
+            dung_msgs2: Default::default(),
+            mana_shield: Default::default(),
+            original_cathedral: Default::default(),
+            w_reflections: Default::default(),
+            diablo_kill_level: Default::default(),
+            difficulty: Default::default(),
+            dam_ac_flags: Default::default(),
+            save_items: std::array::from_fn(|_| None),
+        }
+    }
+}
+
 
 /// Player structure - exact port from C++
 ///
@@ -566,6 +838,9 @@ pub struct Player {
     pub _p_cmd: PlayerCmd,
     /// Player command parameter
     pub _p_cmd_param: u32,
+    /// C++ `SavePlayer`-only state not modelled by gameplay yet.
+    pub save_extra: PlayerSaveExtra,
+
 }
 
 impl Player {
@@ -671,6 +946,10 @@ impl Player {
             // Network
             _p_cmd: PlayerCmd::Invalid,
             _p_cmd_param: 0,
+            save_extra: PlayerSaveExtra {
+                save_items: std::array::from_fn(|_| None),
+                ..PlayerSaveExtra::default()
+            },
         }
     }
 

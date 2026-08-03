@@ -14,7 +14,7 @@ fn main() {
     let header = CppGameHeader::parse(&decoded).expect("header");
     let seeds = CppGameHeader::parse_level_seeds(&decoded, 17).expect("seeds");
     let mut gs = GameState::new(Player::new(), true, 12345);
-    gs.load_from_save(&pack, &header, &seeds);
+    gs.load_from_save(&pack, &header, &seeds, Some(&decoded));
     let ok = devilutionx_rs::game::game_loop::prepare_dungeon_for_replay(&mut gs, 1);
     println!("[Probe] prep={ok} monsters={} objects={} numtrigs={} state={}", gs.monster_manager.active_count(), gs.objects.len(), gs.triggers.numtrigs, devilutionx_rs::engine::random::gameplay_rng_state());
     let sv = gs.write_save_game_v3();

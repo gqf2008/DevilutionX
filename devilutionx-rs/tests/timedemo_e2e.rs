@@ -448,7 +448,7 @@ fn loads_reference_save_into_game_state() {
 
     let mut gs = GameState::new(Player::new(), false, 42);
     println!("[SeedProbe] timedemo L1 seed = {}", seeds[1].0);
-    gs.load_from_save(&pack, &header, &seeds);
+    gs.load_from_save(&pack, &header, &seeds, Some(&decoded));
     assert_eq!(gs.player.get_name(), "timedemo", "hero name loaded");
     assert_eq!(gs.player._p_class as u8, 0, "Warrior");
     assert_eq!(gs.current_dungeon_level, 1);
@@ -488,7 +488,7 @@ fn replay_prep_counts_match_cpp_algorithm() {
     let seeds = CppGameHeader::parse_level_seeds(&decoded, 17).expect("seed table");
 
     let mut gs = GameState::new(Player::new(), false, 12345);
-    gs.load_from_save(&pack, &header, &seeds);
+    gs.load_from_save(&pack, &header, &seeds, Some(&decoded));
     assert!(
         devilutionx_rs::game::game_loop::prepare_dungeon_for_replay(&mut gs, 1),
         "L1 level generation succeeds"
@@ -564,7 +564,7 @@ fn replay_from_saved_state_reports_reference_diff() {
     // Start the replay from the saved state (C++ RunTimedemo loads the save).
     devilutionx_rs::engine::random::seed_gameplay_rng(12345);
     let mut gs = GameState::new(Player::new(), false, 12345);
-    gs.load_from_save(&pack, &header, &seeds);
+    gs.load_from_save(&pack, &header, &seeds, Some(&decoded));
     // Generate the saved L1 level headlessly (C++-exact layout +
     // PlaceMonsters) so the post-replay entry carries the level's
     // monsters/objects.
@@ -819,10 +819,16 @@ fn dungeon_body_writer_matches_cpp_layout() {
 
     let o = BinaryObjectData::default();
     let l = BinaryLightData::default();
+    let mut ids = vec![0u32; 200];
+    ids[0] = 7;
+    for (i, v) in ids.iter_mut().enumerate().skip(1) {
+        *v = i as u32;
+    }
     let mut h = SaveHelper::new(4096);
     write_dungeon_body(
         &mut h,
-        &[(7u32, m)],
+        &ids,
+        &[m],
         1, 0, 0, 0,
         &[],
         &[0i8, 5i8],
@@ -834,7 +840,8 @@ fn dungeon_body_writer_matches_cpp_layout() {
     let d = h.into_data();
 
     assert_eq!(&d[0..4], &7u32.to_be_bytes(), "active monster id BE u32");
-    let missiles_off = 4 + monster_len;
+    assert_eq!(&d[4..8], &1u32.to_be_bytes(), "next ActiveMonsters slot id");
+    let missiles_off = 200 * 4 + monster_len;
     assert_eq!(&d[missiles_off..missiles_off + 3], &[0, 1, 2], "missile active array 0..125");
     let objects_off = missiles_off + 250;
     assert_eq!(&d[objects_off..objects_off + 2], &[0, 5], "active object ids");

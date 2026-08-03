@@ -994,6 +994,7 @@ impl GameState {
         pack: &crate::game::pack::PlayerPack,
         header: &crate::game::loadsave::CppGameHeader,
         seeds: &[(u32, u32)],
+        game_entry: Option<&[u8]>,
     ) {
         use crate::game::player_exact::{HeroClass, PlayerItem};
         let p = &mut self.player;
@@ -1058,6 +1059,40 @@ impl GameState {
         for (i, ip) in pack.spd_list.iter().enumerate() {
             if i < p.spd_list.len() {
                 p.spd_list[i] = item_from_pack(ip);
+            }
+        }
+        // Load the C++ SavePlayer block (header 43B + seeds 17x8B = 179) from
+        // the `game` entry so save_player round-trips the full player state.
+        if let Some(entry) = game_entry {
+            const PLAYER_BLOCK_OFFSET: usize = 43 + 17 * 8;
+            const PLAYER_BLOCK_LEN: usize = 21680;
+            if entry.len() >= PLAYER_BLOCK_OFFSET + PLAYER_BLOCK_LEN {
+                let mut lh = crate::game::loadsave::LoadHelper::new(
+                    entry[PLAYER_BLOCK_OFFSET..PLAYER_BLOCK_OFFSET + PLAYER_BLOCK_LEN].to_vec(),
+                );
+                crate::game::loadsave::load_player_from_game(&mut lh, &mut self.player);
+            }
+        }
+        // Quests: 16 x 44-byte SaveQuest blocks right after the player
+        // (C++ Quests[] + ReturnLvl* globals, loadsave.cpp:980-1030).
+        const QUESTS_OFFSET: usize = 43 + 17 * 8 + 21680;
+        if let Some(entry) = game_entry {
+            for i in 0..16usize {
+                if let Some((q, _)) = crate::game::loadsave::parse_quest(entry, QUESTS_OFFSET + i * 44) {
+                    if i < self.quests.quests.len() {
+                        self.quests.quests[i] = q;
+                    }
+                }
+            }
+            // Return state is written per quest block as BE i32 x4 at +24
+            // (ReturnLvlPosition.x/y, ReturnLvlLevel, ReturnLvlDungeonType).
+            if entry.len() >= QUESTS_OFFSET + 16 * 44 {
+                let last = QUESTS_OFFSET + 15 * 44;
+                let be_i32 = |i: usize| i32::from_be_bytes([entry[i], entry[i + 1], entry[i + 2], entry[i + 3]]);
+                self.quests.return_lvl_position = (be_i32(last + 24), be_i32(last + 28));
+                self.quests.return_level = be_i32(last + 32);
+                self.quests.return_level_type =
+                    unsafe { std::mem::transmute(be_i32(last + 36) as i8) };
             }
         }
         // Game state: spawn flag (C++ gbIsSpawn from the save magic) + level
@@ -2535,13 +2570,12 @@ fn find_free_inv_cell(inv_grid: &[i8; 40], width: usize, height: usize) -> Optio
             .collect();
         let kill = self.kill_counts.to_vec();
 
-        // Dungeon body (monsters, missiles, objects, lights, vision).
+        // Dungeon body (monsters, missiles, objects, lights, vision). The
+        // ActiveMonsters id array is the full MaxMonsters (200) slots; a
+        // freshly generated level uses the sequential slot ids 0..199.
         let (monsters, params) = self.capture_monsters();
-        let active_monsters: Vec<(u32, loadsave::BinaryMonsterData)> = monsters
-            .into_iter()
-            .enumerate()
-            .map(|(i, m)| (i as u32, m))
-            .collect();
+        let active_ids: Vec<u32> = (0..200u32).collect();
+        let active_monsters: Vec<loadsave::BinaryMonsterData> = monsters;
         let missiles: Vec<BinaryMissileData> = self
             .capture_simple_missiles()
             .iter()
@@ -2584,6 +2618,7 @@ fn find_free_inv_cell(inv_grid: &[i8; 40], width: usize, height: usize) -> Optio
         let mut body = SaveHelper::new(32 * 1024);
         loadsave::write_dungeon_body(
             &mut body,
+            &active_ids,
             &active_monsters,
             monster_level,
             0,
