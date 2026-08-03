@@ -285,12 +285,110 @@ fn max_trans_val(game_state: &crate::game::game_state::GameState) -> i8 {
     layout.trans_val.iter().copied().max().unwrap_or(0)
 }
 
+/// C++ `IsObjectAtPosition` (objects.h:307): object anchors plus the
+/// large-object coverage markers (sarcophagi store a negative dObject entry
+/// on their north tile).
 fn is_object_at(game_state: &crate::game::game_state::GameState, x: i32, y: i32) -> bool {
-    game_state.objects.iter().any(|o| o.position.x == x && o.position.y == y)
+    use crate::game::objdat::ObjectId;
+    if game_state.objects.iter().any(|o| o.position.x == x && o.position.y == y) {
+        return true;
+    }
+    game_state.objects.iter().any(|o| {
+        o.otype == ObjectId::Sarc && o.position.x == x && o.position.y == y + 1
+    })
 }
 
-fn add_object(game_state: &mut crate::game::game_state::GameState, otype: crate::game::objdat::ObjectId, x: i32, y: i32) {
-    game_state.objects.push(crate::game::objects::Object::new(otype, crate::game::types::Point::new(x, y)));
+fn add_object(game_state: &mut crate::game::game_state::GameState, level_types: &crate::game::monster::LevelMonsterTypes, otype: crate::game::objdat::ObjectId, x: i32, y: i32) {
+    use crate::engine::random::{gameplay_advance_rnd_seed, gameplay_generate_rnd};
+    use crate::game::objdat::ObjectId;
+    let mut obj = crate::game::objects::Object::new(otype, crate::game::types::Point::new(x, y));
+    // C++ AddObject -> SetupObject (objects.cpp:679-708): animated objects
+    // consume GenerateRnd(animDelay) + GenerateRnd(animLen-1).
+    match otype {
+        ObjectId::SkFire => {
+            // objdat: animDelay=2, animLen=11
+            obj.anim_delay = 2;
+            obj.anim_len = 11;
+            obj.anim_cnt = gameplay_generate_rnd(2);
+            obj.anim_frame = gameplay_generate_rnd(10) + 1;
+        }
+        ObjectId::Candle2 | ObjectId::BookCandle => {
+            // objdat: animDelay=2, animLen=4
+            obj.anim_delay = 2;
+            obj.anim_len = 4;
+            obj.anim_cnt = gameplay_generate_rnd(2);
+            obj.anim_frame = gameplay_generate_rnd(3) + 1;
+        }
+        _ => {
+            obj.anim_delay = 1000;
+            obj.anim_cnt = 0;
+            obj.anim_len = 0;
+            obj.anim_frame = 0;
+        }
+    }
+    // C++ AddObject body draws per object type.
+    match otype {
+        ObjectId::Barrel | ObjectId::BarrelEx => {
+            // C++ AddBarrel (objects.cpp:1279-1292).
+            obj.ovar1 = 0;
+            obj.rnd_seed = gameplay_advance_rnd_seed() as u32;
+            obj.ovar2 = if otype == ObjectId::BarrelEx {
+                0
+            } else {
+                gameplay_generate_rnd(10)
+            };
+            obj.ovar3 = gameplay_generate_rnd(3);
+            if obj.ovar2 >= 8 {
+                obj.ovar4 = spawn_holding_skeleton(game_state, level_types.clone())
+                    .map(|idx| idx as i32)
+                    .unwrap_or(-1);
+            }
+        }
+        ObjectId::SkelBook | ObjectId::Bookstand | ObjectId::BookcaseL | ObjectId::BookcaseR => {
+            // C++ cases: _oRndSeed = AdvanceRndSeed() (+ _oPreFlag for bookcases).
+            obj.rnd_seed = gameplay_advance_rnd_seed() as u32;
+            if matches!(otype, ObjectId::BookcaseL | ObjectId::BookcaseR) {
+                obj.pre_flag = 1;
+            }
+        }
+        _ => {}
+    }
+    game_state.objects.push(obj);
+}
+
+/// C++ `PreSpawnSkeleton` (monster.cpp:4738-4745) for the holding cell:
+/// pick a registered skeleton type (one draw) + InitMonster draws, register
+/// the monster at {0,0}. Returns the monster index.
+fn spawn_holding_skeleton(
+    game_state: &mut crate::game::game_state::GameState,
+    level_types: crate::game::monster::LevelMonsterTypes,
+) -> Option<usize> {
+    let mut skeleton_indexes: Vec<usize> = Vec::new();
+    for i in 0..level_types.count() {
+        let id = level_types.get(i).map(|e| e.monster_type).unwrap_or(crate::game::monstdat::MonsterId::Invalid);
+        if is_skel(id) {
+            skeleton_indexes.push(i);
+        }
+    }
+    if skeleton_indexes.is_empty() {
+        return None;
+    }
+    let type_index = skeleton_indexes[crate::engine::random::gameplay_generate_rnd(skeleton_indexes.len() as i32) as usize];
+    let id = (game_state.monster_manager.active_count() + 1) as u32;
+    let mtype_id = level_types.get(type_index).map(|e| e.monster_type).unwrap_or(crate::game::monstdat::MonsterId::SkeletonAxeW);
+    let mut m = crate::game::monster::Monster::new_with_rng(
+        id,
+        mtype_id,
+        0,
+        0,
+        game_state.current_dungeon_level,
+        &mut rand::rngs::StdRng::seed_from_u64(0),
+    );
+    m.facing = crate::game::types::Direction::South;
+    m.level_type = type_index as u8;
+    m.ai_state = crate::game::monster::MonsterAIState::Idle;
+    m.mode = crate::game::monster::MonsterMode::Stand;
+    game_state.monster_manager.add_monster(m)
 }
 
 /// C++ `CheckThemeObj3` (themes.cpp:141-156): a 1x1 object fits when in bounds,
@@ -672,6 +770,10 @@ fn place_theme_monsts(
     }
     let mtype = scatter[crate::engine::random::gameplay_generate_rnd(scatter.len() as i32) as usize];
     let region = game_state.theme_manager.themes[t].ttval;
+    // C++ PlaceThemeMonsts (themes.cpp:353-375) spawns *inline*: each
+    // FlipCoin(f) is immediately followed by AddMonster's GenerateRnd(8) +
+    // InitMonster draws, so the draws interleave with the scan. Batching the
+    // spawns would consume the same draws in a different order.
     let mut spawns = Vec::new();
     for y in 0..crate::levels::types::MAXDUNY as i32 {
         for x in 0..crate::levels::types::MAXDUNX as i32 {
@@ -681,26 +783,25 @@ fn place_theme_monsts(
                 && !is_object_at(game_state, x, y)
                 && crate::engine::random::gameplay_flip_coin(f)
             {
-                spawns.push((x, y));
+                let mtype_id = level_types.get(mtype).map(|e| e.monster_type).unwrap_or(crate::game::monstdat::MonsterId::Zombie);
+                let dir = crate::engine::random::gameplay_generate_rnd(8);
+                let mut m = crate::game::monster::Monster::new_with_rng(
+                    (game_state.monster_manager.active_count() + spawns.len() + 1) as u32,
+                    mtype_id,
+                    x,
+                    y,
+                    game_state.current_dungeon_level,
+                    &mut rand::rngs::StdRng::seed_from_u64(0),
+                );
+                m.facing = crate::game::types::Direction::ALL[(dir as usize) % 8];
+                m.level_type = mtype as u8;
+                m.ai_state = crate::game::monster::MonsterAIState::Idle;
+                m.mode = crate::game::monster::MonsterMode::Stand;
+                spawns.push(m);
             }
         }
     }
-    for (x, y) in spawns {
-        let id = (game_state.monster_manager.active_count() + 1) as u32;
-        let mtype_id = level_types.get(mtype).map(|e| e.monster_type).unwrap_or(crate::game::monstdat::MonsterId::Zombie);
-        let dir = crate::engine::random::gameplay_generate_rnd(8);
-        let mut m = crate::game::monster::Monster::new_with_rng(
-            id,
-            mtype_id,
-            x,
-            y,
-            game_state.current_dungeon_level,
-            &mut rand::rngs::StdRng::seed_from_u64(0),
-        );
-        m.facing = crate::game::types::Direction::ALL[(dir as usize) % 8];
-        m.level_type = mtype as u8;
-        m.ai_state = crate::game::monster::MonsterAIState::Idle;
-        m.mode = crate::game::monster::MonsterMode::Stand;
+    for m in spawns {
         game_state.monster_manager.add_monster(m);
     }
 }
@@ -739,7 +840,7 @@ fn spawn_skeleton(game_state: &mut crate::game::game_state::GameState, level_typ
 /// C++ `SpawnObjectOrSkeleton` (themes.cpp:469-479).
 fn spawn_object_or_skeleton(game_state: &mut crate::game::game_state::GameState, level_types: &crate::game::monster::LevelMonsterTypes, frequency: u32, otype: crate::game::objdat::ObjectId, x: i32, y: i32) {
     if crate::engine::random::gameplay_flip_coin(frequency as i32) {
-        add_object(game_state, otype, x, y);
+        add_object(game_state, level_types, otype, x, y);
     } else {
         spawn_skeleton(game_state, level_types, x, y);
     }
@@ -757,7 +858,7 @@ fn theme_barrel(game_state: &mut crate::game::game_state::GameState, level_types
             if trans_val(game_state, x, y) == region && is_tile_not_solid(game_state, x, y) {
                 if crate::engine::random::gameplay_flip_coin(barrnd[level - 1]) {
                     let r = if crate::engine::random::gameplay_flip_coin(barrnd[level - 1]) { ObjectId::Barrel } else { ObjectId::BarrelEx };
-                    add_object(game_state, r, x, y);
+                    add_object(game_state, level_types, r, x, y);
                 }
             }
         }
@@ -772,13 +873,13 @@ fn theme_shrine(game_state: &mut crate::game::game_state::GameState, level_types
     let region = game_state.theme_manager.themes[t].ttval;
     if let Some((x, y, variant)) = tfit_shrine(game_state, region) {
         if variant == 1 {
-            add_object(game_state, ObjectId::Candle2, x - 1, y);
-            add_object(game_state, ObjectId::ShrineR, x, y);
-            add_object(game_state, ObjectId::Candle2, x + 1, y);
+            add_object(game_state, level_types, ObjectId::Candle2, x - 1, y);
+            add_object(game_state, level_types, ObjectId::ShrineR, x, y);
+            add_object(game_state, level_types, ObjectId::Candle2, x + 1, y);
         } else {
-            add_object(game_state, ObjectId::Candle2, x, y - 1);
-            add_object(game_state, ObjectId::ShrineL, x, y);
-            add_object(game_state, ObjectId::Candle2, x, y + 1);
+            add_object(game_state, level_types, ObjectId::Candle2, x, y - 1);
+            add_object(game_state, level_types, ObjectId::ShrineL, x, y);
+            add_object(game_state, level_types, ObjectId::Candle2, x, y + 1);
         }
     }
     let level = game_state.current_dungeon_level as usize;
@@ -833,13 +934,13 @@ fn theme_library(game_state: &mut crate::game::game_state::GameState, level_type
     let region = game_state.theme_manager.themes[t].ttval;
     if let Some((x, y, variant)) = tfit_shrine(game_state, region) {
         if variant == 1 {
-            add_object(game_state, ObjectId::BookCandle, x - 1, y);
-            add_object(game_state, ObjectId::BookcaseR, x, y);
-            add_object(game_state, ObjectId::BookCandle, x + 1, y);
+            add_object(game_state, level_types, ObjectId::BookCandle, x - 1, y);
+            add_object(game_state, level_types, ObjectId::BookcaseR, x, y);
+            add_object(game_state, level_types, ObjectId::BookCandle, x + 1, y);
         } else {
-            add_object(game_state, ObjectId::BookCandle, x, y - 1);
-            add_object(game_state, ObjectId::BookcaseL, x, y);
-            add_object(game_state, ObjectId::BookCandle, x, y + 1);
+            add_object(game_state, level_types, ObjectId::BookCandle, x, y - 1);
+            add_object(game_state, level_types, ObjectId::BookcaseL, x, y);
+            add_object(game_state, level_types, ObjectId::BookCandle, x, y + 1);
         }
     }
     for y in 1..(crate::levels::types::MAXDUNY as i32 - 1) {
@@ -848,7 +949,7 @@ fn theme_library(game_state: &mut crate::game::game_state::GameState, level_type
                 && !game_state.monster_manager.find_monster_at(crate::game::types::Point::new(x, y)).is_some()
                 && crate::engine::random::gameplay_flip_coin(librnd[level - 1] as i32)
             {
-                add_object(game_state, ObjectId::Bookstand, x, y);
+                add_object(game_state, level_types, ObjectId::Bookstand, x, y);
                 if !crate::engine::random::gameplay_flip_coin((2 * librnd[level - 1]) as i32) {
                     if let Some(o) = game_state.objects.last_mut() {
                         o.selection_region = crate::game::objdat::SelectionRegion::None;
@@ -871,7 +972,7 @@ fn theme_skel_room(game_state: &mut crate::game::game_state::GameState, level_ty
     game_state.theme_manager.theme_var1 = skel;
     game_state.theme_manager.themex = xp;
     game_state.theme_manager.themey = yp;
-    add_object(game_state, ObjectId::SkFire, xp, yp);
+    add_object(game_state, level_types, ObjectId::SkFire, xp, yp);
     spawn_object_or_skeleton(game_state, level_types, monstrnd[level - 1], ObjectId::BannerL, xp - 1, yp - 1);
     spawn_skeleton(game_state, level_types, xp, yp - 1);
     spawn_object_or_skeleton(game_state, level_types, monstrnd[level - 1], ObjectId::BannerR, xp + 1, yp - 1);
@@ -881,10 +982,10 @@ fn theme_skel_room(game_state: &mut crate::game::game_state::GameState, level_ty
     spawn_skeleton(game_state, level_types, xp, yp + 1);
     spawn_object_or_skeleton(game_state, level_types, monstrnd[level - 1], ObjectId::BannerL, xp + 1, yp + 1);
     if !is_object_at(game_state, xp, yp - 3) {
-        add_object(game_state, ObjectId::SkelBook, xp, yp - 2);
+        add_object(game_state, level_types, ObjectId::SkelBook, xp, yp - 2);
     }
     if !is_object_at(game_state, xp, yp + 3) {
-        add_object(game_state, ObjectId::SkelBook, xp, yp + 2);
+        add_object(game_state, level_types, ObjectId::SkelBook, xp, yp + 2);
     }
 }
 
@@ -901,7 +1002,7 @@ fn theme_torture(game_state: &mut crate::game::game_state::GameState, level_type
                 && check_theme_obj3(game_state, x, y, region, 0)
                 && crate::engine::random::gameplay_flip_coin(tortrnd[level - 1] as i32)
             {
-                add_object(game_state, ObjectId::TNudeM2, x, y);
+                add_object(game_state, level_types, ObjectId::TNudeM2, x, y);
             }
         }
     }
@@ -912,7 +1013,7 @@ fn theme_torture(game_state: &mut crate::game::game_state::GameState, level_type
 fn theme_obj5_object(game_state: &mut crate::game::game_state::GameState, level_types: &crate::game::monster::LevelMonsterTypes, t: usize, otype: crate::game::objdat::ObjectId, monstrnd: [i32; 4]) {
     let region = game_state.theme_manager.themes[t].ttval;
     if let Some((x, y)) = tfit_obj5(game_state, region) {
-        add_object(game_state, otype, x, y);
+        add_object(game_state, level_types, otype, x, y);
     }
     let level = game_state.current_dungeon_level as usize;
     place_theme_monsts(game_state, level_types, t, monstrnd[level - 1]);
@@ -931,7 +1032,7 @@ fn theme_decap(game_state: &mut crate::game::game_state::GameState, level_types:
                 && check_theme_obj3(game_state, x, y, region, 0)
                 && crate::engine::random::gameplay_flip_coin(decaprnd[level - 1] as i32)
             {
-                add_object(game_state, ObjectId::Decap, x, y);
+                add_object(game_state, level_types, ObjectId::Decap, x, y);
             }
         }
     }
@@ -947,7 +1048,7 @@ fn theme_armor_stand(game_state: &mut crate::game::game_state::GameState, level_
     let region = game_state.theme_manager.themes[t].ttval;
     if game_state.theme_manager.armor_flag {
         if let Some((x, y)) = tfit_obj3(game_state, region) {
-            add_object(game_state, ObjectId::ArmorStand, x, y);
+            add_object(game_state, level_types, ObjectId::ArmorStand, x, y);
         }
     }
     for y in 0..crate::levels::types::MAXDUNY as i32 {
@@ -956,7 +1057,7 @@ fn theme_armor_stand(game_state: &mut crate::game::game_state::GameState, level_
                 && check_theme_obj3(game_state, x, y, region, 0)
                 && crate::engine::random::gameplay_flip_coin(armorrnd[level - 1] as i32)
             {
-                add_object(game_state, ObjectId::ArmorStandN, x, y);
+                add_object(game_state, level_types, ObjectId::ArmorStandN, x, y);
             }
         }
     }
@@ -972,7 +1073,7 @@ fn theme_goat_shrine(game_state: &mut crate::game::game_state::GameState, level_
     game_state.theme_manager.theme_var1 = goat;
     game_state.theme_manager.themex = themex;
     game_state.theme_manager.themey = themey;
-    add_object(game_state, ObjectId::GoatShrine, themex, themey);
+    add_object(game_state, level_types, ObjectId::GoatShrine, themex, themey);
     for yy in (themey - 1)..=(themey + 1) {
         for xx in (themex - 1)..=(themex + 1) {
             if trans_val(game_state, xx, yy) == region && is_tile_not_solid(game_state, xx, yy) && (xx != themex || yy != themey) {
@@ -1005,7 +1106,7 @@ fn theme_brn_cross(game_state: &mut crate::game::game_state::GameState, level_ty
                 && check_theme_obj3(game_state, x, y, region, 0)
                 && crate::engine::random::gameplay_flip_coin(bcrossrnd[level - 1] as i32)
             {
-                add_object(game_state, ObjectId::TBCross, x, y);
+                add_object(game_state, level_types, ObjectId::TBCross, x, y);
             }
         }
     }
@@ -1021,7 +1122,7 @@ fn theme_weapon_rack(game_state: &mut crate::game::game_state::GameState, level_
     let region = game_state.theme_manager.themes[t].ttval;
     if game_state.theme_manager.weapon_flag {
         if let Some((x, y)) = tfit_obj3(game_state, region) {
-            add_object(game_state, ObjectId::WeapRack, x, y);
+            add_object(game_state, level_types, ObjectId::WeapRack, x, y);
         }
     }
     for y in 0..crate::levels::types::MAXDUNY as i32 {
@@ -1030,7 +1131,7 @@ fn theme_weapon_rack(game_state: &mut crate::game::game_state::GameState, level_
                 && check_theme_obj3(game_state, x, y, region, 0)
                 && crate::engine::random::gameplay_flip_coin(weaponrnd[level - 1] as i32)
             {
-                add_object(game_state, ObjectId::WeaponRackN, x, y);
+                add_object(game_state, level_types, ObjectId::WeaponRackN, x, y);
             }
         }
     }

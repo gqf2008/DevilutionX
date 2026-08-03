@@ -16,7 +16,7 @@ fn main() {
     let mut gs = GameState::new(Player::new(), true, 12345);
     gs.load_from_save(&pack, &header, &seeds);
     let ok = devilutionx_rs::game::game_loop::prepare_dungeon_for_replay(&mut gs, 1);
-    println!("[Probe] prep={ok} monsters={} objects={} numtrigs={}", gs.monster_manager.active_count(), gs.objects.len(), gs.triggers.numtrigs);
+    println!("[Probe] prep={ok} monsters={} objects={} numtrigs={} state={}", gs.monster_manager.active_count(), gs.objects.len(), gs.triggers.numtrigs, devilutionx_rs::engine::random::gameplay_rng_state());
     for t in 0..gs.triggers.numtrigs {
         let p = gs.triggers.trigs[t].position;
         println!("  trig {t}: ({},{})", p.x, p.y);
@@ -27,6 +27,11 @@ fn main() {
         println!("  {i}: ttval={} ttype={:?}", th.ttval, th.ttype);
     }
     println!("[Monsters] count={}", gs.monster_manager.active_count());
+    for i in 102..gs.monster_manager.active_count() {
+        if let Some(m) = gs.monster_manager.get_monster(i) {
+            println!("  THEME {i}: lt={} pos=({},{})", m.level_type, m.x, m.y);
+        }
+    }
     for i in 4..gs.monster_manager.active_count() {
         if let Some(m) = gs.monster_manager.get_monster(i) {
             println!("  {i}: lt={} pos=({},{})", m.level_type, m.x, m.y);

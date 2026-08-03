@@ -1670,6 +1670,89 @@ fn pre_spawn_skeleton(
     game_state.monster_manager.add_monster(m)
 }
 
+/// C++ `ItemPlace` (items.cpp:424-440): the tile must be free of monsters,
+/// the player, items, objects (incl. large-object markers), theme-room
+/// (Populated) tiles, and solid tiles.
+fn item_place(game_state: &GameState, x: i32, y: i32) -> bool {
+    let Some(layout) = &game_state.dungeon_layout else {
+        return false;
+    };
+    if x < 0 || y < 0 || x >= layout.width as i32 || y >= layout.height as i32 {
+        return false;
+    }
+    if game_state
+        .monster_manager
+        .find_monster_at(crate::game::types::Point::new(x, y))
+        .is_some()
+    {
+        return false;
+    }
+    if game_state.player.position.x == x && game_state.player.position.y == y {
+        return false;
+    }
+    if game_state.ground_items.iter().any(|gi| gi.x == x && gi.y == y) {
+        return false;
+    }
+    if object_blocks_tile(game_state, x, y) {
+        return false;
+    }
+    if layout.populated[y as usize * layout.width + x as usize] {
+        return false;
+    }
+    let pn = layout.d_piece[y as usize * layout.width + x as usize] as usize;
+    let props = layout.sol.get(pn).copied().unwrap_or_default();
+    !props.contains(crate::engine::dungeon::TileProperties::SOLID)
+}
+
+/// C++ `InitItems` (items.cpp:2432-2479) single-player level generation:
+/// `DiscardRandomValues(1)` then `AddInitItems` — `GenerateRnd(3)+3` pregen
+/// mana/heal potions, each placed via `GetRandomAvailableItemPosition`
+/// (`GenerateRnd(80)+16` until `ItemPlace`), seeded with `AdvanceRndSeed()`
+/// (which then reseeds the gameplay RNG), followed by the potion-type pick
+/// (`PickRandomlyAmong({IDI_MANA, IDI_HEAL})` = `GenerateRnd(2)`) and the
+/// `GetItemAttrs` AC roll (`GenerateRnd(1)` — the potion AC range is 0..0).
+/// The draws and the placed positions (which `PlaceThemeMonsts` checks via
+/// `dItem`) are replicated for exact RNG-stream continuity; the potions are
+/// recorded as ground items.
+fn init_items_rng(game_state: &mut GameState) {
+    use crate::engine::random::{
+        gameplay_advance_rnd_seed, gameplay_generate_rnd, gameplay_rnd, seed_gameplay_rng,
+    };
+    use crate::game::game_state::GroundItemType;
+    // InitItems: DiscardRandomValues(1)
+    gameplay_advance_rnd_seed();
+    // AddInitItems: rnd = GenerateRnd(3) + 3
+    let num = gameplay_generate_rnd(3) + 3;
+    for _ in 0..num {
+        // GetRandomAvailableItemPosition
+        let (x, y) = loop {
+            let x = gameplay_rnd(16, 95);
+            let y = gameplay_rnd(16, 95);
+            if item_place(game_state, x, y) {
+                break (x, y);
+            }
+        };
+        // item._iSeed = AdvanceRndSeed(); SetRndSeed(_iSeed)
+        let iseed = gameplay_advance_rnd_seed() as u32;
+        seed_gameplay_rng(iseed);
+        // PickRandomlyAmong({ IDI_MANA, IDI_HEAL }): 0 = Mana, 1 = Heal.
+        let pick = gameplay_generate_rnd(2);
+        // GetItemAttrs potion AC roll: GenerateRnd(1) (iMinAC == iMaxAC == 0).
+        let _ac = gameplay_generate_rnd(1);
+        game_state.ground_items.push(crate::game::game_state::GroundItem {
+            x,
+            y,
+            item_type: if pick == 0 {
+                GroundItemType::ManaPotion
+            } else {
+                GroundItemType::HealingPotion
+            },
+            item_index: None,
+            item: None,
+        });
+    }
+}
+
 /// C++ `PlaceMonsters` (monster.cpp:3701-3756) single-player: place
 /// `na / 30` monsters (`na` = non-solid tiles in the 16..96 dungeon region)
 /// from the scatter roster, one group at a time.
@@ -1922,8 +2005,11 @@ pub fn prepare_dungeon_for_replay(game_state: &mut GameState, level: u8) -> bool
         game_state.player.position.y,
         level_types.clone(),
     );
+    // C++ InitItems runs between InitMonsters and CreateThemeRooms
+    // (diablo.cpp:3150-3152); its draws shift the theme RNG stream.
+    init_items_rng(game_state);
     // C++ CreateThemeRooms: place theme-room objects/monsters/items after the
-    // scatter monsters (their RNG draws do not affect monster placement).
+    // scatter monsters.
     crate::levels::themes::create_theme_rooms(game_state, &level_types);
     true
 }
