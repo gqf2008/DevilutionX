@@ -414,12 +414,15 @@ pub fn gameplay_rng_state() -> u32 {
 }
 
 /// C++ `FlipCoin(frequency)` on the gameplay RNG: `GenerateRnd(f) == 0`,
-/// which is true when `f <= 0` (GenerateRnd returns 0 for non-positive input).
+/// which is true when `f <= 0` (GenerateRnd returns 0 and does *not* advance).
+/// Uses the raw `gameplay_generate_rnd` so `GenerateRnd(1)` still advances the
+/// LCG exactly like C++ (`gameplay_rnd(0, 0)` would short-circuit and skip the
+/// draw, desynchronising every subsequent roll).
 pub fn gameplay_flip_coin(frequency: i32) -> bool {
     if frequency <= 0 {
         return true;
     }
-    gameplay_rnd(0, frequency - 1) == 0
+    gameplay_generate_rnd(frequency) == 0
 }
 
 #[cfg(test)]

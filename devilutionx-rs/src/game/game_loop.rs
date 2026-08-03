@@ -1291,7 +1291,6 @@ pub fn place_dungeon_objects(game_state: &mut GameState) {
             .into_iter()
             .map(|(x, y, otype)| crate::game::objects::Object::new(otype, Point::new(x, y))),
     );
-
     // InitRndBarrels: numobjs = GenerateRnd(5) + 3 barrel groups.
     let numobjs = crate::engine::random::gameplay_rnd(0, 4) + 3;
     for _ in 0..numobjs {

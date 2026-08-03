@@ -463,7 +463,7 @@ fn loads_reference_save_into_game_state() {
 /// Determinism lock for the replay dungeon setup (issue #13): for the
 /// Timedemo L1 seed the C++-exact pipeline must place exactly 4 holding-cell
 /// golems (InitGolems) + 95 scatter monsters (na/30 with na=2868) + theme-room
-/// monsters = 111, and 82 objects (InitObjects + CreateThemeRooms). The
+/// monsters = 107, and 81 objects (InitObjects + CreateThemeRooms). The
 /// reference fixture reports 88 monsters / 76 objects because the demo replay
 /// kills monsters and destroys objects.
 #[test]
@@ -493,12 +493,11 @@ fn replay_prep_counts_match_cpp_algorithm() {
         devilutionx_rs::game::game_loop::prepare_dungeon_for_replay(&mut gs, 1),
         "L1 level generation succeeds"
     );
-    // C++-exact L1 generator: na = 2868 -> 95 scatter + 4 golems + the theme
-    // room monsters (PlaceThemeMonsts/skeletons) = 111 initial monsters. The
-    // reference fixture's 88 reflect monsters killed during the demo replay.
-    // Objects: InitObjects + theme-room objects = 82 (reference 76 post-replay).
-    assert_eq!(gs.monster_manager.active_count(), 111, "4 golems + 95 scatter + theme monsters");
-    assert_eq!(gs.objects.len(), 82, "InitObjects + theme-room objects");
+    // C++-exact L1 generator: na = 2868 -> 95 scatter + 4 golems + theme
+    // room monsters = 107 initial monsters (the reference's 88 reflect deaths
+    // during the demo replay). Objects: InitObjects + theme-room objects = 81.
+    assert_eq!(gs.monster_manager.active_count(), 107, "4 golems + 95 scatter + theme monsters");
+    assert_eq!(gs.objects.len(), 81, "InitObjects + theme-room objects");
 }
 
 /// Diagnostic: run the demo replay *from the saved state* (Tier 1
