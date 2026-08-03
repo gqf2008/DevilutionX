@@ -524,14 +524,13 @@ fn replay_prep_counts_match_cpp_algorithm() {
         assert_eq!(e, g, "InitObjects[{i}] mismatch");
     }
     eprintln!("[ReplayPrep] monsters={} objects={}", gs.monster_manager.active_count(), gs.objects.len());
-    // Monster/theme alignment status: the C++ spawn save has 118 initial
-    // monsters and 76 objects. Objects are now byte-exact (54 InitObjects +
-    // 22 theme-room objects); the 95 scatter monsters and theme monsters
-    // 102-116 are byte-exact too. The remaining gap is Theme_Treasure's gold
-    // drops (SetupAllItems RNG), which shift its PlaceThemeMonsts stream (3
-    // Rust spawns vs the C++'s 1, so 120 vs 118 monsters).
-    assert_eq!(gs.monster_manager.active_count(), 120, "4 golems + 3 skeletons + 95 scatter + 18 theme monsters (intermediate; C++ = 118)");
-    assert_eq!(gs.objects.len(), 76, "54 InitObjects + 22 theme-room objects (C++-exact)");
+    // The full L1 level generation now matches the C++ reference byte-for-
+    // byte: 76 objects (54 InitObjects + 22 theme-room objects) and 118
+    // monsters (4 golems + 3 pre-spawned skeletons + 95 scatter + 16 theme
+    // monsters), including Theme_Treasure's SetupAllItems gold/random-item
+    // RNG draws.
+    assert_eq!(gs.monster_manager.active_count(), 118, "L1 initial monsters (C++-exact)");
+    assert_eq!(gs.objects.len(), 76, "L1 objects (C++-exact)");
 }
 
 /// Diagnostic: run the demo replay *from the saved state* (Tier 1

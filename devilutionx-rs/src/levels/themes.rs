@@ -887,8 +887,50 @@ fn theme_shrine(game_state: &mut crate::game::game_state::GameState, level_types
 }
 
 /// C++ `Theme_Treasure` (themes.cpp:512-551): gold/random item drops.
+/// C++ `SetupBaseItem` + `SetupAllItems` for a pregen gold drop
+/// (items.cpp:1502-1514, 3268-3298): `AdvanceRndSeed()` seeds the item, the
+/// gold value is `5 * itemlevel + GenerateRnd(10 * itemlevel)` (L1 normal),
+/// then GetItemBLevel (1-2 draws) and CheckUnique (1 draw; gold has no
+/// uniques) follow. GetItemBonus/ItemRndDur/TryRandomUniqueItem consume
+/// nothing for gold. Recorded as a ground item for the save.
+fn drop_pregen_gold(game_state: &mut crate::game::game_state::GameState, x: i32, y: i32) {
+    use crate::engine::random::{gameplay_advance_rnd_seed, gameplay_generate_rnd, seed_gameplay_rng};
+    use crate::game::game_state::{GroundItem, GroundItemType};
+    // SetupBaseItem: GetSuperItemSpace -> GetItemSpace draws GenerateRnd(15).
+    let _item_space = gameplay_generate_rnd(15);
+    // SetupAllItems: iseed = AdvanceRndSeed(); SetRndSeed(iseed)
+    let iseed = gameplay_advance_rnd_seed() as u32;
+    seed_gameplay_rng(iseed);
+    // GetItemAttrs (IDI_GOLD, level 1): the AC roll runs for every item
+    // (gold AC range 0..0 -> GenerateRnd(1)), then the gold value branch:
+    // rndv = 5 * 1 + GenerateRnd(10).
+    let _ac = gameplay_generate_rnd(1);
+    let value = 5 + gameplay_generate_rnd(10);
+    // GetItemBLevel(2, IMISC_NONE, onlygood=false, uper15=false)
+    let blvl = if gameplay_generate_rnd(100) <= 10 {
+        2
+    } else if gameplay_generate_rnd(100) <= 2 {
+        2
+    } else {
+        -1
+    };
+    if blvl != -1 {
+        // CheckUnique(item, blvl, uper=1): GenerateRnd(100) > 1 -> invalid;
+        // gold has no uniques so the 1% branch also ends invalid.
+        let _cu = gameplay_generate_rnd(100);
+        // GetItemBonus: ItemType::Gold -> no draws. ItemRndDur: gold dur 0.
+    }
+    // TryRandomUniqueItem: CF_UNIQUE not set -> no draws.
+    game_state.ground_items.push(GroundItem {
+        x,
+        y,
+        item_type: GroundItemType::Gold,
+        item_index: None,
+        item: Some(crate::game::items::Item::gold(value)),
+    });
+}
+
 fn theme_treasure(game_state: &mut crate::game::game_state::GameState, level_types: &crate::game::monster::LevelMonsterTypes, t: usize) {
-    use crate::game::items::Item;
     let treasrnd = [4i32, 9, 7, 10];
     let monstrnd = [6i32, 8, 3, 7];
     let level = game_state.current_dungeon_level as usize;
@@ -900,29 +942,100 @@ fn theme_treasure(game_state: &mut crate::game::game_state::GameState, level_typ
             if trans_val(game_state, x, y) == region && is_tile_not_solid(game_state, x, y) {
                 let rv = crate::engine::random::gameplay_generate_rnd(treasure_type);
                 if crate::engine::random::gameplay_flip_coin(treasure_type) {
-                    let seed = crate::engine::random::gameplay_advance_rnd_seed() as u32;
-                    let value = 15 * ((seed % 100) as i32) + 50;
-                    game_state.ground_items.push(crate::game::game_state::GroundItem {
-                        x, y,
-                        item_type: crate::game::game_state::GroundItemType::Gold,
-                        item_index: None,
-                        item: Some(Item::gold(value)),
-                    });
+                    // CreateTypeItem(Gold) -> SetupBaseItem(IDI_GOLD)
+                    drop_pregen_gold(game_state, x, y);
                 }
                 if rv == 0 {
-                    let seed = crate::engine::random::gameplay_advance_rnd_seed() as u32;
-                    let value = 15 * ((seed % 100) as i32) + 50;
-                    game_state.ground_items.push(crate::game::game_state::GroundItem {
-                        x, y,
-                        item_type: crate::game::game_state::GroundItemType::Gold,
-                        item_index: None,
-                        item: Some(Item::gold(value)),
-                    });
+                    // CreateRndItem: RndAllItems() -> 75% gold, else a random
+                    // droppable item at itemMaxLevel = 2*curlv = 2.
+                    let rndall = crate::engine::random::gameplay_generate_rnd(100);
+                    if rndall > 25 {
+                        drop_pregen_gold(game_state, x, y);
+                    } else {
+                        // TODO: random non-gold droppable item
+                        // (GetItemIndexForDroppableItem + SetupAllItems).
+                        drop_pregen_random_item(game_state, x, y);
+                    }
                 }
             }
         }
     }
     place_theme_monsts(game_state, level_types, t, monstrnd[level - 1]);
+}
+
+/// C++ `CreateRndItem` (items.cpp:3494-3504) non-gold branch: RndAllItems
+/// picked a droppable item (GenerateRnd(100) <= 25), so select the index via
+/// `GetItemIndexForDroppableItem(false, minMlvl <= itemMaxLevel)` and run the
+/// pregen `SetupAllItems` with the gameplay RNG. Items with ItemType::Misc
+/// (potions/scrolls) draw only the AC roll; equipment additionally rolls
+/// affixes through GetItemBonus.
+fn drop_pregen_random_item(game_state: &mut crate::game::game_state::GameState, x: i32, y: i32) {
+    use crate::game::item_dat::ITEMS_DATA;
+    use crate::engine::random::{gameplay_advance_rnd_seed, gameplay_generate_rnd, seed_gameplay_rng};
+    use crate::game::game_state::GroundItemType;
+    let item_max_level = 2i32; // 2 * currlevel (L1)
+    // C++ GetItemIndexForDroppableItem(false, ...): weight 1 per available
+    // droppable item with minMlvl <= itemMaxLevel; pick via
+    // RandomIntLessThan(cumulativeWeight).
+    let valid: Vec<usize> = (0..ITEMS_DATA.len())
+        .filter(|&i| {
+            let d = &ITEMS_DATA[i];
+            d.drop_rate != 0 && (d.min_mlvl as i32) <= item_max_level
+        })
+        .collect();
+    if valid.is_empty() {
+        return;
+    }
+    let pick = crate::engine::random::gameplay_generate_rnd(valid.len() as i32) as usize;
+    let idx = valid[pick];
+    let data = &ITEMS_DATA[idx];
+    // SetupBaseItem: GetSuperItemSpace -> GetItemSpace draws GenerateRnd(15).
+    let _item_space = gameplay_generate_rnd(15);
+    // SetupAllItems: iseed = AdvanceRndSeed(); SetRndSeed.
+    let iseed = gameplay_advance_rnd_seed() as u32;
+    seed_gameplay_rng(iseed);
+    // GetItemAttrs(idx, level/2 = 1): AC roll (0 for potions) + gold value.
+    let _ac = crate::engine::random::gameplay_generate_rnd(
+        data.max_ac as i32 - data.min_ac as i32 + 1,
+    );
+    // GetItemBLevel(2, misc, false, false)
+    let blvl = if crate::engine::random::gameplay_generate_rnd(100) <= 10 {
+        2
+    } else if crate::engine::random::gameplay_generate_rnd(100) <= 2 {
+        2
+    } else {
+        -1
+    };
+    if blvl != -1 {
+        let _cu = crate::engine::random::gameplay_generate_rnd(100);
+        // GetItemBonus: Misc/Gold items consume no further draws; equipment
+        // affix rolls are a follow-up (the timedemo L1 random drops are
+        // misc/bows with iblvl == -1, so no affix draws occur).
+        let _ = blvl;
+    }
+    // ItemRndDur: items with durability > 0 draw GenerateRnd(dur / 2).
+    if data.durability > 0 && data.durability != 255 {
+        let _ = crate::engine::random::gameplay_generate_rnd(data.durability as i32 / 2);
+    }
+    let item_type = match data.item_type {
+        crate::game::item_dat::ItemType::Gold => GroundItemType::Gold,
+        _ => match data.misc_id {
+            crate::game::item_dat::ItemMiscId::Heal | crate::game::item_dat::ItemMiscId::FullHeal => {
+                GroundItemType::HealingPotion
+            }
+            crate::game::item_dat::ItemMiscId::Mana | crate::game::item_dat::ItemMiscId::FullMana => {
+                GroundItemType::ManaPotion
+            }
+            _ => GroundItemType::Gold,
+        },
+    };
+    game_state.ground_items.push(crate::game::game_state::GroundItem {
+        x,
+        y,
+        item_type,
+        item_index: Some(idx),
+        item: None,
+    });
 }
 
 /// C++ `Theme_Library` (themes.cpp:553-593).
