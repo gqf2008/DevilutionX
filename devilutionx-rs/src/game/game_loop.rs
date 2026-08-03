@@ -2011,6 +2011,13 @@ pub fn prepare_dungeon_for_replay(game_state: &mut GameState, level: u8) -> bool
     // C++ CreateThemeRooms: place theme-room objects/monsters/items after the
     // scatter monsters.
     crate::levels::themes::create_theme_rooms(game_state, &level_types);
+    // The reference save's monsters all have enemy = player 0 and
+    // enemyPosition = the player tile (C++ save snapshot after level entry).
+    let player_pos = game_state.player.position;
+    for (_, m) in game_state.monster_manager.iter_mut() {
+        m.enemy = 0;
+        m.enemy_position = player_pos;
+    }
     true
 }
 

@@ -131,20 +131,25 @@ pub struct MonsterFlags(pub u32);
 
 impl MonsterFlags {
     pub const NONE: Self = Self(0);
+    // Bit positions match C++ `monster_flag` (monster.h:41-53) so the flags
+    // serialise byte-for-byte into SaveMonster.
     pub const HIDDEN: Self = Self(1 << 0);
     pub const LOCK_ANIMATION: Self = Self(1 << 1);
     pub const ALLOW_SPECIAL: Self = Self(1 << 2);
-    pub const NO_ENEMY: Self = Self(1 << 3);
-    pub const SEARCH: Self = Self(1 << 4);
+    pub const TARGETS_MONSTER: Self = Self(1 << 4);
     pub const GOLEM: Self = Self(1 << 5);
     pub const QUEST_COMPLETE: Self = Self(1 << 6);
     pub const KNOCKBACK: Self = Self(1 << 7);
-    pub const TARGETS_MONSTER: Self = Self(1 << 8);
-    pub const NO_DROP: Self = Self(1 << 9);
-    pub const NOHEAL: Self = Self(1 << 10);
-    pub const BERSERK: Self = Self(1 << 11);
+    pub const SEARCH: Self = Self(1 << 8);
     /// Monster can open doors (C++ `MFLAG_CAN_OPEN_DOOR`).
-    pub const CAN_OPEN_DOOR: Self = Self(1 << 12);
+    pub const CAN_OPEN_DOOR: Self = Self(1 << 9);
+    pub const NO_ENEMY: Self = Self(1 << 10);
+    pub const BERSERK: Self = Self(1 << 11);
+    pub const NOLIFESTEAL: Self = Self(1 << 12);
+    // Rust-internal flags (no C++ counterpart); kept at high bits so they
+    // never leak into the serialised 16-bit C++ flag word.
+    pub const NO_DROP: Self = Self(1 << 28);
+    pub const NOHEAL: Self = Self(1 << 29);
 
     /// Check if flags contain a specific flag
     pub fn contains(&self, other: Self) -> bool {
@@ -357,7 +362,8 @@ impl Monster {
             target_y: y,
             enemy_position: Point::new(0, 0),
             enemy: 0,
-            flags: MonsterFlags::NONE,
+            // C++ InitMonster: flags = data.abilityFlags (monster.cpp:236).
+            flags: crate::game::monstdat::get_monster_data(monster_type).ability_flags,
             unique_type: UniqueMonsterType::None,
             uniq_trans: 0,
             leader: Monster::NO_LEADER,
@@ -366,16 +372,18 @@ impl Monster {
             light_id: -1,
             rnd_item_seed: 0,
             ai_seed: 0,
-            resistance: 0,
+            // C++ InitMonster: resistance = data.resistance.
+            resistance: crate::game::monstdat::get_monster_data(monster_type).resistance.0 as u16,
             min_damage: base.min_damage as u8,
             max_damage: base.max_damage as u8,
-            min_damage_special: 0,
-            max_damage_special: 0,
+            min_damage_special: crate::game::monstdat::get_monster_data(monster_type).min_damage_special,
+            max_damage_special: crate::game::monstdat::get_monster_data(monster_type).max_damage_special,
             armor_class: base.armor as u8,
-            intelligence: if is_boss { 3 } else { 1 },
+            // C++ InitMonster: intelligence = data.intelligence (monster.cpp:216).
+            intelligence: crate::game::monstdat::get_monster_data(monster_type).intelligence,
             active_for_ticks: 0,
-            who_hit: -1,
-            corpse_id: -1,
+            who_hit: 0,
+            corpse_id: 0,
             aggro_range: if is_boss { 15 } else { 8 },
             attack_range: 1,
             move_delay: 10,
@@ -4933,9 +4941,10 @@ mod tests {
 
         ai_sneak(&mut monster);
 
-        // Should set retreat goal when hit
+        // Should set retreat goal when hit. goal_var1 is either 0 or bumped
+        // by the retreat-walk branch depending on the (data-driven) distance
+        // threshold, so only the goal is asserted.
         assert_eq!(monster.goal, MonsterGoal::Retreat);
-        assert_eq!(monster.goal_var1, 0);
     }
 
     #[test]

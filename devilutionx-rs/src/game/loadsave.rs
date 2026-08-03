@@ -1156,7 +1156,8 @@ impl BinaryMonsterData {
         helper.write_le_u16(self.resistance);
         helper.skip(2); // Alignment
         helper.write_le_i32(self.talk_msg);
-        helper.write_u8(self.leader);
+        // C++ SaveMonster writes 0 when leader == Monster::NoLeader (loadsave.cpp:1610).
+        helper.write_u8(if self.leader == u8::MAX { 0 } else { self.leader });
         helper.write_u8(self.leader_relation);
         helper.write_u8(self.pack_size);
         // Vanilla writes 0 when lightId == NO_LIGHT (-1).
