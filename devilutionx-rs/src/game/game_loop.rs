@@ -2504,10 +2504,10 @@ fn apply_movement(game_state: &mut GameState, input: &InputSystem) {
 /// (Warrior walkingFrames), `StartWalkAnimation` skips two leading frames on
 /// dungeon levels and `processAnimation` advances once in the starting tick,
 /// so crossing a tile takes 9 game ticks.
-const WALK_TICKS_PER_TILE: i32 = 9;
+pub const WALK_TICKS_PER_TILE: i32 = 9;
 
 /// Convert a C++ `GetPathDirection` code (path.h:60-67) to a tile delta.
-fn dir_code_delta(code: i8) -> (i32, i32) {
+pub fn dir_code_delta(code: i8) -> (i32, i32) {
     match code {
         1 => (0, -1),  // NorthEast
         2 => (-1, 0),  // NorthWest
@@ -2542,7 +2542,7 @@ fn is_tile_not_solid_layout(game_state: &GameState, x: i32, y: i32) -> bool {
 }
 
 /// C++ `PosOkPlayer` (player.cpp:3083-3100): a tile the player may stand on.
-fn pos_ok_player(game_state: &GameState, x: i32, y: i32) -> bool {
+pub fn pos_ok_player(game_state: &GameState, x: i32, y: i32) -> bool {
     if !is_tile_not_solid_layout(game_state, x, y) {
         return false;
     }
@@ -2595,7 +2595,7 @@ fn can_step_player(game_state: &GameState, sx: i32, sy: i32, dx: i32, dy: i32) -
 
 /// C++ `MakePlrPath` (player.cpp:3121-3136): A* walk route from the player's
 /// current tile to `target` as a list of `GetPathDirection` codes.
-fn make_plr_path(game_state: &GameState, target: (i32, i32)) -> Vec<i8> {
+pub fn make_plr_path(game_state: &GameState, target: (i32, i32)) -> Vec<i8> {
     let start = crate::engine::types::Point::new(
         game_state.player.position.x,
         game_state.player.position.y,

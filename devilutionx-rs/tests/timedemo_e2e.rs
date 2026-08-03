@@ -91,7 +91,7 @@ fn headless_replay_applies_click_to_move() {
     let mut driver = ReplayDriver::new(demo);
 
     fn run(driver: &mut ReplayDriver, limit: usize) -> (i32, i32, u32) {
-        use devilutionx_rs::game::game_loop::{convert_screen_to_tile, tick_move_target};
+        use devilutionx_rs::game::game_loop::convert_screen_to_tile;
         use devilutionx_rs::game::game_state::GameState;
         use devilutionx_rs::game::player_exact::{HeroClass, Player};
         use rand::SeedableRng;
@@ -100,7 +100,6 @@ fn headless_replay_applies_click_to_move() {
         player._p_class = HeroClass::Warrior;
         let mut gs = GameState::new(player, false, 12345);
         let mut rng = rand::rngs::StdRng::seed_from_u64(0);
-        let mut move_target: Option<(i32, i32)> = None;
         let mut ticks = 0;
         let mut clicks = 0;
         driver.reset();
@@ -111,16 +110,13 @@ fn headless_replay_applies_click_to_move() {
                         DemoEventType::MouseButtonDown => {
                             if let DemoPayload::MouseButton { x, y, .. } = ev.payload {
                                 let cam = gs.camera;
-                                move_target = Some(convert_screen_to_tile(
+                                gs.handle_click_tile(convert_screen_to_tile(
                                     x as i32, y as i32, cam.tile_x, cam.tile_y,
                                 ));
                                 clicks += 1;
                             }
                         }
                         DemoEventType::GameTick => {
-                            if let Some(target) = move_target {
-                                tick_move_target(&mut gs, target, &mut move_target);
-                            }
                             gs.update(&mut rng);
                             ticks += 1;
                         }
@@ -159,7 +155,7 @@ fn headless_replay_applies_click_to_move() {
 #[test]
 fn full_replay_runs_to_completion() {
     use devilutionx_rs::engine::demo_reader::DemoPayload;
-    use devilutionx_rs::game::game_loop::{convert_screen_to_tile, tick_move_target};
+    use devilutionx_rs::game::game_loop::convert_screen_to_tile;
     use devilutionx_rs::game::game_state::GameState;
     use devilutionx_rs::game::player_exact::{HeroClass, Player};
     use rand::SeedableRng;
@@ -186,7 +182,6 @@ fn full_replay_runs_to_completion() {
         player._p_class = HeroClass::Warrior;
         let mut gs = GameState::new(player, false, 12345);
         let mut rng = rand::rngs::StdRng::seed_from_u64(0);
-        let mut move_target: Option<(i32, i32)> = None;
         let mut ticks = 0usize;
         let mut clicks = 0usize;
         driver.reset();
@@ -195,15 +190,13 @@ fn full_replay_runs_to_completion() {
                 DemoEventType::MouseButtonDown => {
                     if let DemoPayload::MouseButton { x, y, .. } = ev.payload {
                         let cam = gs.camera;
-                        move_target =
-                            Some(convert_screen_to_tile(x as i32, y as i32, cam.tile_x, cam.tile_y));
+                        gs.handle_click_tile(convert_screen_to_tile(
+                            x as i32, y as i32, cam.tile_x, cam.tile_y,
+                        ));
                         clicks += 1;
                     }
                 }
                 DemoEventType::GameTick => {
-                    if let Some(target) = move_target {
-                        tick_move_target(&mut gs, target, &mut move_target);
-                    }
                     gs.update(&mut rng);
                     ticks += 1;
                 }
@@ -542,7 +535,7 @@ fn replay_prep_counts_match_cpp_algorithm() {
 #[test]
 fn replay_from_saved_state_reports_reference_diff() {
     use rand::SeedableRng;
-    use devilutionx_rs::game::game_loop::{convert_screen_to_tile, tick_move_target};
+    use devilutionx_rs::game::game_loop::convert_screen_to_tile;
     use devilutionx_rs::game::codec::codec_decode;
     use devilutionx_rs::game::game_state::GameState;
     use devilutionx_rs::game::loadsave::CppGameHeader;
@@ -576,21 +569,17 @@ fn replay_from_saved_state_reports_reference_diff() {
             gs.objects.len());
     let mut rng = rand::rngs::StdRng::seed_from_u64(0);
     let mut driver = ReplayDriver::new(parse_demo(&data).unwrap());
-    let mut move_target: Option<(i32, i32)> = None;
     while let Some(ev) = driver.peek() {
         match ev.event_type {
             DemoEventType::MouseButtonDown => {
                 if let DemoPayload::MouseButton { x, y, .. } = ev.payload {
                     let cam = gs.camera;
-                    move_target = Some(convert_screen_to_tile(
+                    gs.handle_click_tile(convert_screen_to_tile(
                         x as i32, y as i32, cam.tile_x, cam.tile_y,
                     ));
                 }
             }
             DemoEventType::GameTick => {
-                if let Some(target) = move_target {
-                    tick_move_target(&mut gs, target, &mut move_target);
-                }
                 gs.update(&mut rng);
             }
             _ => {}

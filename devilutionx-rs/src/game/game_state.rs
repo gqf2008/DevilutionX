@@ -29,6 +29,23 @@ use rand::Rng;
 pub const TOWN_MAX_X: usize = 112;
 pub const TOWN_MAX_Y: usize = 112;
 
+/// A pending player action from a click (C++ `destAction`): walk to a tile or
+/// attack a monster. `process_player_internal` consumes it when the player is
+/// standing; a new click replaces the pending action.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DestAction {
+    /// Walk toward a dungeon tile (C++ ACTION_WALK).
+    Walk((i32, i32)),
+    /// Attack the monster with the given slot (C++ ACTION_ATTACK).
+    AttackMonster(usize),
+}
+
+/// Player attack animation length in game ticks (C++ Warrior sword: 16
+/// frames at 1 tick/frame) and the frame on which the hit lands (`_pAFNum`,
+/// Warrior swordActionFrame = 9, animations.tsv).
+pub const ATTACK_TICKS: i32 = 16;
+pub const ATTACK_ACTION_FRAME: i32 = 9;
+
 /// Number of dungeon levels (C++ `NUMLEVELS`): index 0 = town, 1..16 = L1..L4.
 /// Mirrors Source/diablo.cpp:134 `uint32_t DungeonSeeds[NUMLEVELS];`.
 pub const NUM_LEVELS: usize = 17;
@@ -445,6 +462,15 @@ pub struct GameState {
     /// Destination the current walk route was computed for; a new click with
     /// a different destination recomputes the route (C++ `MakePlrPath`).
     pub player_walk_target: Option<(i32, i32)>,
+    /// Pending player action from a click (C++ `destAction`): a walk to a
+    /// tile or an attack on a monster. Executed by `process_player_internal`
+    /// when the player is standing (C++ ProcessPlayers consumes destAction).
+    pub dest_action: Option<DestAction>,
+    /// Ticks remaining in the current attack animation (C++ attack frames);
+    /// the hit lands when it reaches the C++ attack hit frame.
+    pub attack_cooldown: i32,
+    /// Monster the current attack targets (C++ `destParam1` monster id).
+    pub attack_target: Option<usize>,
     /// Per-monster-type kill counts (C++ MonsterKillCounts[138]); the Rust
     /// monster set is a 20-type simplification, so counts land in the first
     /// slots.
@@ -672,6 +698,9 @@ impl GameState {
             player_walk_path: Vec::new(),
             player_walk_sub_tick: 0,
             player_walk_target: None,
+            dest_action: None,
+            attack_cooldown: 0,
+            attack_target: None,
             last_visible_tiles: Vec::new(),
             kill_counts: [0; 138],
             dcorpse: vec![0; 112 * 112],
@@ -1358,6 +1387,65 @@ impl GameState {
     ///
     /// # Arguments
     /// - `rng`: Random number generator
+    /// Translate a click on a dungeon tile into a pending player action
+    /// (C++ CheckCursMove + the mouse handler): a click on a living monster
+    /// becomes an attack, anything else becomes a walk.
+    pub fn handle_click_tile(&mut self, tile: (i32, i32)) {
+        let attack = self
+            .monster_manager
+            .iter()
+            .find(|(_, m)| m.is_alive() && m.x == tile.0 && m.y == tile.1)
+            .map(|(id, _)| id);
+        self.dest_action = Some(match attack {
+            Some(id) => DestAction::AttackMonster(id),
+            None => DestAction::Walk(tile),
+        });
+    }
+
+    /// Advance the click-to-move walk by one game tick (C++ DoWalk: the walk
+    /// animation advances one frame per tick and crosses a tile every
+    /// WALK_TICKS_PER_TILE frames). Returns the new tile position.
+    fn advance_walk(&mut self) -> Point {
+        if self.player_walk_path.is_empty() {
+            return self.player.position;
+        }
+        self.player_walk_sub_tick += 1;
+        if self.player_walk_sub_tick < crate::game::game_loop::WALK_TICKS_PER_TILE {
+            return self.player.position;
+        }
+        self.player_walk_sub_tick = 0;
+        if let Some(code) = self.player_walk_path.first().copied() {
+            let (dx, dy) = crate::game::game_loop::dir_code_delta(code);
+            let nx = self.player.position.x + dx;
+            let ny = self.player.position.y + dy;
+            // C++ PlrDirOK (player.cpp:124-143): refuse to step onto a blocked
+            // tile — the walk stops at the last reachable tile instead of
+            // entering a wall/object/monster tile.
+            if !crate::game::game_loop::pos_ok_player(self, nx, ny) {
+                self.player_walk_path.clear();
+                self.player_walk_sub_tick = 0;
+                self.dest_action = None;
+                return self.player.position;
+            }
+            self.player_walk_path.remove(0);
+            self.player.position.x = nx;
+            self.player.position.y = ny;
+            self.camera.tile_x = self.player.position.x;
+            self.camera.tile_y = self.player.position.y;
+            self.camera.sub_x = 0;
+            self.camera.sub_y = 0;
+        }
+        self.player.position
+    }
+
+    /// C++ MakePlrPath for a pending walk destination (starts from the
+    /// player's current tile; C++ starts from position.future).
+    fn make_walk_path(&mut self, target: (i32, i32)) {
+        self.player_walk_path = crate::game::game_loop::make_plr_path(self, target);
+        self.player_walk_sub_tick = 0;
+        self.player_walk_target = Some(target);
+    }
+
     pub fn update(&mut self, rng: &mut impl Rng) {
         self.game_tick += 1;
 
@@ -1611,6 +1699,14 @@ impl GameState {
     ///
     /// **C++ Reference**: `Source/player.cpp` - `ProcessPlayers()`
     fn process_player_internal(&mut self, rng: &mut impl Rng) {
+        // C++ ProcessPlayers order: advance the walk (DoWalk), then consume
+        // the pending destAction when the player is standing. The pending
+        // action waits while walking (the C++ action queue).
+        self.advance_walk();
+        if self.player_walk_path.is_empty() {
+            self.process_dest_action(rng);
+        }
+
         // Player regeneration
         if self.player._p_hit_points < self.player._p_max_hp {
             let regen = (self.player._p_level as i32) / 4 + 1;
@@ -1623,8 +1719,95 @@ impl GameState {
             self.player._p_mana = (self.player._p_mana + mana_regen).min(self.player._p_max_mana);
         }
 
-        // Check for player-monster combat
+        // Advance the attack animation and apply the hit on the C++ action
+        // frame; the attack only runs when a click targeted a monster.
         self.check_player_combat(rng);
+    }
+
+    /// C++ ProcessPlayers destAction handling: walk toward a clicked tile or
+    /// a clicked monster (attacking once adjacent).
+    fn process_dest_action(&mut self, _rng: &mut impl Rng) {
+        let Some(action) = self.dest_action else { return };
+        match action {
+            DestAction::Walk(tile) => {
+                if self.player.position.x == tile.0 && self.player.position.y == tile.1 {
+                    self.dest_action = None;
+                    return;
+                }
+                if self.player_walk_target != Some(tile) {
+                    self.make_walk_path(tile);
+                    // Consume the action (C++ reads destAction once); the walk
+                    // itself runs from the stored path.
+                    self.dest_action = None;
+                    if self.player_walk_path.is_empty() {
+                        self.dest_action = None; // unreachable destination
+                    }
+                } else {
+                    self.dest_action = None;
+                }
+            }
+            DestAction::AttackMonster(id) => {
+                let alive = self
+                    .monster_manager
+                    .get_monster(id)
+                    .map_or(false, |m| m.is_alive());
+                if !alive {
+                    self.dest_action = None;
+                    self.attack_target = None;
+                    return;
+                }
+                let mpos = self
+                    .monster_manager
+                    .get_monster(id)
+                    .map(|m| m.position())
+                    .unwrap_or(self.player.position);
+                let dist = walking_distance(self.player.position, mpos);
+                if dist <= 1 {
+                    self.attack_target = Some(id);
+                    self.dest_action = None;
+                    if self.attack_cooldown == 0 {
+                        self.attack_cooldown = ATTACK_TICKS;
+                    }
+                } else if self.player_walk_path.is_empty() {
+                    // Walk toward a free tile adjacent to the monster.
+                    if let Some(adj) = self.tile_toward(mpos) {
+                        if self.player_walk_target != Some(adj) {
+                            self.make_walk_path(adj);
+                        }
+                    } else {
+                        self.dest_action = None;
+                        self.attack_target = None;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Pick a walkable tile adjacent to `target` that moves the player closer
+    /// (C++ walks to the monster then attacks once adjacent).
+    fn tile_toward(&self, target: Point) -> Option<(i32, i32)> {
+        use crate::game::game_loop::{dir_code_delta, make_plr_path};
+        // Prefer the adjacent tile closest to the player that is reachable.
+        let mut best: Option<(i32, i32)> = None;
+        let mut best_dist = i32::MAX;
+        for code in 1..=8i8 {
+            let (dx, dy) = dir_code_delta(code);
+            let tx = target.x + dx;
+            let ty = target.y + dy;
+            if !crate::game::game_loop::pos_ok_player(self, tx, ty) {
+                continue;
+            }
+            // The tile must be reachable via a walk route.
+            if make_plr_path(self, (tx, ty)).is_empty() {
+                continue;
+            }
+            let d = (self.player.position.x - tx).abs() + (self.player.position.y - ty).abs();
+            if d < best_dist {
+                best_dist = d;
+                best = Some((tx, ty));
+            }
+        }
+        best
     }
 
     /// Process all monsters
@@ -1738,100 +1921,90 @@ impl GameState {
         }
     }
 
-    /// Check if player should attack nearby monsters
+    /// Advance the player's attack animation (C++ StartAttack frames) and
+    /// apply the hit on the C++ action frame. Attacks only run when a click
+    /// targeted a monster (`attack_target`), never as a free auto-attack.
     fn check_player_combat(&mut self, rng: &mut impl Rng) {
+        if self.attack_cooldown <= 0 {
+            return;
+        }
+        self.attack_cooldown -= 1;
+        // C++ applies the damage on `_pAFNum` (Warrior sword action frame 9
+        // of a 16-frame animation): after ATTACK_TICKS - ACTION_FRAME ticks.
+        if self.attack_cooldown != ATTACK_TICKS - ATTACK_ACTION_FRAME {
+            return;
+        }
+        if let Some(id) = self.attack_target {
+            self.apply_player_attack(id, rng);
+        }
+        if self.attack_cooldown == 0 {
+            self.attack_target = None;
+        }
+    }
+
+    /// Apply one player melee hit to `monster_id` (C++ PlrHitMonst): roll to
+    /// hit/damage, apply the kill bookkeeping (XP, corpse, drop, SFX).
+    fn apply_player_attack(&mut self, monster_id: usize, rng: &mut impl Rng) {
         let player_pos = self.player.position;
-
-        // Collect monster IDs to avoid borrow checker issues
-        let monster_ids: Vec<usize> = self.monster_manager
-            .iter()
-            .map(|(id, _)| id)
-            .collect();
-
-        // Track XP gained from kills this tick to award after the borrows
-        // on monster_manager/player resolve. Also collect the tile of each kill
-        // so we can roll a ground-item drop once the monster_manager borrow is
-        // released.
+        let Some(monster) = self.monster_manager.get_monster_mut(monster_id) else {
+            self.attack_target = None;
+            return;
+        };
+        if !monster.is_alive() || walking_distance(player_pos, monster.position()) > 1 {
+            self.attack_target = None;
+            return;
+        }
         let mut xp_gained: i32 = 0;
         let mut kill_positions: Vec<(i32, i32, i32)> = Vec::new();
         let mut sfx_hits = 0u32;
         let mut sfx_kills = 0u32;
-        for monster_id in monster_ids {
-            if let Some(monster) = self.monster_manager.get_monster_mut(monster_id) {
-                let dist = walking_distance(player_pos, monster.position());
-
-                if dist <= 1 {
-                    // Player attacks this monster
-                    match player_attack_monster(&self.player, monster, rng) {
-                        crate::game::combat_integration::AttackResult::Kill { damage } => {
-                            // Award monster XP on kill (monster_dat xp reward).
-                            self.kill_counts[monster.monster_type as usize % 138] += 1;
-                            xp_gained += monster.experience as i32;
-                            // Record the death tile for loot drop.
-                            let mp = monster.position();
-                            kill_positions.push((mp.x, mp.y, monster.level as i32));
-                            // Record the corpse tile (C++ dCorpse, dead.cpp:95).
-                            if mp.x >= 0 && mp.x < 112 && mp.y >= 0 && mp.y < 112 {
-                                let dir = monster.facing as u8 as i32;
-                                self.dcorpse[mp.y as usize * 112 + mp.x as usize] =
-                                    ((monster.corpse_id as i32 & 0x1F) + (dir << 5)) as i8;
-                            }
-                            // Queue the monster-death SFX. The game loop drains
-                            // pending_sfx and forwards it to AudioManager.
-                            sfx_kills += 1;
-                            // Floating damage number (C++ AddFloatingNumber).
-                            self.floating_numbers.add(
-                                self.game_tick as u64,
-                                mp,
-                                crate::game::floatingnumbers::FloatingNumber::new(
-                                    crate::game::combat_system::DamageType::Physical,
-                                    damage,
-                                ),
-                                monster_id as i32,
-                            );
-                        }
-                        crate::game::combat_integration::AttackResult::Hit { damage } => {
-                            // Queue the weapon-swing SFX for a non-killing hit.
-                            sfx_hits += 1;
-                            // Floating damage number (C++ AddFloatingNumber).
-                            let mp = monster.position();
-                            self.floating_numbers.add(
-                                self.game_tick as u64,
-                                mp,
-                                crate::game::floatingnumbers::FloatingNumber::new(
-                                    crate::game::combat_system::DamageType::Physical,
-                                    damage,
-                                ),
-                                monster_id as i32,
-                            );
-                        }
-                        _ => {}
-                    }
+        match player_attack_monster(&self.player, monster, rng) {
+            crate::game::combat_integration::AttackResult::Kill { damage } => {
+                self.kill_counts[monster.monster_type as usize % 138] += 1;
+                xp_gained += monster.experience as i32;
+                let mp = monster.position();
+                kill_positions.push((mp.x, mp.y, monster.level as i32));
+                if mp.x >= 0 && mp.x < 112 && mp.y >= 0 && mp.y < 112 {
+                    let dir = monster.facing as u8 as i32;
+                    self.dcorpse[mp.y as usize * 112 + mp.x as usize] =
+                        ((monster.corpse_id as i32 & 0x1F) + (dir << 5)) as i8;
                 }
+                sfx_kills += 1;
+                self.floating_numbers.add(
+                    self.game_tick as u64,
+                    mp,
+                    crate::game::floatingnumbers::FloatingNumber::new(
+                        crate::game::combat_system::DamageType::Physical,
+                        damage,
+                    ),
+                    monster_id as i32,
+                );
             }
+            crate::game::combat_integration::AttackResult::Hit { damage } => {
+                sfx_hits += 1;
+                let mp = monster.position();
+                self.floating_numbers.add(
+                    self.game_tick as u64,
+                    mp,
+                    crate::game::floatingnumbers::FloatingNumber::new(
+                        crate::game::combat_system::DamageType::Physical,
+                        damage,
+                    ),
+                    monster_id as i32,
+                );
+            }
+            _ => {}
         }
-
-        // Push the SFX requests once, after the monster_manager borrow ends.
-        // We collapse repeated identical sounds into a single play per tick so
-        // a multi-monster cleave doesn't spam the audio system.
         if sfx_hits > 0 {
-            self.pending_sfx.push(
-                crate::engine::audio::SfxLibrary::for_combat(false).to_string(),
-            );
+            self.pending_sfx.push(crate::engine::audio::SfxLibrary::for_combat(false).to_string());
         }
         if sfx_kills > 0 {
-            self.pending_sfx.push(
-                crate::engine::audio::SfxLibrary::for_combat(true).to_string(),
-            );
+            self.pending_sfx.push(crate::engine::audio::SfxLibrary::for_combat(true).to_string());
         }
-
         if xp_gained > 0 {
             self.player._p_experience = self.player._p_experience.saturating_add(xp_gained as u32);
-            // Level-up check: advance while XP exceeds the next level threshold.
             self.check_level_up();
         }
-
-        // Roll loot drops for each kill (after the monster_manager borrow ends).
         for (kx, ky, klevel) in kill_positions {
             self.roll_monster_drop(kx, ky, klevel, rng);
         }
@@ -4436,6 +4609,10 @@ mod tests {
             gs.player._p_i_bonus_to_hit = 100;
             gs.player._p_i_min_dam = 1;
             gs.player._p_i_max_dam = 3; // small damage so the tank survives
+            // Survive the monster's counter-attacks while the 16-tick attack
+            // animation runs.
+            gs.player._p_hit_points = 100000;
+            gs.player._p_max_hp = 100000;
 
             // Find the placed monster's actual id (add_monster may re-index)
             // and make it very tanky with zero armor.
@@ -4449,9 +4626,14 @@ mod tests {
                 }
             }
 
+            // The player only attacks a click-targeted monster (C++ attack
+            // action); the hit lands on the attack action frame.
+            gs.dest_action = Some(DestAction::AttackMonster(monster_ids[0]));
             let _ = gs.drain_pending_sfx();
             let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
-            gs.update(&mut rng);
+            for _ in 0..ATTACK_TICKS + 2 {
+                gs.update(&mut rng);
+            }
 
             for name in gs.drain_pending_sfx() {
                 if name == "swing" {
@@ -4477,6 +4659,8 @@ mod tests {
             gs.player._p_i_bonus_to_hit = 200;
             gs.player._p_i_min_dam = 10;
             gs.player._p_i_max_dam = 20;
+            gs.player._p_hit_points = 100000;
+            gs.player._p_max_hp = 100000;
 
             let monster_ids: Vec<usize> =
                 gs.monster_manager.iter().map(|(id, _)| id).collect();
@@ -4488,9 +4672,12 @@ mod tests {
                 }
             }
 
+            gs.dest_action = Some(DestAction::AttackMonster(monster_ids[0]));
             let _ = gs.drain_pending_sfx();
             let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
-            gs.update(&mut rng);
+            for _ in 0..ATTACK_TICKS + 2 {
+                gs.update(&mut rng);
+            }
 
             for name in gs.drain_pending_sfx() {
                 if name == "monster_death" {
