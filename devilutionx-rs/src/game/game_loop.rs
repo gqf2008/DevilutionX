@@ -592,35 +592,6 @@ pub fn convert_screen_to_tile(
     (tile_x.clamp(0, 111), tile_y.clamp(0, 111))
 }
 
-/// C++ `AlterMousePositionViaPlayer` (cursor.cpp:696-718): while the player is
-/// walking, the cursor screen position is shifted by the walking offset
-/// (camera mode) so clicks land on the world tile the player is pointing at
-/// from their sub-tile position. Most demo clicks happen mid-walk.
-pub fn adjust_cursor_for_walk(game_state: &GameState, mx: i32, my: i32) -> (i32, i32) {
-    use crate::game::game_loop::WALK_TICKS_PER_TILE;
-    if game_state.player_walk_path.is_empty() || game_state.player_walk_dir == 0 {
-        return (mx, my);
-    }
-    // MovingOffset[8] (scrollrt.cpp:1577): South, SouthWest, West, NorthWest,
-    // North, NorthEast, East, SouthEast.
-    let (dx, dy) = match game_state.player_walk_dir {
-        7 => (0, 32),
-        4 => (-32, 16),
-        8 => (-64, 0),
-        2 => (-32, -16),
-        5 => (0, -32),
-        1 => (32, -16),
-        6 => (64, 0),
-        3 => (32, 16),
-        _ => (0, 0),
-    };
-    let progress = game_state.player_walk_sub_tick * 256 / WALK_TICKS_PER_TILE;
-    (
-        mx + dx * progress / 256,
-        my + dy * progress / 256,
-    )
-}
-
 /// Dispatch a keymapper action to the game loop state — the Rust counterpart
 /// of C++ `keymapper.cpp` `HandleKeymapperEvents` producing a `GameAction`.
 /// Returns `true` when the action was handled.

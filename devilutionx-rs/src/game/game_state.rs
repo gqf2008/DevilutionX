@@ -462,10 +462,6 @@ pub struct GameState {
     /// Destination the current walk route was computed for; a new click with
     /// a different destination recomputes the route (C++ `MakePlrPath`).
     pub player_walk_target: Option<(i32, i32)>,
-    /// `GetPathDirection` code of the step the player is currently walking
-    /// (0 when idle); used for the C++ `AlterMousePositionViaPlayer` cursor
-    /// adjustment while walking.
-    pub player_walk_dir: i8,
     /// Pending player action from a click (C++ `destAction`): a walk to a
     /// tile or an attack on a monster. Executed by `process_player_internal`
     /// when the player is standing (C++ ProcessPlayers consumes destAction).
@@ -702,7 +698,6 @@ impl GameState {
             player_walk_path: Vec::new(),
             player_walk_sub_tick: 0,
             player_walk_target: None,
-            player_walk_dir: 0,
             dest_action: None,
             attack_cooldown: 0,
             attack_target: None,
@@ -1439,12 +1434,10 @@ impl GameState {
             if !crate::game::game_loop::pos_ok_player(self, nx, ny) {
                 self.player_walk_path.clear();
                 self.player_walk_sub_tick = 0;
-                self.player_walk_dir = 0;
                 self.dest_action = None;
                 return self.player.position;
             }
             self.player_walk_path.remove(0);
-            self.player_walk_dir = code;
             self.player.position.x = nx;
             self.player.position.y = ny;
             self.camera.tile_x = self.player.position.x;

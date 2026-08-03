@@ -91,7 +91,7 @@ fn headless_replay_applies_click_to_move() {
     let mut driver = ReplayDriver::new(demo);
 
     fn run(driver: &mut ReplayDriver, limit: usize) -> (i32, i32, u32) {
-        use devilutionx_rs::game::game_loop::{adjust_cursor_for_walk, convert_screen_to_tile};
+        use devilutionx_rs::game::game_loop::convert_screen_to_tile;
         use devilutionx_rs::game::game_state::GameState;
         use devilutionx_rs::game::player_exact::{HeroClass, Player};
         use rand::SeedableRng;
@@ -110,9 +110,8 @@ fn headless_replay_applies_click_to_move() {
                         DemoEventType::MouseButtonDown => {
                             if let DemoPayload::MouseButton { x, y, .. } = ev.payload {
                                 let cam = gs.camera;
-                                let (ax, ay) = adjust_cursor_for_walk(&gs, x as i32, y as i32);
                                 gs.handle_click_tile(convert_screen_to_tile(
-                                    ax, ay, cam.tile_x, cam.tile_y, 768, 480,
+                                    x as i32, y as i32, cam.tile_x, cam.tile_y, 768, 480,
                                 ));
                                 clicks += 1;
                             }
@@ -574,7 +573,7 @@ fn pre_replay_save_matches_reference_byte_for_byte() {
 #[test]
 fn replay_from_saved_state_reports_reference_diff() {
     use rand::SeedableRng;
-    use devilutionx_rs::game::game_loop::{adjust_cursor_for_walk, convert_screen_to_tile};
+    use devilutionx_rs::game::game_loop::convert_screen_to_tile;
     use devilutionx_rs::game::codec::codec_decode;
     use devilutionx_rs::game::game_state::GameState;
     use devilutionx_rs::game::loadsave::CppGameHeader;
@@ -613,9 +612,8 @@ fn replay_from_saved_state_reports_reference_diff() {
             DemoEventType::MouseButtonDown => {
                 if let DemoPayload::MouseButton { x, y, .. } = ev.payload {
                     let cam = gs.camera;
-                    let (ax, ay) = adjust_cursor_for_walk(&gs, x as i32, y as i32);
                     gs.handle_click_tile(convert_screen_to_tile(
-                        ax, ay, cam.tile_x, cam.tile_y, 768, 480,
+                        x as i32, y as i32, cam.tile_x, cam.tile_y, 768, 480,
                     ));
                 }
             }
