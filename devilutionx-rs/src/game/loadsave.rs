@@ -2342,16 +2342,22 @@ pub fn save_player(helper: &mut SaveHelper, player: &crate::game::player_exact::
     // Mode + walk path + flags.
     helper.write_le_i32(player._p_mode as u8 as i32);
     for i in 0..25 {
-        let v = player.walk_path.get(i).copied().unwrap_or_default() as u8 as i8;
-        helper.write_i8(v);
+        // C++ walkpath default is WALK_NONE = -1 (player.h:56); the port's
+        // Direction::None = 8 serialises as -1 for the save.
+        let v = player.walk_path.get(i).copied().unwrap_or(crate::game::player_exact::Direction::None);
+        helper.write_i8(if v == crate::game::player_exact::Direction::None {
+            -1
+        } else {
+            v as u8 as i8
+        });
     }
     helper.write_u8(1); // plractive
     helper.skip(2);
-    helper.write_le_i32(0); // destAction
-    helper.write_le_i32(0); // destParam1
-    helper.write_le_i32(0); // destParam2
-    helper.write_le_i32(0); // destParam3
-    helper.write_le_i32(0); // destParam4
+    helper.write_le_i32(player.dest_action as i32);
+    helper.write_le_i32(player.dest_param1);
+    helper.write_le_i32(player.dest_param2);
+    helper.write_le_i32(player.dest_param3);
+    helper.write_le_i32(player.dest_param4);
     helper.write_le_u32(player.plr_level as u32);
     // Position (tile, future, target, last, old).
     helper.write_le_i32(player.position.x);

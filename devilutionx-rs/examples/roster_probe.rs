@@ -17,6 +17,10 @@ fn main() {
     gs.load_from_save(&pack, &header, &seeds);
     let ok = devilutionx_rs::game::game_loop::prepare_dungeon_for_replay(&mut gs, 1);
     println!("[Probe] prep={ok} monsters={} objects={} numtrigs={} state={}", gs.monster_manager.active_count(), gs.objects.len(), gs.triggers.numtrigs, devilutionx_rs::engine::random::gameplay_rng_state());
+    let sv = gs.write_save_game_v3();
+    println!("[Probe] save_game_v3 len={}", sv.len());
+    let out = std::env::var("PROBE_SAVE_OUT").unwrap_or_else(|_| "rust_game.bin".into());
+    std::fs::write(&out, &sv).expect("write");
     for t in 0..gs.triggers.numtrigs {
         let p = gs.triggers.trigs[t].position;
         println!("  trig {t}: ({},{})", p.x, p.y);
