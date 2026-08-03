@@ -526,6 +526,44 @@ fn replay_prep_counts_match_cpp_algorithm() {
     assert_eq!(gs.objects.len(), 76, "L1 objects (C++-exact)");
 }
 
+/// Byte-exact save/level-generation alignment: `prepare_dungeon_for_replay`
+/// followed by `write_save_game_v3` must reproduce the reference
+/// `spawn_0.sv` game entry byte-for-byte (the 7412 -> 0 diffs milestone).
+/// Guards against regressions in the lighting/dFlags/object/monster/item
+/// serialisation round-trips.
+#[test]
+fn pre_replay_save_matches_reference_byte_for_byte() {
+    use devilutionx_rs::game::codec::codec_decode;
+    use devilutionx_rs::game::game_state::GameState;
+    use devilutionx_rs::game::loadsave::CppGameHeader;
+    use devilutionx_rs::game::pack::PlayerPack;
+    use devilutionx_rs::game::player_exact::Player;
+    const PASSWORD_SPAWN_SINGLE: &str = "adslhfb1";
+
+    let mut save = load_save_archive(fixture_path("spawn_0.sv")).expect("open save");
+    let hero = codec_decode(&save.read_entry("hero").unwrap(), PASSWORD_SPAWN_SINGLE);
+    let pack = PlayerPack::from_bytes(&hero);
+    let decoded = codec_decode(&save.read_entry("game").unwrap(), PASSWORD_SPAWN_SINGLE);
+    let header = CppGameHeader::parse(&decoded).expect("game header parses");
+    let seeds = CppGameHeader::parse_level_seeds(&decoded, 17).expect("seed table");
+
+    let mut gs = GameState::new(Player::new(), false, 12345);
+    gs.load_from_save(&pack, &header, &seeds, Some(&decoded));
+    assert!(
+        devilutionx_rs::game::game_loop::prepare_dungeon_for_replay(&mut gs, 1),
+        "L1 level generation succeeds"
+    );
+    let actual = gs.write_save_game_v3();
+    assert_eq!(actual.len(), decoded.len(), "saved game entry length matches the reference");
+    let first = (0..actual.len()).find(|&i| actual[i] != decoded[i]);
+    assert_eq!(
+        first,
+        None,
+        "saved game entry must be byte-identical to the reference spawn_0.sv game entry; first diff at {first:?}"
+    );
+}
+
+
 /// Diagnostic: run the demo replay *from the saved state* (Tier 1
 /// load_from_save) and report the first byte difference per SaveGameData
 /// section against the C++ reference save. The engine simulation is not
