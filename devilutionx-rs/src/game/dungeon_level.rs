@@ -427,9 +427,12 @@ pub fn build_dungeon_layout(gen: &CathedralGenerator, level: &DungeonLevelData) 
     //    above; Tile::Floor == 13 matches the C++ floor id.
     let mut tiles = [[0u8; DMAXY]; DMAXX];
     let flood_src = gen.pre_variation_dungeon.as_ref().unwrap_or(&gen.dungeon);
+    // The generator stores the grid transposed vs C++ (`dungeon[row][col]`
+    // here, `dungeon[col][row]` in C++), so build the flood tiles in the C++
+    // orientation: tiles[col][row] = grid[row][col].
     for y in 0..DMAXY {
         for x in 0..DMAXX {
-            tiles[x][y] = flood_src[x][y] as u8;
+            tiles[x][y] = flood_src[y][x] as u8;
         }
     }
     let mut trans_val = [[0i8; MAXDUNY]; MAXDUNX];

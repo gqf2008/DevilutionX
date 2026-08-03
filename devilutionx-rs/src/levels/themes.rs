@@ -330,24 +330,26 @@ fn tfit_shrine(game_state: &crate::game::game_state::GameState, region: i8) -> O
     while found == 0 {
         let (px, py) = position;
         if trans_val(game_state, px, py) == region {
-            if tile_has_any(game_state, px + 1, py - 1, crate::engine::dungeon::TileProperties::TRAP)
-                && is_tile_not_solid(game_state, px - 1, py - 1)
-                && is_tile_not_solid(game_state, px + 1, py + 1)
+            // C++ Direction deltas (displacement.hpp): NE=(0,-1), NW=(-1,0),
+            // SE=(1,0), SW=(0,1), N=(-1,-1), E=(1,-1), W=(-1,1).
+            if tile_has_any(game_state, px, py - 1, crate::engine::dungeon::TileProperties::TRAP)
+                && is_tile_not_solid(game_state, px - 1, py)
+                && is_tile_not_solid(game_state, px + 1, py)
                 && trans_val(game_state, px - 1, py) == region
                 && trans_val(game_state, px + 1, py) == region
-                && !is_object_at(game_state, px, py - 1)
-                && !is_object_at(game_state, px + 1, py)
+                && !is_object_at(game_state, px - 1, py - 1)
+                && !is_object_at(game_state, px + 1, py - 1)
             {
                 found = 1;
             }
             if found == 0
-                && tile_has_any(game_state, px - 1, py - 1, crate::engine::dungeon::TileProperties::TRAP)
-                && is_tile_not_solid(game_state, px + 1, py - 1)
-                && is_tile_not_solid(game_state, px - 1, py + 1)
+                && tile_has_any(game_state, px - 1, py, crate::engine::dungeon::TileProperties::TRAP)
+                && is_tile_not_solid(game_state, px, py - 1)
+                && is_tile_not_solid(game_state, px, py + 1)
                 && trans_val(game_state, px, py - 1) == region
                 && trans_val(game_state, px, py + 1) == region
-                && !is_object_at(game_state, px, py - 1)
-                && !is_object_at(game_state, px - 1, py)
+                && !is_object_at(game_state, px - 1, py - 1)
+                && !is_object_at(game_state, px - 1, py + 1)
             {
                 found = 2;
             }
@@ -1024,7 +1026,11 @@ pub fn create_theme_rooms(game_state: &mut crate::game::game_state::GameState, l
                 let mut found = None;
                 let mut ixp = 0i32;
                 let mut iyp = 0i32;
-                while remaining > 0 {
+                // C++ scans with wrap-around until the r-th matching tile; a
+                // region with fewer than r non-solid tiles would spin forever
+                // there too, so bound the scan at one full pass.
+                let mut scanned = 0usize;
+                while remaining > 0 && scanned < (crate::levels::types::MAXDUNX * crate::levels::types::MAXDUNY) {
                     if trans_val(game_state, ixp, iyp) == region && is_tile_not_solid(game_state, ixp, iyp) {
                         remaining -= 1;
                         found = Some((ixp, iyp));
@@ -1040,6 +1046,7 @@ pub fn create_theme_rooms(game_state: &mut crate::game::game_state::GameState, l
                             iyp = 0;
                         }
                     }
+                    scanned += 1;
                 }
                 if let Some((x, y)) = found {
                     let seed = crate::engine::random::gameplay_advance_rnd_seed() as u32;
