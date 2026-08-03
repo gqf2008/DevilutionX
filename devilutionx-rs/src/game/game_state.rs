@@ -2500,17 +2500,18 @@ fn find_free_inv_cell(inv_grid: &[i8; 40], width: usize, height: usize) -> Optio
             active_object_count: self.objects.len() as i32,
         };
         // C++ DungeonSeeds[i] + getHellfireLevelType(GetLevelType(i)) per
-        // level: town=0, L1..L4 = 1..4, Nest/Crypt = 5/6.
+        // level: town=0; levels 1-4 -> CATHEDRAL(1), 5-8 -> CATACOMBS(2),
+        // 9-12 -> CAVES(3), 13-16 -> HELL(4), 17-20 -> NEST -> CAVES(3),
+        // 21-24 -> CRYPT -> CATHEDRAL(1) (loadsave.cpp:2805, gendung.cpp:393).
         let seeds: Vec<(u32, u32)> = (0..17u32)
             .map(|i| {
                 let ltype = match i {
                     0 => 0,
-                    2 => 2,
-                    3 => 3,
-                    4 => 4,
-                    5 => 5,
-                    6 => 6,
-                    _ => 1,
+                    1..=4 => 1,
+                    5..=8 => 2,
+                    9..=12 => 3,
+                    13..=16 => 4,
+                    _ => 3,
                 };
                 (
                     self.dungeon_seeds.get(i as usize).copied().unwrap_or(0),
