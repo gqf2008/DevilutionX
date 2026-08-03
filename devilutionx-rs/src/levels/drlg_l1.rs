@@ -700,12 +700,16 @@ pub struct CathedralGenerator {
     /// Dungeon tile array (40x40 logical tiles)
     pub dungeon: [[Tile; DUNGEON_SIZE]; DUNGEON_SIZE],
 
-    /// Snapshot of the dungeon right after `AddWall` and *before*
-    /// `Substitution`/`FillFloor` (C++ runs `FloodTransparencyValues(13)` at
-    /// exactly that point, when every floor tile is still `Tile::Floor`).
-    /// The post-variation grid has shadow/FillFloor tiles that fragment the
-    /// flood regions, so the transparency regions must come from this state.
+    /// Snapshot of the dungeon right after `AddWall` and *before* the stairs
+    /// are placed (C++ runs `FloodTransparencyValues(13)` at exactly that
+    /// point, when every floor tile is still `Tile::Floor`). The post-variation
+    /// grid has shadow/FillFloor tiles that fragment the flood regions, so the
+    /// transparency regions must come from this state.
     pub pre_variation_dungeon: Option<[[Tile; DUNGEON_SIZE]; DUNGEON_SIZE]>,
+
+    /// Snapshot right after the stairs are placed (still pre-variation) — the
+    /// grid C++ uses for the stairs transparency copy and `FixTransparency`.
+    pub post_stairs_dungeon: Option<[[Tile; DUNGEON_SIZE]; DUNGEON_SIZE]>,
 
     /// Dungeon mask (tracks which tiles are part of rooms)
     /// C++ equivalent: DungeonMask bitset
@@ -747,6 +751,7 @@ pub struct CathedralGenerator {
         CathedralGenerator {
             dungeon: [[Tile::Invalid; DUNGEON_SIZE]; DUNGEON_SIZE],
         pre_variation_dungeon: None,
+        post_stairs_dungeon: None,
             dungeon_mask: [[false; DUNGEON_SIZE]; DUNGEON_SIZE],
             protected: [[false; DUNGEON_SIZE]; DUNGEON_SIZE],
             chamber: [[false; DUNGEON_SIZE]; DUNGEON_SIZE],
@@ -1906,6 +1911,9 @@ impl CathedralGenerator {
             // FloodTransparencyValues(13) only touches dTransVal; skip.
                         let ok = self.place_stairs();
                         if ok {
+                // Post-stairs grid for the stairs transparency copy +
+                // FixTransparency (C++ GenerateLevel runs them next).
+                self.post_stairs_dungeon = Some(self.dungeon);
                 break;
             }
         }
@@ -2034,14 +2042,17 @@ pub fn fix_transparency(
     for j in 0..DMAXY {
         let mut xx = 16usize;
         for i in 0..DMAXX {
-            let t = tiles[i][j];
+            // The generator stores the grid transposed vs C++ (tiles[row][col]
+            // here, dungeon[col][row] in C++), so read the transposed index to
+            // match `dungeon[i][j]` (i=col, j=row).
+            let t = tiles[j][i];
             // BUGFIX: `j > 0` is checked after the tile test in C++; keep the
             // same guarded semantics.
-            if t == Tile::DirtHwallEnd && j > 0 && tiles[i][j - 1] == Tile::DirtHwall {
+            if t == Tile::DirtHwallEnd && j > 0 && tiles[j - 1][i] == Tile::DirtHwall {
                 trans_val[xx + 1][yy] = trans_val[xx][yy];
                 trans_val[xx + 1][yy + 1] = trans_val[xx][yy];
             }
-            if t == Tile::DirtVwallEnd && i + 1 < DMAXY && tiles[i + 1][j] == Tile::DirtVwall {
+            if t == Tile::DirtVwallEnd && i + 1 < DMAXY && tiles[j][i + 1] == Tile::DirtVwall {
                 trans_val[xx][yy + 1] = trans_val[xx][yy];
                 trans_val[xx + 1][yy + 1] = trans_val[xx][yy];
             }
@@ -2073,7 +2084,7 @@ pub fn copy_stairs_transparency(
 ) {
     for j in 0..DMAXY {
         for i in 0..DMAXX {
-            if tiles[i][j] == Tile::EntranceStairs {
+            if tiles[j][i] == Tile::EntranceStairs {
                 let xx = 2 * i + 16;
                 let yy = 2 * j + 16;
                 trans_val[xx][yy] = trans_val[xx][yy + 1];
@@ -2110,14 +2121,13 @@ mod tests {
                 trans_val[xx + 1][yy + 1] = 7;
             }
         }
-        // Dirt walls on the floor region's east/south borders. The top-left
-        // micro of each wall is a diagonal/edge neighbour of a floor tile, so
-        // after the C++ flood fill it already carries the region id (simulate
-        // that here).
-        tiles[12][10] = Tile::DirtHwall; // east of (11,10)
-        tiles[12][11] = Tile::DirtHwallEnd; // east of (11,11)
-        tiles[10][12] = Tile::DirtVwallEnd; // south of (10,11)
-        tiles[11][12] = Tile::DirtVwall; // south of (11,11)
+        // Dirt walls on the floor region's east/south borders. The grid is in
+        // the generator's [row][col] convention (tiles[y][x]); "east of (11,10)"
+        // is row 10, col 12.
+        tiles[10][12] = Tile::DirtHwall; // east of (11,10)
+        tiles[11][12] = Tile::DirtHwallEnd; // east of (11,11)
+        tiles[12][10] = Tile::DirtVwallEnd; // south of (10,11)
+        tiles[12][11] = Tile::DirtVwall; // south of (11,11)
         tiles[12][12] = Tile::VDirtCorner; // SE diagonal of (11,11)
         // Wall micros adjacent to the floor inherit the region id (flood).
         trans_val[2 * 12 + 16][2 * 10 + 16] = 7; // DirtHwall (12,10) top-left

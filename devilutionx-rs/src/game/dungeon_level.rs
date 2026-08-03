@@ -440,8 +440,11 @@ pub fn build_dungeon_layout(gen: &CathedralGenerator, level: &DungeonLevelData) 
     // C++ GenerateLevel (drlg_l1.cpp): after the retry loop, copy the TransVal
     // below each EntranceStairs tile into the stairs row, then run
     // FixTransparency() to spread the region value over Dirt wall footprints.
-    crate::levels::drlg_l1::copy_stairs_transparency(&gen.dungeon, &mut trans_val);
-    crate::levels::drlg_l1::fix_transparency(&gen.dungeon, &mut trans_val);
+    // Both use the post-stairs, pre-variation grid (C++ runs them before
+    // Substitution/FillFloor).
+    let fix_src = gen.post_stairs_dungeon.as_ref().unwrap_or(&gen.dungeon);
+    crate::levels::drlg_l1::copy_stairs_transparency(fix_src, &mut trans_val);
+    crate::levels::drlg_l1::fix_transparency(fix_src, &mut trans_val);
     for y in 0..MAXDUNY {
         for x in 0..MAXDUNX {
             layout.trans_val[y * MAXDUNX + x] = trans_val[x][y];
