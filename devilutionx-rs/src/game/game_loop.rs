@@ -556,7 +556,11 @@ pub fn convert_screen_to_tile(
 
     let columns = (screen_w + TILE_WIDTH - 1) / TILE_WIDTH; // ceil
     let rows = (screen_h + TILE_HEIGHT - 1) / TILE_HEIGHT; // ceil
-    let lrow = rows; // RowsCoveredByPanel = 0 when panel width >= screen width
+    // C++ RowsCoveredByPanel (scrollrt.cpp:1603): the main panel (128px =
+    // 4 rows of 32px) covers rows only when the screen is wider than the
+    // panel (640). The 768x480 timedemo viewport is wider, so lrow = rows-4.
+    let panel_rows = if screen_w > 640 { 128 / TILE_HEIGHT } else { 0 };
+    let lrow = rows - panel_rows;
 
     // ShiftGrid(&tile, -columns / 2, -lrow / 2)
     let mut tile_x = cam_tile_x + (-lrow / 2) + (-columns / 2);
@@ -586,6 +590,35 @@ pub fn convert_screen_to_tile(
         tile_x += 1;
     }
     (tile_x.clamp(0, 111), tile_y.clamp(0, 111))
+}
+
+/// C++ `AlterMousePositionViaPlayer` (cursor.cpp:696-718): while the player is
+/// walking, the cursor screen position is shifted by the walking offset
+/// (camera mode) so clicks land on the world tile the player is pointing at
+/// from their sub-tile position. Most demo clicks happen mid-walk.
+pub fn adjust_cursor_for_walk(game_state: &GameState, mx: i32, my: i32) -> (i32, i32) {
+    use crate::game::game_loop::WALK_TICKS_PER_TILE;
+    if game_state.player_walk_path.is_empty() || game_state.player_walk_dir == 0 {
+        return (mx, my);
+    }
+    // MovingOffset[8] (scrollrt.cpp:1577): South, SouthWest, West, NorthWest,
+    // North, NorthEast, East, SouthEast.
+    let (dx, dy) = match game_state.player_walk_dir {
+        7 => (0, 32),
+        4 => (-32, 16),
+        8 => (-64, 0),
+        2 => (-32, -16),
+        5 => (0, -32),
+        1 => (32, -16),
+        6 => (64, 0),
+        3 => (32, 16),
+        _ => (0, 0),
+    };
+    let progress = game_state.player_walk_sub_tick * 256 / WALK_TICKS_PER_TILE;
+    (
+        mx + dx * progress / 256,
+        my + dy * progress / 256,
+    )
 }
 
 /// Dispatch a keymapper action to the game loop state — the Rust counterpart
@@ -5846,12 +5879,13 @@ mod tests {
 
     #[test]
     fn test_convert_screen_to_tile_at_view_centre_is_camera() {
-        // The timedemo viewport (768x480) centres ViewPosition at screen
-        // (384,240); clicking there maps back to the camera tile (C++
-        // ConvertToTileGrid).
+        // The timedemo viewport is 768x480 with a 128px bottom panel, so the
+        // camera (ViewPosition) sits at the 352px viewport centre (384,176);
+        // clicking there maps back to the camera tile (C++ ConvertToTileGrid
+        // with lrow = rows - RowsCoveredByPanel = 15 - 4).
         let cam_x = 75;
         let cam_y = 68;
-        let (wx, wy) = convert_screen_to_tile(384, 240, cam_x, cam_y, 768, 480);
+        let (wx, wy) = convert_screen_to_tile(384, 176, cam_x, cam_y, 768, 480);
         assert_eq!((wx, wy), (cam_x, cam_y));
     }
 
@@ -5859,13 +5893,13 @@ mod tests {
     fn test_convert_screen_to_tile_concrete_example() {
         // Hand-computed from C++ ConvertToTileGrid + ShiftToDiamondGridAlignment
         // for the timedemo 640x480 viewport (no zoom, panel rows 0).
-        // cam=(75,68): ShiftGrid(-6,-7) -> (62,67); (384,295) -> tx=6,ty=9 ->
-        // ShiftGrid(6,9) -> (77,70); px=0,py=7 -> no diamond nudge.
-        assert_eq!(convert_screen_to_tile(384, 295, 75, 68, 768, 480), (77, 70));
+        // cam=(75,68): ShiftGrid(-6,-5) -> (64,69); (384,295) -> tx=6,ty=9 ->
+        // ShiftGrid(6,9) -> (79,72); px=0,py=7 -> no diamond nudge.
+        assert_eq!(convert_screen_to_tile(384, 295, 75, 68, 768, 480), (79, 72));
         // First demo click at ViewPosition (77,46).
-        assert_eq!(convert_screen_to_tile(338, 164, 77, 46, 768, 480), (74, 44));
-        // Screen centre maps to the camera tile regardless of camera position.
-        assert_eq!(convert_screen_to_tile(384, 240, 77, 46, 768, 480), (77, 46));
+        assert_eq!(convert_screen_to_tile(338, 164, 77, 46, 768, 480), (76, 46));
+        // Viewport centre maps to the camera tile regardless of camera pos.
+        assert_eq!(convert_screen_to_tile(384, 176, 77, 46, 768, 480), (77, 46));
     }
 
     #[test]
@@ -6637,9 +6671,9 @@ mod tests {
         // C++ ConvertToTileGrid (cursor.cpp:723-755) + ShiftToDiamondGridAlignment
         // with the timedemo 640x480 viewport (panel rows 0, no zoom).
         // Hand-computed for the first demo clicks at ViewPosition (77,46).
-        assert_eq!(super::convert_screen_to_tile(338, 164, 77, 46, 768, 480), (74, 44));
-        assert_eq!(super::convert_screen_to_tile(438, 204, 75, 43, 768, 480), (75, 41));
-        assert_eq!(super::convert_screen_to_tile(384, 240, 77, 46, 768, 480), (77, 46));
+        assert_eq!(super::convert_screen_to_tile(338, 164, 77, 46, 768, 480), (76, 46));
+        assert_eq!(super::convert_screen_to_tile(438, 204, 75, 43, 768, 480), (77, 43));
+        assert_eq!(super::convert_screen_to_tile(384, 176, 77, 46, 768, 480), (77, 46));
     }
 
     #[test]

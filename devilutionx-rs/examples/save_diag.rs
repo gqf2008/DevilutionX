@@ -2,7 +2,7 @@
 //! Not part of the crate's public API surface; kept for serialization alignment.
 use devilutionx_rs::engine::demo_reader::{load_save_archive, parse_demo, DemoEventType, DemoPayload, ReplayDriver};
 use devilutionx_rs::game::codec::codec_decode;
-use devilutionx_rs::game::game_loop::convert_screen_to_tile;
+use devilutionx_rs::game::game_loop::{adjust_cursor_for_walk, convert_screen_to_tile};
 use devilutionx_rs::game::game_state::GameState;
 use devilutionx_rs::game::loadsave::CppGameHeader;
 use devilutionx_rs::game::pack::PlayerPack;
@@ -50,7 +50,8 @@ fn main() {
             DemoEventType::MouseButtonDown => {
                 if let DemoPayload::MouseButton { x, y, .. } = ev.payload {
                     let cam = gs.camera;
-                    gs.handle_click_tile(convert_screen_to_tile(x as i32, y as i32, cam.tile_x, cam.tile_y, 768, 480));
+                    let (ax, ay) = devilutionx_rs::game::game_loop::adjust_cursor_for_walk(&gs, x as i32, y as i32);
+                    gs.handle_click_tile(convert_screen_to_tile(ax, ay, cam.tile_x, cam.tile_y, 768, 480));
                 }
             }
             DemoEventType::GameTick => {
