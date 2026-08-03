@@ -50,7 +50,7 @@ fn main() {
             DemoEventType::MouseButtonDown => {
                 if let DemoPayload::MouseButton { x, y, .. } = ev.payload {
                     let cam = gs.camera;
-                    gs.handle_click_tile(convert_screen_to_tile(x as i32, y as i32, cam.tile_x, cam.tile_y));
+                    gs.handle_click_tile(convert_screen_to_tile(x as i32, y as i32, cam.tile_x, cam.tile_y, 768, 480));
                 }
             }
             DemoEventType::GameTick => {

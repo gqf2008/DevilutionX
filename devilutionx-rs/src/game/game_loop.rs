@@ -542,21 +542,21 @@ pub fn convert_screen_to_tile(
     my: i32,
     cam_tile_x: i32,
     cam_tile_y: i32,
+    screen_w: i32,
+    screen_h: i32,
 ) -> (i32, i32) {
     // C++ ConvertToTileGrid (cursor.cpp:723-755) + ShiftToDiamondGridAlignment
     // (cursor.cpp:757-789). The cursor tile is a square-grid division of the
     // screen position relative to the view centre (ViewPosition), then the
     // sub-tile diamond alignment nudges the tile. The timedemo viewport is
-    // 640x480 with the main panel (128px) not covering the width, so
-    // RowsCoveredByPanel is 0 and zoom is off.
-    const SCREEN_W: i32 = 640;
-    const SCREEN_H: i32 = 480;
+    // 768x480 (demo_0.dmo header) with the main panel (128px) not covering
+    // the width, so RowsCoveredByPanel is 0 and zoom is off.
     let mut sx = mx;
     let mut sy = my;
 
-    let columns = (SCREEN_W + TILE_WIDTH - 1) / TILE_WIDTH; // ceil
-    let rows = (SCREEN_H + TILE_HEIGHT - 1) / TILE_HEIGHT; // ceil
-    let lrow = rows; // RowsCoveredByPanel = 0 at 640x640 panel width
+    let columns = (screen_w + TILE_WIDTH - 1) / TILE_WIDTH; // ceil
+    let rows = (screen_h + TILE_HEIGHT - 1) / TILE_HEIGHT; // ceil
+    let lrow = rows; // RowsCoveredByPanel = 0 when panel width >= screen width
 
     // ShiftGrid(&tile, -columns / 2, -lrow / 2)
     let mut tile_x = cam_tile_x + (-lrow / 2) + (-columns / 2);
@@ -734,6 +734,8 @@ fn handle_event(
                     *y,
                     game_state.camera.tile_x,
                     game_state.camera.tile_y,
+                    640,
+                    480,
                 );
 
                 // First, if the click lands on (or very near) a shop-capable
@@ -4590,7 +4592,7 @@ fn draw_monster_health_bar(window: &mut GameWindow, game_state: &GameState, mous
         return;
     }
     let cam = game_state.camera;
-    let tile = convert_screen_to_tile(mouse_pos.0, mouse_pos.1, cam.tile_x, cam.tile_y);
+    let tile = convert_screen_to_tile(mouse_pos.0, mouse_pos.1, cam.tile_x, cam.tile_y, 640, 480);
     let hovered = find_hovered_monster(game_state.monster_manager.iter().map(|(_, m)| m), tile);
     let Some(monster) = hovered else { return };
 
@@ -5844,11 +5846,12 @@ mod tests {
 
     #[test]
     fn test_convert_screen_to_tile_at_view_centre_is_camera() {
-        // The timedemo viewport centres ViewPosition at screen (320,240);
-        // clicking there maps back to the camera tile (C++ ConvertToTileGrid).
+        // The timedemo viewport (768x480) centres ViewPosition at screen
+        // (384,240); clicking there maps back to the camera tile (C++
+        // ConvertToTileGrid).
         let cam_x = 75;
         let cam_y = 68;
-        let (wx, wy) = convert_screen_to_tile(320, 240, cam_x, cam_y);
+        let (wx, wy) = convert_screen_to_tile(384, 240, cam_x, cam_y, 768, 480);
         assert_eq!((wx, wy), (cam_x, cam_y));
     }
 
@@ -5856,13 +5859,13 @@ mod tests {
     fn test_convert_screen_to_tile_concrete_example() {
         // Hand-computed from C++ ConvertToTileGrid + ShiftToDiamondGridAlignment
         // for the timedemo 640x480 viewport (no zoom, panel rows 0).
-        // cam=(75,68): ShiftGrid(-5,-7) -> (63,66); (384,295) -> tx=6,ty=9 ->
-        // ShiftGrid(6,9) -> (78,69); px=0,py=7 -> no diamond nudge.
-        assert_eq!(convert_screen_to_tile(384, 295, 75, 68), (78, 69));
+        // cam=(75,68): ShiftGrid(-6,-7) -> (62,67); (384,295) -> tx=6,ty=9 ->
+        // ShiftGrid(6,9) -> (77,70); px=0,py=7 -> no diamond nudge.
+        assert_eq!(convert_screen_to_tile(384, 295, 75, 68, 768, 480), (77, 70));
         // First demo click at ViewPosition (77,46).
-        assert_eq!(convert_screen_to_tile(338, 164, 77, 46), (75, 43));
+        assert_eq!(convert_screen_to_tile(338, 164, 77, 46, 768, 480), (74, 44));
         // Screen centre maps to the camera tile regardless of camera position.
-        assert_eq!(convert_screen_to_tile(320, 240, 77, 46), (77, 46));
+        assert_eq!(convert_screen_to_tile(384, 240, 77, 46, 768, 480), (77, 46));
     }
 
     #[test]
@@ -6634,9 +6637,9 @@ mod tests {
         // C++ ConvertToTileGrid (cursor.cpp:723-755) + ShiftToDiamondGridAlignment
         // with the timedemo 640x480 viewport (panel rows 0, no zoom).
         // Hand-computed for the first demo clicks at ViewPosition (77,46).
-        assert_eq!(super::convert_screen_to_tile(338, 164, 77, 46), (75, 43));
-        assert_eq!(super::convert_screen_to_tile(438, 204, 75, 43), (76, 40));
-        assert_eq!(super::convert_screen_to_tile(320, 240, 77, 46), (77, 46));
+        assert_eq!(super::convert_screen_to_tile(338, 164, 77, 46, 768, 480), (74, 44));
+        assert_eq!(super::convert_screen_to_tile(438, 204, 75, 43, 768, 480), (75, 41));
+        assert_eq!(super::convert_screen_to_tile(384, 240, 77, 46, 768, 480), (77, 46));
     }
 
     #[test]

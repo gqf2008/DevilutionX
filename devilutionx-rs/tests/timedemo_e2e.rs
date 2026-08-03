@@ -111,7 +111,7 @@ fn headless_replay_applies_click_to_move() {
                             if let DemoPayload::MouseButton { x, y, .. } = ev.payload {
                                 let cam = gs.camera;
                                 gs.handle_click_tile(convert_screen_to_tile(
-                                    x as i32, y as i32, cam.tile_x, cam.tile_y,
+                                    x as i32, y as i32, cam.tile_x, cam.tile_y, 768, 480,
                                 ));
                                 clicks += 1;
                             }
@@ -191,7 +191,7 @@ fn full_replay_runs_to_completion() {
                     if let DemoPayload::MouseButton { x, y, .. } = ev.payload {
                         let cam = gs.camera;
                         gs.handle_click_tile(convert_screen_to_tile(
-                            x as i32, y as i32, cam.tile_x, cam.tile_y,
+                            x as i32, y as i32, cam.tile_x, cam.tile_y, 768, 480,
                         ));
                         clicks += 1;
                     }
@@ -575,7 +575,7 @@ fn replay_from_saved_state_reports_reference_diff() {
                 if let DemoPayload::MouseButton { x, y, .. } = ev.payload {
                     let cam = gs.camera;
                     gs.handle_click_tile(convert_screen_to_tile(
-                        x as i32, y as i32, cam.tile_x, cam.tile_y,
+                        x as i32, y as i32, cam.tile_x, cam.tile_y, 768, 480,
                     ));
                 }
             }

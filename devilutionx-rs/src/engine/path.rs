@@ -58,11 +58,19 @@ struct PathNode {
     f_cost: i32,
     /// 从起点到此节点的代价
     g_cost: i32,
+    /// h(position, dest) at push time (C++ `GetHeuristicCost`).
+    h_cost: i32,
+    /// Whether the step into this node was diagonal (C++ tie-break prefers
+    /// diagonal steps first).
+    is_diagonal: bool,
 }
 
 impl PartialEq for PathNode {
     fn eq(&self, other: &Self) -> bool {
         self.f_cost == other.f_cost
+            && self.h_cost == other.h_cost
+            && self.is_diagonal == other.is_diagonal
+            && self.position == other.position
     }
 }
 
@@ -75,9 +83,18 @@ impl PartialOrd for PathNode {
 }
 
 impl Ord for PathNode {
+    /// Matches the C++ `frontierComparator` (path.cpp:205-220): pop the node
+    /// with the smallest f, then smallest h, then a diagonal step first, then
+    /// smallest x, then smallest y. The reversed comparisons turn the
+    /// `BinaryHeap` (a max-heap) into a min-heap on those keys.
     fn cmp(&self, other: &Self) -> Ordering {
-        // 反转顺序以创建最小堆
-        other.f_cost.cmp(&self.f_cost)
+        other
+            .f_cost
+            .cmp(&self.f_cost)
+            .then_with(|| other.h_cost.cmp(&self.h_cost))
+            .then_with(|| self.is_diagonal.cmp(&other.is_diagonal))
+            .then_with(|| other.position.x.cmp(&self.position.x))
+            .then_with(|| other.position.y.cmp(&self.position.y))
     }
 }
 
@@ -169,6 +186,8 @@ where
         position: start,
         f_cost: initial_h,
         g_cost: 0,
+        h_cost: initial_h,
+        is_diagonal: false,
     });
     explored.insert(start, ExploredNode { prev: start, g_cost: 0 });
 
@@ -242,6 +261,8 @@ where
                     position: neighbor_pos,
                     f_cost: f,
                     g_cost: g,
+                    h_cost: f - g,
+                    is_diagonal: is_diagonal_step(cur.position, neighbor_pos),
                 });
             }
         }

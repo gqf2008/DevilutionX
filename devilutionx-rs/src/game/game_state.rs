@@ -1391,11 +1391,21 @@ impl GameState {
     /// (C++ CheckCursMove + the mouse handler): a click on a living monster
     /// becomes an attack, anything else becomes a walk.
     pub fn handle_click_tile(&mut self, tile: (i32, i32)) {
-        let attack = self
-            .monster_manager
-            .iter()
-            .find(|(_, m)| m.is_alive() && m.x == tile.0 && m.y == tile.1)
-            .map(|(id, _)| id);
+        // C++ TrySelectMonster (cursor.cpp:85-103): a click selects a monster
+        // whose sprite overlaps the cursor tile. The cursor tile is checked
+        // against the monster's sprite offsets top-first; the C++ flip flag
+        // picks (2,1) vs (1,2) and (1,0) vs (0,1), so check the union in the
+        // same priority order (first match wins).
+        const OFFSETS: [(i32, i32); 7] =
+            [(2, 1), (1, 2), (2, 2), (1, 0), (0, 1), (0, 0), (1, 1)];
+        let attack = OFFSETS.iter().find_map(|&(dx, dy)| {
+            let x = tile.0 + dx;
+            let y = tile.1 + dy;
+            self.monster_manager
+                .iter()
+                .find(|(_, m)| m.is_alive() && m.x == x && m.y == y)
+                .map(|(id, _)| id)
+        });
         self.dest_action = Some(match attack {
             Some(id) => DestAction::AttackMonster(id),
             None => DestAction::Walk(tile),
@@ -1769,7 +1779,9 @@ impl GameState {
                         self.attack_cooldown = ATTACK_TICKS;
                     }
                 } else if self.player_walk_path.is_empty() {
-                    // Walk toward a free tile adjacent to the monster.
+                    // Walk toward a free tile adjacent to the monster. Keep
+                    // destAction pending so the attack fires when the player
+                    // arrives (C++ ACTION_ATTACK persists across the walk).
                     if let Some(adj) = self.tile_toward(mpos) {
                         if self.player_walk_target != Some(adj) {
                             self.make_walk_path(adj);
