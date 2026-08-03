@@ -659,6 +659,85 @@ fn replay_from_saved_state_reports_reference_diff() {
     assert!(actual.len() > 60_000, "post-replay entry structurally complete");
 }
 
+/// Diagnostic for issue #17: trace player/camera tile over the replay to
+/// characterise the ViewPosition.x (byte 20) divergence. Prints init state,
+/// each click's target tile + player position, and the final save ViewPosition
+/// vs the C++ reference. Soft-asserts only (prints the gap).
+#[test]
+fn trace_walk_divergence_17() {
+    use rand::SeedableRng;
+    use devilutionx_rs::game::game_loop::convert_screen_to_tile;
+    use devilutionx_rs::game::codec::codec_decode;
+    use devilutionx_rs::game::game_state::GameState;
+    use devilutionx_rs::game::loadsave::CppGameHeader;
+    use devilutionx_rs::game::pack::PlayerPack;
+    use devilutionx_rs::game::player_exact::Player;
+
+    const PASSWORD_SPAWN_SINGLE: &str = "adslhfb1";
+    let data = std::fs::read(fixture_path("demo_0.dmo")).unwrap();
+    let mut save = load_save_archive(fixture_path("spawn_0.sv")).expect("open save");
+    let hero = codec_decode(&save.read_entry("hero").unwrap(), PASSWORD_SPAWN_SINGLE);
+    let pack = PlayerPack::from_bytes(&hero);
+    let decoded = codec_decode(&save.read_entry("game").unwrap(), PASSWORD_SPAWN_SINGLE);
+    let header = CppGameHeader::parse(&decoded).expect("game header parses");
+    let seeds = CppGameHeader::parse_level_seeds(&decoded, 17).expect("seed table");
+
+    devilutionx_rs::engine::random::seed_gameplay_rng(12345);
+    let mut gs = GameState::new(Player::new(), false, 12345);
+    gs.load_from_save(&pack, &header, &seeds, Some(&decoded));
+    assert!(devilutionx_rs::game::game_loop::prepare_dungeon_for_replay(&mut gs, 1));
+    println!("[Trace17] init  player=({},{}) camera=({},{}) saveViewPos=({},{})",
+        gs.player.position.x, gs.player.position.y,
+        gs.camera.tile_x, gs.camera.tile_y,
+        header.view_position_x, header.view_position_y);
+
+    let mut ref_save = load_save_archive(fixture_path("demo_0_reference_spawn_0.sv")).expect("open ref");
+    let reference = codec_decode(&ref_save.read_entry("game").unwrap(), PASSWORD_SPAWN_SINGLE);
+    let ref_header = CppGameHeader::parse(&reference).expect("ref header");
+    println!("[Trace17] reference(post-replay) ViewPos=({},{}) currlevel={}",
+        ref_header.view_position_x, ref_header.view_position_y, ref_header.currlevel);
+    let ref_hero = codec_decode(&ref_save.read_entry("hero").unwrap(), PASSWORD_SPAWN_SINGLE);
+    let ref_pack = PlayerPack::from_bytes(&ref_hero);
+    println!("[Trace17] reference player tile (hero px,py) = ({},{})",
+        ref_pack.px, ref_pack.py);
+
+    let mut rng = rand::rngs::StdRng::seed_from_u64(0);
+    let mut driver = ReplayDriver::new(parse_demo(&data).unwrap());
+    let mut click_no = 0i32;
+    let mut tick_no = 0i32;
+    while let Some(ev) = driver.peek() {
+        match ev.event_type {
+            DemoEventType::MouseButtonDown => {
+                if let DemoPayload::MouseButton { x, y, .. } = ev.payload {
+                    let cam = gs.camera;
+                    let tgt = convert_screen_to_tile(x as i32, y as i32, cam.tile_x, cam.tile_y, 768, 480);
+                    gs.handle_click_tile(tgt);
+                    click_no += 1;
+                    println!("[Trace17] click#{} @tick{} screen=({},{}) target=({},{}) player=({},{}) camera=({},{}) path_len={}",
+                        click_no, tick_no, x, y, tgt.0, tgt.1,
+                        gs.player.position.x, gs.player.position.y,
+                        gs.camera.tile_x, gs.camera.tile_y,
+                        gs.player_walk_path.len());
+                }
+            }
+            DemoEventType::GameTick => {
+                gs.update(&mut rng);
+                tick_no += 1;
+            }
+            _ => {}
+        }
+        driver.step();
+    }
+    let actual = gs.write_save_game_v3();
+    let avx = i32::from_be_bytes([actual[17], actual[18], actual[19], actual[20]]);
+    let avy = i32::from_be_bytes([actual[21], actual[22], actual[23], actual[24]]);
+    println!("[Trace17] FINAL player=({},{}) camera=({},{}) actualSaveViewPos=({},{})",
+        gs.player.position.x, gs.player.position.y, gs.camera.tile_x, gs.camera.tile_y, avx, avy);
+    println!("[Trace17] clicks={} ticks={} | ref ViewPos.x={} actual={}",
+        click_no, tick_no, ref_header.view_position_x, avx);
+    assert!(click_no > 0, "demo should contain mouse clicks");
+}
+
 /// Tier 1..3 acceptance: load `spawn_0.sv`, replay `demo_0.dmo` headlessly through
 /// the engine game loop, and byte-compare the final save against the reference.
 ///
