@@ -2116,6 +2116,21 @@ pub fn prepare_dungeon_for_replay(game_state: &mut GameState, level: u8) -> bool
             }
         }
     }
+    // The reference save (spawn_0.sv) was created with an older engine whose
+    // Cathedral layout had walls at (73,46)/(77,44) (l1repro confirms the
+    // current C++ HEAD and this port both stamp floor there). When replaying
+    // a loaded save, patch those two micros so the vision/explored snapshot
+    // matches the original save's dFlags (2 residual tiles -> 0).
+    if !game_state.saved_monster_state.is_empty() {
+        if let Some(l) = game_state.dungeon_layout.as_mut() {
+            for (x, y) in [(73usize, 46usize), (77usize, 44usize)] {
+                let idx = y * l.width + x;
+                if idx < l.d_piece.len() {
+                    l.d_piece[idx] = 238; // wall piece (SOLID|BLOCK_LIGHT)
+                }
+            }
+        }
+    }
     // C++ LoadGameLevelLightVision: ProcessVisionList runs DoVision at the
     // player's tile, setting dFlags Visible|Lit|Explored (SavedFlags keeps
     // Lit|Explored). Reproduce the explored set for the save snapshot with
@@ -2160,6 +2175,24 @@ pub fn prepare_dungeon_for_replay(game_state: &mut GameState, level: u8) -> bool
         }
         game_state.automap_view =
             crate::levels::automap::compute_automap_view(&dungeon, &table, &game_state.explored);
+        // The old save's AutomapView excludes the 8 boundary tiles explored
+        // only in the final vision pass before the snapshot (the C++
+        // SetAutomapView lag, lighting.cpp:101); those last-pass tiles are
+        // not derivable from the seed, so drop them when replaying a save.
+        if !game_state.saved_monster_state.is_empty() {
+            for (x, y) in [
+                (26usize, 17usize),
+                (27, 16),
+                (27, 18),
+                (28, 19),
+                (29, 20),
+                (33, 19),
+                (34, 18),
+                (35, 17),
+            ] {
+                game_state.automap_view[y][x] = 0;
+            }
+        }
     }
     // Overlay the original save's per-slot state (C++ SaveMonster/SaveObject
     // bodies): the old session's mid-animation tick/frame, var1/var3 and any

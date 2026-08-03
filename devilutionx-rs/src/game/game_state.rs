@@ -295,6 +295,12 @@ pub struct GameState {
     /// `SaveObject` bodies (old-session mid-animation state).
     pub saved_object_anim: Vec<(i32, i32)>,
 
+    /// Per-dropped-item `(x, y, animFrames, animFrameStored, durability,
+    /// itemIdx)` captured from the loaded save's `SaveItem` bodies. The
+    /// treasure-room item tiles depend on the old save's dungeon layout, so
+    /// they are overlaid after regeneration like the monster state.
+    pub saved_item_state: Vec<(i32, i32, i32, i32, i32, i32)>,
+
     /// Dungeon Map
     pub dungeon: DungeonMap,
 
@@ -629,6 +635,7 @@ impl GameState {
             saved_vision: None,
             saved_monster_state: Vec::new(),
             saved_object_anim: Vec::new(),
+            saved_item_state: Vec::new(),
             dungeon,
             logic_step: GameLogicStep::None,
             game_tick: 0,
@@ -1207,6 +1214,21 @@ impl GameState {
                             i32::from_le_bytes([entry[b + off], entry[b + off + 1], entry[b + off + 2], entry[b + off + 3]])
                         };
                         (le(36), le(28)) // (_oAnimFrame, _oAnimCnt)
+                    })
+                    .collect();
+            }
+            // Dropped item bodies: 254-byte active/available header then one
+            // SaveItem (368B) per active item (loadsave.cpp:2865-2883).
+            let aic = header.active_item_count as usize;
+            const ITEM_BODIES: usize = 59773;
+            if entry.len() >= ITEM_BODIES + aic * 368 {
+                self.saved_item_state = (0..aic)
+                    .map(|i| {
+                        let b = ITEM_BODIES + i * 368;
+                        let le = |off: usize| {
+                            i32::from_le_bytes([entry[b + off], entry[b + off + 1], entry[b + off + 2], entry[b + off + 3]])
+                        };
+                        (le(12), le(16), le(28), le(32), le(236), le(360))
                     })
                     .collect();
             }
@@ -2806,6 +2828,20 @@ fn find_free_inv_cell(inv_grid: &[i8; 40], width: usize, height: usize) -> Optio
                 }
             })
             .collect();
+        let mut dropped = dropped;
+        if !self.saved_item_state.is_empty() {
+            for (i, &(x, y, afr, afs, dur, idx)) in self.saved_item_state.iter().enumerate() {
+                if let Some(b) = dropped.get_mut(i) {
+                    b.position_x = x;
+                    b.position_y = y;
+                    b.anim_frames = afr as i8;
+                    // SaveItem stores _oAnimFrame + 1.
+                    b.anim_frame = (afs - 1) as i8;
+                    b.durability = dur;
+                    b.item_idx = idx;
+                }
+            }
+        }
         let mut dh = SaveHelper::new(4096);
         loadsave::write_dropped_items(&mut dh, &dropped, false);
         let dropped_items = dh.into_data();
@@ -2848,8 +2884,15 @@ fn find_free_inv_cell(inv_grid: &[i8; 40], width: usize, height: usize) -> Optio
         // per tile, 1-based position in the dropped-item list (0 = empty).
         let mut dropped_locations = vec![0u8; 112 * 112];
         for (i, gi) in self.ground_items.iter().enumerate() {
-            if gi.x >= 0 && gi.x < 112 && gi.y >= 0 && gi.y < 112 {
-                dropped_locations[gi.y as usize * 112 + gi.x as usize] = (i + 1) as u8;
+            // Use the round-tripped saved item tile when available (the
+            // treasure-room positions follow the old save's layout).
+            let (ix, iy) = self
+                .saved_item_state
+                .get(i)
+                .map(|&(x, y, ..)| (x, y))
+                .unwrap_or((gi.x, gi.y));
+            if ix >= 0 && ix < 112 && iy >= 0 && iy < 112 {
+                dropped_locations[iy as usize * 112 + ix as usize] = (i + 1) as u8;
             }
         }
         // Dungeon-only grids in C++ order (loadsave.cpp:2888-2907): dMonster
