@@ -990,11 +990,26 @@ fn drop_pregen_random_item(game_state: &mut crate::game::game_state::GameState, 
     let item_max_level = 2i32; // 2 * currlevel (L1)
     // C++ GetItemIndexForDroppableItem(false, ...): weight 1 per available
     // droppable item with minMlvl <= itemMaxLevel; pick via
-    // RandomIntLessThan(cumulativeWeight).
+    // RandomIntLessThan(cumulativeWeight). Mirrors the full filter
+    // (items.cpp:1357-1370): IsItemAvailable + dropRate + Resurrect/HealOther
+    // scroll exclusion in single player.
     let valid: Vec<usize> = (0..ITEMS_DATA.len())
         .filter(|&i| {
+            if !crate::game::item_affix::is_item_available(i, false, game_state.is_spawn, false) {
+                return false;
+            }
             let d = &ITEMS_DATA[i];
-            d.drop_rate != 0 && (d.min_mlvl as i32) <= item_max_level
+            if d.drop_rate == 0 {
+                return false;
+            }
+            if (d.min_mlvl as i32) > item_max_level {
+                return false;
+            }
+            // C++ skips Resurrect/HealOther scrolls outside multiplayer.
+            !matches!(
+                d.spell,
+                crate::game::spelldat::SpellID::Resurrect | crate::game::spelldat::SpellID::HealOther
+            )
         })
         .collect();
     if valid.is_empty() {
@@ -1027,9 +1042,11 @@ fn drop_pregen_random_item(game_state: &mut crate::game::game_state::GameState, 
         // misc/bows with iblvl == -1, so no affix draws occur).
         let _ = blvl;
     }
-    // ItemRndDur: items with durability > 0 draw GenerateRnd(dur / 2).
+    // ItemRndDur: items with durability > 0 draw GenerateRnd(dur / 2) and
+    // reduce _iDurability by it (items.cpp ItemRndDur); _iMaxDur stays base.
+    let mut rolled_dur = data.durability as i32;
     if data.durability > 0 && data.durability != 255 {
-        let _ = crate::engine::random::gameplay_generate_rnd(data.durability as i32 / 2);
+        rolled_dur -= crate::engine::random::gameplay_generate_rnd(data.durability as i32 / 2);
     }
     let item_type = match data.item_type {
         crate::game::item_dat::ItemType::Gold => GroundItemType::Gold,
@@ -1051,6 +1068,9 @@ fn drop_pregen_random_item(game_state: &mut crate::game::game_state::GameState, 
     item.create_info = 0x8102;
     item.name = data.name.to_string();
     item.base_name = data.name.to_string();
+    // C++ ItemRndDur reduced _iDurability; _iMaxDur stays the base value.
+    item.durability = rolled_dur;
+    item.max_durability = data.durability as i32;
     crate::game::items::setup_item(&mut item);
     game_state.ground_items.push(crate::game::game_state::GroundItem {
         x,
