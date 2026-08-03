@@ -543,16 +543,49 @@ pub fn convert_screen_to_tile(
     cam_tile_x: i32,
     cam_tile_y: i32,
 ) -> (i32, i32) {
-    let (ax, ay) = tile_to_screen(cam_tile_x, cam_tile_y, cam_tile_x, cam_tile_y);
-    let rel_x = mx - ax; // (u - v) * 32
-    let rel_y = my - ay; // (u + v) * 16
+    // C++ ConvertToTileGrid (cursor.cpp:723-755) + ShiftToDiamondGridAlignment
+    // (cursor.cpp:757-789). The cursor tile is a square-grid division of the
+    // screen position relative to the view centre (ViewPosition), then the
+    // sub-tile diamond alignment nudges the tile. The timedemo viewport is
+    // 640x480 with the main panel (128px) not covering the width, so
+    // RowsCoveredByPanel is 0 and zoom is off.
+    const SCREEN_W: i32 = 640;
+    const SCREEN_H: i32 = 480;
+    let mut sx = mx;
+    let mut sy = my;
 
-    let diff_uv = rel_x / (TILE_WIDTH / 2); // u - v
-    let sum_uv = rel_y / (TILE_HEIGHT / 2); // u + v
-    let u = (sum_uv + diff_uv) / 2;
-    let v = (sum_uv - diff_uv) / 2;
+    let columns = (SCREEN_W + TILE_WIDTH - 1) / TILE_WIDTH; // ceil
+    let rows = (SCREEN_H + TILE_HEIGHT - 1) / TILE_HEIGHT; // ceil
+    let lrow = rows; // RowsCoveredByPanel = 0 at 640x640 panel width
 
-    (cam_tile_x + u, cam_tile_y + v)
+    // ShiftGrid(&tile, -columns / 2, -lrow / 2)
+    let mut tile_x = cam_tile_x + (-lrow / 2) + (-columns / 2);
+    let mut tile_y = cam_tile_y + (-lrow / 2) - (-columns / 2);
+
+    if columns % 2 == 0 && lrow % 2 == 0 {
+        sy += TILE_HEIGHT / 2;
+    } else if columns % 2 != 0 && lrow % 2 != 0 {
+        sx -= TILE_WIDTH / 2;
+    } else if columns % 2 != 0 && lrow % 2 == 0 {
+        tile_y += 1;
+    }
+
+    let tx = sx / TILE_WIDTH;
+    let ty = sy / TILE_HEIGHT;
+    // ShiftGrid(&tile, tx, ty)
+    tile_x += ty + tx;
+    tile_y += ty - tx;
+
+    // ShiftToDiamondGridAlignment
+    let px = sx % TILE_WIDTH;
+    let py = sy % TILE_HEIGHT;
+    if py < px / 2 {
+        tile_y -= 1;
+    }
+    if py >= TILE_HEIGHT - (px / 2) {
+        tile_x += 1;
+    }
+    (tile_x.clamp(0, 111), tile_y.clamp(0, 111))
 }
 
 /// Dispatch a keymapper action to the game loop state — the Rust counterpart
@@ -1994,6 +2027,9 @@ pub fn prepare_dungeon_for_replay(game_state: &mut GameState, level: u8) -> bool
     game_state.current_dungeon_level = level;
     game_state.in_dungeon = true;
     game_state.is_town = false;
+    // C++ ViewPosition is the view centre at level entry (the player tile).
+    game_state.camera.tile_x = game_state.player.position.x;
+    game_state.camera.tile_y = game_state.player.position.y;
     game_state.explored.fill(false);
     game_state.triggers.init_no_triggers();
     let d_piece: Vec<u16> = game_state
@@ -2464,45 +2500,165 @@ fn apply_movement(game_state: &mut GameState, input: &InputSystem) {
 /// `target` is passed by value and `move_target` is a mutable reference back
 /// into `GameLoopState` so we can `None` it on arrival; the caller reads the
 /// current value from `state.move_target` before invoking us.
+/// Game ticks per walked tile (C++ walk animation: one frame per game tick,
+/// 8 frames cross a tile). `StartWalkAnimation` skips two leading frames on
+/// dungeon levels; the exact cadence is tuned against the demo replay.
+const WALK_TICKS_PER_TILE: i32 = 8;
+
+/// Convert a C++ `GetPathDirection` code (path.h:60-67) to a tile delta.
+fn dir_code_delta(code: i8) -> (i32, i32) {
+    match code {
+        1 => (0, -1),  // NorthEast
+        2 => (-1, 0),  // NorthWest
+        3 => (1, 0),   // SouthEast
+        4 => (0, 1),   // SouthWest
+        5 => (-1, -1), // North
+        6 => (1, -1),  // East
+        7 => (1, 1),   // South
+        8 => (-1, 1),  // West
+        _ => (0, 0),
+    }
+}
+
+/// C++ `IsTileNotSolid` for the layout (SOLData[dPiece] & Solid).
+fn is_tile_not_solid_layout(game_state: &GameState, x: i32, y: i32) -> bool {
+    use crate::engine::dungeon::TileProperties;
+    if x < 0 || y < 0 || x >= 112 || y >= 112 {
+        return false;
+    }
+    let Some(layout) = &game_state.dungeon_layout else { return false };
+    let piece = layout
+        .d_piece
+        .get(y as usize * layout.width + x as usize)
+        .copied()
+        .unwrap_or(0);
+    !layout
+        .sol
+        .get(piece as usize)
+        .copied()
+        .unwrap_or_default()
+        .contains(TileProperties::SOLID)
+}
+
+/// C++ `PosOkPlayer` (player.cpp:3083-3100): a tile the player may stand on.
+fn pos_ok_player(game_state: &GameState, x: i32, y: i32) -> bool {
+    if !is_tile_not_solid_layout(game_state, x, y) {
+        return false;
+    }
+    // Solid objects block (C++ FindObjectAtPosition->_oSolidFlag).
+    if game_state
+        .objects
+        .iter()
+        .any(|o| o.position.x == x && o.position.y == y && o.solid)
+    {
+        return false;
+    }
+    // Living monsters block (C++ dMonster != 0 && !hasNoLife).
+    if game_state
+        .monster_manager
+        .iter()
+        .any(|(_, m)| m.is_alive() && m.x == x && m.y == y)
+    {
+        return false;
+    }
+    // The player's own tile is the walk start; exclude it as a destination.
+    if game_state.player.position.x == x && game_state.player.position.y == y {
+        return false;
+    }
+    true
+}
+
+/// C++ `CanStep` (tile_properties.cpp:66-85): axis-aligned steps additionally
+/// require the two diagonal corner tiles to be non-solid.
+fn can_step_player(game_state: &GameState, sx: i32, sy: i32, dx: i32, dy: i32) -> bool {
+    let code = crate::engine::path::get_path_direction(
+        crate::engine::types::Point::new(sx, sy),
+        crate::engine::types::Point::new(dx, dy),
+    );
+    match code {
+        // North: dest + SouthWest (0,1) and dest + SouthEast (1,0).
+        5 => is_tile_not_solid_layout(game_state, dx, dy + 1)
+            && is_tile_not_solid_layout(game_state, dx + 1, dy),
+        // East: dest + SouthWest (0,1) and dest + NorthWest (-1,0).
+        6 => is_tile_not_solid_layout(game_state, dx, dy + 1)
+            && is_tile_not_solid_layout(game_state, dx - 1, dy),
+        // South: dest + NorthEast (0,-1) and dest + NorthWest (-1,0).
+        7 => is_tile_not_solid_layout(game_state, dx, dy - 1)
+            && is_tile_not_solid_layout(game_state, dx - 1, dy),
+        // West: dest + SouthEast (1,0) and dest + NorthEast (0,-1).
+        8 => is_tile_not_solid_layout(game_state, dx + 1, dy)
+            && is_tile_not_solid_layout(game_state, dx, dy - 1),
+        _ => true,
+    }
+}
+
+/// C++ `MakePlrPath` (player.cpp:3121-3136): A* walk route from the player's
+/// current tile to `target` as a list of `GetPathDirection` codes.
+fn make_plr_path(game_state: &GameState, target: (i32, i32)) -> Vec<i8> {
+    let start = crate::engine::types::Point::new(
+        game_state.player.position.x,
+        game_state.player.position.y,
+    );
+    let dest = crate::engine::types::Point::new(target.0, target.1);
+    if start == dest {
+        return Vec::new();
+    }
+    crate::engine::path::find_path(
+        |a, b| can_step_player(game_state, a.x, a.y, b.x, b.y),
+        |p| pos_ok_player(game_state, p.x, p.y),
+        start,
+        dest,
+        crate::engine::path::MAX_PATH_LENGTH_PLAYER,
+    )
+}
+
+/// Advance the player one click-to-move tick (C++ `MakePlrPath` +
+/// `DoWalk`): recompute the route when the destination changes, then move
+/// along it at `WALK_TICKS_PER_TILE` ticks per tile.
 pub fn tick_move_target(
     game_state: &mut GameState,
     target: (i32, i32),
     move_target: &mut Option<(i32, i32)>,
 ) {
     let (tx, ty) = target;
-    let cur_x = game_state.player.position.x;
-    let cur_y = game_state.player.position.y;
-    println!("[TickMove] player=({},{}) target=({},{})", cur_x, cur_y, tx, ty);
+    let cur = (game_state.player.position.x, game_state.player.position.y);
 
-    // Already there?
-    if cur_x == tx && cur_y == ty {
-        *move_target = None;
-        return;
+    // A new destination (a fresh click) recomputes the route (C++ MakePlrPath
+    // runs on every click, from position.future).
+    if game_state.player_walk_target != Some(target) {
+        game_state.player_walk_path = make_plr_path(game_state, target);
+        game_state.player_walk_sub_tick = 0;
+        game_state.player_walk_target = Some(target);
+        if game_state.player_walk_path.is_empty() {
+            if cur == (tx, ty) {
+                *move_target = None;
+            }
+            return;
+        }
     }
 
-    // Step one tile toward the target on each axis (signum delta). This gives
-    // a diagonal-then-straight path: e.g. from (0,0) to (3,1) walks
-    // (1,1)->(2,1)->(3,1).
-    let dx = (tx - cur_x).signum();
-    let dy = (ty - cur_y).signum();
+    // The walk animation advances one frame per game tick; a tile is crossed
+    // every WALK_TICKS_PER_TILE frames.
+    game_state.player_walk_sub_tick += 1;
+    if game_state.player_walk_sub_tick < WALK_TICKS_PER_TILE {
+        return;
+    }
+    game_state.player_walk_sub_tick = 0;
 
-    let new_x = (cur_x + dx).max(4).min((TOWN_MAX_X as i32) - 5);
-    let new_y = (cur_y + dy).max(4).min((TOWN_MAX_Y as i32) - 5);
+    if let Some(code) = game_state.player_walk_path.first().copied() {
+        game_state.player_walk_path.remove(0);
+        let (dx, dy) = dir_code_delta(code);
+        game_state.player.position.x += dx;
+        game_state.player.position.y += dy;
+        // Move the camera with the player; reset sub-tile accumulators so
+        // keyboard movement resumes cleanly after a click-move.
+        game_state.camera.tile_x = game_state.player.position.x;
+        game_state.camera.tile_y = game_state.player.position.y;
+        game_state.camera.sub_x = 0;
+        game_state.camera.sub_y = 0;
+    }
 
-    // Move the player + camera together. The renderer centres on the camera
-    // tile and draws the player token on top, so they must stay aligned.
-    game_state.player.position.x = new_x;
-    game_state.player.position.y = new_y;
-    game_state.camera.tile_x = new_x;
-    game_state.camera.tile_y = new_y;
-    // Reset the sub-tile accumulators so keyboard movement resumes cleanly
-    // after a click-move.
-    game_state.camera.sub_x = 0;
-    game_state.camera.sub_y = 0;
-
-    // Arrival check: clear the destination so subsequent ticks don't keep
-    // nudging (and so keyboard input regains control).
-    if new_x == tx && new_y == ty {
+    if game_state.player_walk_path.is_empty() {
         *move_target = None;
     }
 }
@@ -5686,43 +5842,26 @@ mod tests {
     }
 
     #[test]
-    fn test_convert_screen_to_tile_at_anchor_is_camera() {
-        // Clicking the camera tile's own screen anchor maps back to the camera.
+    fn test_convert_screen_to_tile_at_view_centre_is_camera() {
+        // The timedemo viewport centres ViewPosition at screen (320,240);
+        // clicking there maps back to the camera tile (C++ ConvertToTileGrid).
         let cam_x = 75;
         let cam_y = 68;
-        let (ax, ay) = tile_to_screen(cam_x, cam_y, cam_x, cam_y);
-        let (wx, wy) = convert_screen_to_tile(ax, ay, cam_x, cam_y);
+        let (wx, wy) = convert_screen_to_tile(320, 240, cam_x, cam_y);
         assert_eq!((wx, wy), (cam_x, cam_y));
     }
 
     #[test]
-    fn test_convert_screen_to_tile_round_trips_forward_projection() {
-        // For every tile offset within the visible radius, forward-project to
-        // a screen point, then convert back — the round-trip must be exact.
-        let cam_x = 75;
-        let cam_y = 68;
-        for u in -9..=9 {
-            for v in -9..=9 {
-                let (mx, my) = project_tile_to_screen(u, v, cam_x, cam_y);
-                let (wx, wy) = convert_screen_to_tile(mx, my, cam_x, cam_y);
-                assert_eq!(
-                    (wx, wy),
-                    (cam_x + u, cam_y + v),
-                    "round-trip failed for offset ({},{}): screen=({},{})",
-                    u, v, mx, my
-                );
-            }
-        }
-    }
-
-    #[test]
     fn test_convert_screen_to_tile_concrete_example() {
-        // cam=(75,68) anchors at (288,183). Tile (80,70): u=5, v=2.
-        // Forward: mx = 288 + (u-v)*32 = 288 + 96 = 384
-        //          my = 183 + (u+v)*16 = 183 + 112 = 295
-        // Inverse must recover (80, 70).
-        let (wx, wy) = convert_screen_to_tile(384, 295, 75, 68);
-        assert_eq!((wx, wy), (80, 70));
+        // Hand-computed from C++ ConvertToTileGrid + ShiftToDiamondGridAlignment
+        // for the timedemo 640x480 viewport (no zoom, panel rows 0).
+        // cam=(75,68): ShiftGrid(-5,-7) -> (63,66); (384,295) -> tx=6,ty=9 ->
+        // ShiftGrid(6,9) -> (78,69); px=0,py=7 -> no diamond nudge.
+        assert_eq!(convert_screen_to_tile(384, 295, 75, 68), (78, 69));
+        // First demo click at ViewPosition (77,46).
+        assert_eq!(convert_screen_to_tile(338, 164, 77, 46), (75, 43));
+        // Screen centre maps to the camera tile regardless of camera position.
+        assert_eq!(convert_screen_to_tile(320, 240, 77, 46), (77, 46));
     }
 
     #[test]
@@ -5742,42 +5881,57 @@ mod tests {
         assert_eq!(gs.camera.tile_y, 50);
     }
 
-    #[test]
-    fn test_tick_move_target_walks_one_tile_toward_destination() {
-        // From (50,50) toward (53,52): the first tick moves diagonally to
-        // (51,51) (both axes advance). Camera must follow the player.
+    /// A GameState with an all-floor layout so the A* walk route always
+    /// resolves (C++-style path-following needs walkable tiles).
+    fn open_layout_gs() -> GameState {
         let player = crate::game::player_exact::Player::new();
         let mut gs = GameState::new(player, true, 1);
+        gs.dungeon_layout = Some(crate::game::game_state::DungeonLayout {
+            d_piece: vec![1u16; 112 * 112],
+            width: 112,
+            height: 112,
+            trans_val: vec![0; 112 * 112],
+            pre_light: vec![15; 112 * 112],
+            floor_tiles: Vec::new(),
+            sol: Vec::new(), // piece 1 -> default (non-solid)
+            populated: vec![false; 112 * 112],
+            dungeon: vec![0; 40 * 40],
+        });
         gs.camera.tile_x = 50;
         gs.camera.tile_y = 50;
         gs.player.position.x = 50;
         gs.player.position.y = 50;
+        gs
+    }
+
+    #[test]
+    fn test_tick_move_target_walks_one_tile_toward_destination() {
+        // From (50,50) toward (53,52): the C++ walk crosses one tile per
+        // WALK_TICKS_PER_TILE ticks. Camera must follow the player.
+        let mut gs = open_layout_gs();
         let mut target = Some((53, 52));
-        tick_move_target(&mut gs, (53, 52), &mut target);
-        assert_eq!(gs.player.position.x, 51, "x advanced by 1");
-        assert_eq!(gs.player.position.y, 51, "y advanced by 1");
-        // Camera follows.
-        assert_eq!(gs.camera.tile_x, 51);
-        assert_eq!(gs.camera.tile_y, 51);
+        for _ in 0..super::WALK_TICKS_PER_TILE {
+            tick_move_target(&mut gs, (53, 52), &mut target);
+        }
+        assert_ne!((gs.player.position.x, gs.player.position.y), (50, 50), "first step taken");
+        assert_eq!(gs.camera.tile_x, gs.player.position.x);
+        assert_eq!(gs.camera.tile_y, gs.player.position.y);
         // Not arrived yet — target retained.
         assert_eq!(target, Some((53, 52)));
     }
 
     #[test]
     fn test_tick_move_target_clears_destination_on_final_step() {
-        // From (50,50) toward (52,50): tick twice. After the second tick the
-        // player is on the destination and target should be None.
-        let player = crate::game::player_exact::Player::new();
-        let mut gs = GameState::new(player, true, 1);
-        gs.camera.tile_x = 50;
-        gs.camera.tile_y = 50;
-        gs.player.position.x = 50;
-        gs.player.position.y = 50;
+        // From (50,50) to (52,50): two tiles on the walk route. After the
+        // final step the player is on the destination and target is None.
+        let mut gs = open_layout_gs();
         let mut target = Some((52, 50));
-        tick_move_target(&mut gs, (52, 50), &mut target);
-        assert_eq!(gs.player.position.x, 51);
-        assert_eq!(target, Some((52, 50)));
-        tick_move_target(&mut gs, (52, 50), &mut target);
+        for _ in 0..3 * super::WALK_TICKS_PER_TILE {
+            tick_move_target(&mut gs, (52, 50), &mut target);
+            if target.is_none() {
+                break;
+            }
+        }
         assert_eq!(gs.player.position.x, 52, "arrived at x");
         assert_eq!(gs.player.position.y, 50, "y unchanged");
         assert_eq!(target, None, "target cleared after final step");
@@ -5785,23 +5939,17 @@ mod tests {
 
     #[test]
     fn test_tick_move_target_walks_full_diagonal_path() {
-        // From (50,50) to (53,53): three diagonal ticks. After arrival the
-        // player is on the target and it is cleared.
-        let player = crate::game::player_exact::Player::new();
-        let mut gs = GameState::new(player, true, 1);
-        gs.camera.tile_x = 50;
-        gs.camera.tile_y = 50;
-        gs.player.position.x = 50;
-        gs.player.position.y = 50;
+        // From (50,50) to (53,53): three diagonal steps on the walk route.
+        let mut gs = open_layout_gs();
         let dest = (53, 53);
         let mut target = Some(dest);
-        for _ in 0..10 {
+        for _ in 0..6 * super::WALK_TICKS_PER_TILE {
             tick_move_target(&mut gs, dest, &mut target);
             if target.is_none() {
                 break;
             }
         }
-        assert_eq!(target, None, "should have arrived within 10 ticks");
+        assert_eq!(target, None, "should have arrived");
         assert_eq!(gs.player.position.x, 53);
         assert_eq!(gs.player.position.y, 53);
     }
@@ -6478,6 +6626,40 @@ mod tests {
         assert_eq!(find_level_up_stairs(4, &layout_with(82), &art), Some((1, 2)), "L4 dPiece 82");
         assert_eq!(find_level_up_stairs(4, &layout_with(999), &art), None, "no stair tile");
         assert_eq!(find_level_up_stairs(5, &layout_with(82), &art), None, "unsupported level");
+    }
+
+    #[test]
+    fn convert_screen_to_tile_matches_cpp_grid() {
+        // C++ ConvertToTileGrid (cursor.cpp:723-755) + ShiftToDiamondGridAlignment
+        // with the timedemo 640x480 viewport (panel rows 0, no zoom).
+        // Hand-computed for the first demo clicks at ViewPosition (77,46).
+        assert_eq!(super::convert_screen_to_tile(338, 164, 77, 46), (75, 43));
+        assert_eq!(super::convert_screen_to_tile(438, 204, 75, 43), (76, 40));
+        assert_eq!(super::convert_screen_to_tile(320, 240, 77, 46), (77, 46));
+    }
+
+    #[test]
+    fn dir_code_delta_roundtrip() {
+        use crate::game::types::Direction;
+        // Every GetPathDirection code maps to the C++ Direction offset
+        // (displacement.hpp:247-270) and back.
+        for (i, dir) in Direction::ALL.iter().enumerate() {
+            let code = match i {
+                0 => 7, // South (1,1)
+                1 => 4, // SouthWest (0,1)
+                2 => 8, // West (-1,1)
+                3 => 2, // NorthWest (-1,0)
+                4 => 5, // North (-1,-1)
+                5 => 1, // NorthEast (0,-1)
+                6 => 6, // East (1,-1)
+                7 => 3, // SouthEast (1,0)
+                _ => unreachable!(),
+            };
+            let (dx, dy) = super::dir_code_delta(code);
+            let off = dir.offset();
+            assert_eq!((dx, dy), (off.x, off.y), "code {code}");
+        }
+        assert_eq!(super::dir_code_delta(0), (0, 0));
     }
 
 }

@@ -436,6 +436,15 @@ pub struct GameState {
     /// Automap exploration grid (C++ `AutomapView[DMAXX][DMAXY]`), written
     /// into the saved level entry.
     pub automap_view: [[u8; 40]; 40],
+    /// Active click-to-move walk route (C++ `player.walkpath` direction
+    /// codes from `MakePlrPath`); empty when not walking.
+    pub player_walk_path: Vec<i8>,
+    /// Sub-tile walk progress within the current tile (0..8; the walk
+    /// animation advances one frame per game tick, 8 frames per tile).
+    pub player_walk_sub_tick: i32,
+    /// Destination the current walk route was computed for; a new click with
+    /// a different destination recomputes the route (C++ `MakePlrPath`).
+    pub player_walk_target: Option<(i32, i32)>,
     /// Per-monster-type kill counts (C++ MonsterKillCounts[138]); the Rust
     /// monster set is a 20-type simplification, so counts land in the first
     /// slots.
@@ -660,6 +669,9 @@ impl GameState {
             pending_spell: None,
             explored: vec![false; 112 * 112],
             automap_view: [[0u8; 40]; 40],
+            player_walk_path: Vec::new(),
+            player_walk_sub_tick: 0,
+            player_walk_target: None,
             last_visible_tiles: Vec::new(),
             kill_counts: [0; 138],
             dcorpse: vec![0; 112 * 112],
