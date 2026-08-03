@@ -413,11 +413,21 @@ int main(int argc, char **argv)
 		if (dObjMask) return nullptr; // caller handles
 		return nullptr;
 	};
+	// Real C++ HoldThemeRooms marks theme-room tiles dFlags::Populated;
+	// RndLocOk's TileContainsSetPiece() rejects them. Theme list from the
+	// instrumented real engine for seed 1545811660.
+	const int8_t realThemeTtvals[] = { 2, 8, 15, 17, 18 };
+	bool populated[MAXDUNX * MAXDUNY] {};
+	for (int8_t v : realThemeTtvals) {
+		for (int y = 0; y < MAXDUNY; y++) for (int x = 0; x < MAXDUNX; x++)
+			if (dTransVal[x][y] == v) populated[y * MAXDUNX + x] = true;
+	}
 	// Direct RndLocOk replica:
 	auto rndOk = [&](int x, int y, const int *dObj, int playerX, int playerY) -> const char* {
 		if (!inBounds(x, y)) return "OOB";
 		if (dObj[y * MAXDUNX + x] != 0) return "dObject";
 		if (x == playerX && y == playerY) return "dPlayer";
+		if (populated[y * MAXDUNX + x]) return "Populated";
 		int pn = dp[x][y];
 		if ((sol[pn] & 1) != 0) return "Solid";
 		if (pn > 125 && pn < 143) return "range126-142";
@@ -442,20 +452,227 @@ int main(int argc, char **argv)
 			printf("[DoorCheck] (%d,%d) dPiece=%d expect=%d %s\n", c.x, c.y, dp[c.x][c.y], c.expect, dp[c.x][c.y] == c.expect ? "OK" : "MISMATCH");
 		}
 	}
-	// Test candidate (55,69) with sarc0 at (48,71) and player at (77,46)
+	// ---- full sarc placement with the correct RNG sequence ----
+	// SetRndSeed(seed); advance 13 draws (4 golems x 3 + DiscardRandomValues(1))
+	SetRndSeed(seed);
+	printf("[RNG] start=%u\n", GetLCGEngineState());
+	for (int i = 0; i < 4; i++) {
+		GenerateRnd(1); // golem maxhp RandomIntBetween(1,1)
+		printf("[RNG] golem %d maxhp -> %u\n", i, GetLCGEngineState());
+		(void)AdvanceRndSeed(); // rndItemSeed
+		printf("[RNG] golem %d seed -> %u\n", i, GetLCGEngineState());
+		(void)AdvanceRndSeed(); // aiSeed
+		printf("[RNG] golem %d ai -> %u\n", i, GetLCGEngineState());
+	}
+	DiscardRandomValues(1);
+	printf("[RNG] after discard -> %u\n", GetLCGEngineState());
+	const int bxadd[8] = {-1, 0, 1, -1, 1, -1, 0, 1};
+	const int byadd[8] = {-1, -1, -1, 0, 0, 1, 1, 1};
 	int dObj[MAXDUNX * MAXDUNY] {};
-	dObj[71 * MAXDUNX + 48] = 1; // sarc 0
-	{
-		const char *why = areaOk(54, 67, 3, 4, dObj, 77, 46);
-		printf("IsAreaOk(55,69) with sarc0: %s\n", why ? why : "ACCEPT");
-		// print each point
-		for (int dy = 0; dy < 4; dy++) {
-			for (int dx = 0; dx < 3; dx++) {
-				int x = 54 + dx, y = 67 + dy;
-				const char *w = rndOk(x, y, dObj, 77, 46);
-				printf("  (%d,%d) dPiece=%d sol=%02x -> %s\n", x, y, dp[x][y], sol[dp[x][y]], w ? w : "ok");
+	int objType[MAXDUNX * MAXDUNY] {}; // save object type per anchor (0 = none)
+	int playerX = 77, playerY = 46;
+	// NOTE: the player tile is NOT in dObject; rndOk checks it directly.
+	int placedSarcs[MAXDUNX * MAXDUNY] {};
+	int numSarcs = 0;
+	const int numobjs = GenerateRnd(5) + 10;
+	printf("[ObjRepro] rng after 13 draws=%u numobjs=%d\n", GetLCGEngineState(), numobjs);
+	for (int i = 0; i < numobjs; i++) {
+		while (true) {
+			const int xp = GenerateRnd(80) + 16;
+			const int yp = GenerateRnd(80) + 16;
+			const char *why = areaOk(xp - 1, yp - 2, 3, 4, dObj, playerX, playerY);
+			if (!why) {
+				placedSarcs[yp * MAXDUNX + xp] = 1;
+				dObj[yp * MAXDUNX + xp] = 1;
+				objType[yp * MAXDUNX + xp] = 48;
+				dObj[(yp - 1) * MAXDUNX + xp] = -1; // AddSarcophagus dObject north marker
+				numSarcs++;
+				printf("[ObjRepro] sarc %d at (%d,%d) state=%u\n", i, xp, yp, GetLCGEngineState());
+				// AddObject -> AddSarcophagus RNG: _oVar1 = GenerateRnd(10), _oRndSeed = AdvanceRndSeed()
+				const int oVar1 = GenerateRnd(10);
+				const int oRndSeed = AdvanceRndSeed();
+				printf("[ObjRepro] sarc %d oVar1=%d oRndSeed=%d state=%u\n", i, oVar1, oRndSeed, GetLCGEngineState());
+				if (oVar1 >= 8) {
+					// PreSpawnSkeleton -> AddSkeleton -> GetRandomSkeletonTypeIndex + InitMonster.
+					// Skeleton type pick (GetRandomSkeletonTypeIndex): GenerateRnd(typeCount)
+					// + InitMonster: GenerateRnd(ticksPerFrame-1), GenerateRnd(frames-1),
+					//   RandomIntBetween(hpMin,hpMax), AdvanceRndSeed x2.
+					const int typeCount = 3; // WSKELAX, TSKELAX, XSKELAX registered for L1
+					const int skelType = GenerateRnd(typeCount);
+					const int tick = GenerateRnd(5 - 1);   // stand ticksPerFrame=5
+					const int frame = GenerateRnd(12 - 1); // stand frames=12
+					const int hp = GenerateRnd(4 - 2 + 1) + 2;
+					(void)skelType; (void)tick; (void)frame; (void)hp;
+					(void)AdvanceRndSeed(); // rndItemSeed
+					(void)AdvanceRndSeed(); // aiSeed
+					printf("[ObjRepro] sarc %d skeleton draws -> state=%u\n", i, GetLCGEngineState());
+				}
+				break;
+			} else if (i < 2) {
+				printf("[ObjRepro] reject (%d,%d): %s\n", xp, yp, why);
 			}
 		}
 	}
+	// Dump dPiece/sol for the three candidates the real C++ engine rejects.
+	{
+		int cand[][2] = {{47,83},{47,86},{30,71}};
+		for (auto &cc : cand) {
+			printf("[Cand] (%d,%d) rect x=%d..%d y=%d..%d\n", cc[0], cc[1], cc[0]-1, cc[0]+1, cc[1]-2, cc[1]+1);
+			for (int dy = -2; dy <= 1; dy++) {
+				for (int dx = -1; dx <= 1; dx++) {
+					int x = cc[0]+dx, y = cc[1]+dy;
+					printf("  (%d,%d) dp=%d sol=%02x dObj=%d %s\n", x, y, dp[x][y], sol[dp[x][y]], dObj[y*MAXDUNX+x], rndOk(x, y, dObj, playerX, playerY) ? rndOk(x, y, dObj, playerX, playerY) : "ok");
+				}
+			}
+		}
+	}
+	printf("[ObjRepro] total sarcs=%d\n", numSarcs);
+	// The reference sarcs (post-replay save):
+	int refSarcs[][2] = {{48,71},{42,72},{81,62},{48,75},{83,62},{34,61},{25,56},{37,41},{86,84},{26,81},{61,48}};
+	for (auto &r : refSarcs) {
+		printf("[RefSarc] (%d,%d) placed=%d\n", r[0], r[1], placedSarcs[r[1] * MAXDUNX + r[0]]);
+	}
+
+	// ---- full InitObjects continuation: doors/lights, barrels, chests, traps ----
+	// AddL1Objs: door + light anchors (no RNG) from the reference save.
+	struct { int x, y, t; } fixedObjs[] = {
+		{42,33,1},{41,36,2},{27,66,2},{49,80,2},{69,80,2},{30,81,1},{41,84,2},{25,86,2},
+		{56,46,0},{48,48,0},{54,50,0},{82,50,0},{76,58,0},{46,72,0},{54,80,0}
+	};
+	for (auto &f : fixedObjs) { dObj[f.y * MAXDUNX + f.x] = 1; objType[f.y * MAXDUNX + f.x] = f.t; }
+	// AddL1Objs -> AddObject(L1LIGHT) -> SetupObject: L1Light is animated
+	// (animDelay=1, animLen=26), so each light consumes GenerateRnd(1) +
+	// GenerateRnd(25). Doors are not animated. Grid-scan order = save order.
+	for (int li = 0; li < 7; li++) {
+		(void)GenerateRnd(1);
+		(void)GenerateRnd(25);
+	}
+	int barrelCount = 0, chestCount = 0, trapCount = 0;
+	// InitRndBarrels
+	{
+		const int numobjs = GenerateRnd(5) + 3;
+		printf("[ObjRepro] barrel groups=%d\n", numobjs);
+		for (int i = 0; i < numobjs; i++) {
+			int xp, yp;
+			do { xp = GenerateRnd(80) + 16; yp = GenerateRnd(80) + 16; } while (rndOk(xp, yp, dObj, playerX, playerY) != nullptr);
+			const bool explosive = FlipCoin(4);
+			const int t = explosive ? 58 : 57;
+			dObj[yp * MAXDUNX + xp] = 1;
+			objType[yp * MAXDUNX + xp] = t;
+			// AddBarrel draws
+			(void)AdvanceRndSeed(); // _oRndSeed
+			int oVar2 = explosive ? 0 : GenerateRnd(10);
+			(void)GenerateRnd(3);   // _oVar3
+			if (oVar2 >= 8) {
+				const int typeCount = 3;
+				(void)GenerateRnd(typeCount);
+				(void)GenerateRnd(4); (void)GenerateRnd(11); (void)(GenerateRnd(3) + 2);
+				(void)AdvanceRndSeed(); (void)AdvanceRndSeed();
+			}
+			printf("[ObjRepro] barrel %d at (%d,%d) type=%d state=%u\n", barrelCount++, xp, yp, t, GetLCGEngineState());
+			bool found = true;
+			int p = 0, c = 1;
+			while (FlipCoin(p) && found) {
+				int tt = 0;
+				found = false;
+				while (true) {
+					if (tt >= 3) break;
+					const int dir = GenerateRnd(8);
+					printf("[ObjBarrelMove] dir=%d from=(%d,%d) to=(%d,%d) state=%u\n", dir, xp, yp, xp + bxadd[dir], yp + byadd[dir], GetLCGEngineState());
+					xp += bxadd[dir]; yp += byadd[dir];
+					found = rndOk(xp, yp, dObj, playerX, playerY) == nullptr;
+					tt++;
+					if (found) break;
+				}
+				if (found) {
+					const bool explosive2 = FlipCoin(5);
+					const int t2 = explosive2 ? 58 : 57;
+					dObj[yp * MAXDUNX + xp] = 1;
+					objType[yp * MAXDUNX + xp] = t2;
+					(void)AdvanceRndSeed();
+					int oVar2b = explosive2 ? 0 : GenerateRnd(10);
+					(void)GenerateRnd(3);
+					if (oVar2b >= 8) {
+						(void)GenerateRnd(3); (void)GenerateRnd(4); (void)GenerateRnd(11); (void)(GenerateRnd(3) + 2);
+						(void)AdvanceRndSeed(); (void)AdvanceRndSeed();
+					}
+					printf("[ObjRepro] barrel %d at (%d,%d) type=%d state=%u\n", barrelCount++, xp, yp, t2, GetLCGEngineState());
+					c++;
+				}
+				p = c / 2;
+			}
+		}
+	}
+	// InitRndLocObj x3 (chests)
+	{
+		struct { int min, max, t; } passes[] = {{5,10,5},{3,6,6},{1,5,7}};
+		for (auto &ps : passes) {
+			const int numobjs = GenerateRnd(ps.max - ps.min) + ps.min;
+			for (int i = 0; i < numobjs; i++) {
+				int xp, yp;
+				do { xp = GenerateRnd(80) + 16; yp = GenerateRnd(80) + 16; } while (areaOk(xp - 1, yp - 1, 3, 3, dObj, playerX, playerY) != nullptr);
+				dObj[yp * MAXDUNX + xp] = 1;
+				objType[yp * MAXDUNX + xp] = ps.t;
+				// AddChest draws
+				(void)FlipCoin();
+				(void)AdvanceRndSeed();
+				(void)GenerateRnd(ps.t == 5 ? 2 : (ps.t == 6 ? 3 : 4));
+				(void)GenerateRnd(8);
+				printf("[ObjRepro] chest %d at (%d,%d) type=%d state=%u\n", chestCount++, xp, yp, ps.t, GetLCGEngineState());
+			}
+		}
+	}
+	// AddObjTraps (L1 rndv=10)
+	{
+		const int rndv = 10;
+		for (int j = 0; j < MAXDUNY; j++) {
+			for (int i = 0; i < MAXDUNX; i++) {
+				// FindObjectAtPosition({i,j}, false): anchors only (positive
+				// dObject; the sarc north-marker is negative and skipped).
+				// Anchors only: positive dObject. (Sarc north-markers are
+				// negative; type 0 = L1Light is a valid anchor.)
+				if (dObj[j * MAXDUNX + i] <= 0) continue;
+				const int t = objType[j * MAXDUNX + i];
+				printf("[ObjScan] (%d,%d) type=%d\n", i, j, t);
+				if (GenerateRnd(100) >= rndv) continue;
+				printf("[ObjRepro] trap trigger (%d,%d) type=%d seed=%u\n", i, j, t, GetLCGEngineState());
+				// trap-eligible: doors(1,2), sarc(48), chests(5,6,7)
+				const bool eligible = t == 1 || t == 2 || t == 48 || (t >= 5 && t <= 7);
+				if (!eligible) continue;
+				int tx, ty;
+				const bool tl = FlipCoin();
+				if (tl) {
+					int xp = i - 1;
+					while (!(sol[dp[xp][j]] & 1)) xp--;
+					if (dObj[j * MAXDUNX + xp] != 0 || populated[j * MAXDUNX + xp] || !(sol[dp[xp][j]] & 0x80) || i - xp <= 1) continue;
+					tx = xp; ty = j;
+				} else {
+					int yp = j - 1;
+					while (!(sol[dp[i][yp]] & 1)) yp--;
+					if (dObj[yp * MAXDUNX + i] != 0 || populated[yp * MAXDUNX + i] || !(sol[dp[i][yp]] & 0x80) || j - yp <= 1) continue;
+					tx = i; ty = yp;
+				}
+				(void)GenerateRnd(1); // AddTrap missile
+				dObj[ty * MAXDUNX + tx] = 1;
+				objType[ty * MAXDUNX + tx] = tl ? 53 : 54;
+				printf("[ObjRepro] trap %d at (%d,%d) type=%d trigger=(%d,%d)\n", trapCount++, tx, ty, tl ? 53 : 54, i, j);
+			}
+		}
+	}
+	printf("[ObjRepro] trap scan start state=%u\n", GetLCGEngineState());
+	printf("[ObjRepro] totals: barrels=%d chests=%d traps=%d\n", barrelCount, chestCount, trapCount);
+	// Reference barrels/chests/traps
+	struct { int x, y, t; } refRest[] = {
+		{23,55,58},{24,54,57},{23,54,57},{23,53,57},{38,31,57},{37,30,57},{36,31,57},{35,30,58},{34,29,57},{23,44,57},{23,42,57},{43,55,57},{44,56,58},{45,55,57},{46,55,57},
+		{84,81,5},{20,80,5},{37,68,5},{92,63,5},{76,76,5},{34,42,5},{18,78,5},{91,61,6},{44,78,6},{25,39,6},{77,60,7},{46,77,7},
+		{16,81,53}
+	};
+	int match = 0;
+	for (auto &r : refRest) {
+		const bool placed = dObj[r.y * MAXDUNX + r.x] != 0;
+		printf("[RefRest] (%d,%d) type=%d placed=%d\n", r.x, r.y, r.t, placed ? 1 : 0);
+		if (placed) match++;
+	}
+	printf("[ObjRepro] refRest match=%d/%d\n", match, (int)(sizeof(refRest) / sizeof(refRest[0])));
 	return 0;
 }

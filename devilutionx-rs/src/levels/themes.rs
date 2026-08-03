@@ -183,10 +183,26 @@ impl ThemeManager {
     /// C++ `HoldThemeRooms` (themes.cpp:902-918) for Cathedral: mark every
     /// tile of each theme room as Populated so normal monsters/objects avoid
     /// them. (Runs before InitObjects in LoadGameLevelDungeon.)
-    pub fn hold_theme_rooms(&mut self) {
-        // The Rust engine does not track dFlags::Populated yet; the theme
-        // room tiles are excluded by the trans_val region checks in
-        // RndLocOk/monster placement instead.
+    ///
+    /// Populated tiles are rejected by `RndLocOk`/`CanPlaceMonster` through
+    /// C++ `TileContainsSetPiece` (`dFlags & DungeonFlag::Populated`). The
+    /// caller passes the dungeon layout; this method stores the marker in
+    /// `layout.populated` so placement checks can consult it.
+    pub fn hold_theme_rooms(&mut self, layout: &mut crate::game::game_state::DungeonLayout) {
+        for theme in self.themes.iter().take(self.numthemes) {
+            // C++ dTransVal 0 is the opaque/unassigned region, never a valid
+            // theme room (the flood starts at 1 and `CheckThemeRoom` requires
+            // a bounded 9..100 tile room), so skip it defensively.
+            let tv = theme.ttval;
+            if tv <= 0 {
+                continue;
+            }
+            for (i, t) in layout.trans_val.iter().enumerate() {
+                if *t == tv {
+                    layout.populated[i] = true;
+                }
+            }
+        }
     }
 
     /// Add a theme to the manager

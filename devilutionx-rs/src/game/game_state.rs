@@ -495,6 +495,11 @@ pub struct DungeonLayout {
     /// value. Populated from the level's `.sol` file by the layout builders;
     /// empty on the synthetic headless layout (no art loaded).
     pub sol: Vec<crate::engine::dungeon::TileProperties>,
+    /// Per-micro-tile theme-room marker (C++ `dFlags & DungeonFlag::Populated`).
+    /// `hold_theme_rooms` sets this for every tile whose `trans_val` matches a
+    /// selected theme room; `RndLocOk` / `CanPlaceMonster` (via
+    /// `TileContainsSetPiece`) reject those tiles.
+    pub populated: Vec<bool>,
 }
 
 impl Default for DungeonLayout {
@@ -509,6 +514,7 @@ impl Default for DungeonLayout {
             pre_light: vec![15; MAXDUNX * MAXDUNY],
             floor_tiles: Vec::new(),
             sol: Vec::new(),
+            populated: vec![false; MAXDUNX * MAXDUNY],
         }
     }
 }

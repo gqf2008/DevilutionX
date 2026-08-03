@@ -913,10 +913,14 @@ pub fn descend_to_level(game_state: &mut GameState, level: u8) -> Result<(), Str
     // C++ InitThemes: pick the theme rooms on the reset#1 stream.
     crate::levels::themes::init_themes(game_state, &level_types);
     crate::engine::random::seed_gameplay_rng(seed);
+    // C++ HoldThemeRooms marks theme-room tiles Populated before InitObjects.
+    if let Some(layout) = game_state.dungeon_layout.as_mut() {
+        game_state.theme_manager.hold_theme_rooms(layout);
+    }
     // C++ InitGolems runs first in LoadGameLevelDungeon (diablo.cpp:3145).
     game_state.monster_manager.clear();
     init_golems(game_state);
-    place_dungeon_objects(game_state);
+    place_dungeon_objects(game_state, &level_types);
     // C++ AddDoor: doors start closed (closed micros baked into dPiece).
     game_state.init_doors_closed();
     // Place monsters from the C++ PlaceMonsters algorithm.
@@ -1034,7 +1038,15 @@ fn can_place_monster(
     }
     let pn = layout.d_piece[y as usize * layout.width + x as usize] as usize;
     let props = layout.sol.get(pn).copied().unwrap_or_default();
-    !props.contains(crate::engine::dungeon::TileProperties::SOLID)
+    if props.contains(crate::engine::dungeon::TileProperties::SOLID) {
+        return false;
+    }
+    // C++ `CanPlaceMonster` -> `TileContainsSetPiece`: theme-room tiles
+    // (dFlags::Populated via HoldThemeRooms) are excluded.
+    if layout.populated[y as usize * layout.width + x as usize] {
+        return false;
+    }
+    true
 }
 
 /// C++ `PlaceGroup` (monster.cpp:308-359) + `PlaceMonster` (290-306): place a
@@ -1147,12 +1159,15 @@ const OBJECT_BX_ADD: [i32; 8] = [-1, 0, 1, -1, 1, -1, 0, 1];
 const OBJECT_BY_ADD: [i32; 8] = [-1, -1, -1, 0, 0, 1, 1, 1];
 
 /// C++ `FlipCoin(frequency)` (engine/random.hpp): `GenerateRnd(f) == 0`,
-/// which is true when `f <= 0` (GenerateRnd returns 0 for non-positive input).
+/// which is true when `f <= 0` (GenerateRnd returns 0 and does *not* advance).
+/// Uses the raw `gameplay_generate_rnd` so `GenerateRnd(1)` still advances the
+/// LCG exactly like C++ (`gameplay_rnd(0, 0)` would short-circuit and skip the
+/// draw, desynchronising every subsequent roll).
 fn gameplay_flip_coin(frequency: i32) -> bool {
     if frequency <= 0 {
         return true;
     }
-    crate::engine::random::gameplay_rnd(0, frequency - 1) == 0
+    crate::engine::random::gameplay_generate_rnd(frequency) == 0
 }
 
 /// C++ `RndLocOk` (objects.cpp:236-250): a random-object candidate tile is
@@ -1181,12 +1196,9 @@ fn rnd_loc_ok(
     if game_state.player.position.x == x && game_state.player.position.y == y {
         return false;
     }
-    // IsObjectAtPosition(p)
-    if game_state
-        .objects
-        .iter()
-        .any(|o| o.position.x == x && o.position.y == y)
-    {
+    // IsObjectAtPosition(p): object anchors plus large-object coverage
+    // (sarcophagi mark their north tile with a negative dObject entry).
+    if object_blocks_tile(game_state, x, y) {
         return false;
     }
     // TileHasAny(p, TileProperties::Solid)
@@ -1197,6 +1209,12 @@ fn rnd_loc_ok(
     }
     // Cathedral/Crypt piece-range check (dPiece 126..142 excluded).
     if pn > 125 && pn < 143 {
+        return false;
+    }
+    // C++ `RndLocOk` -> `TileContainsSetPiece`: theme-room tiles (dFlags::
+    // Populated, set by HoldThemeRooms for every tile whose dTransVal matches
+    // a selected theme room) are rejected.
+    if layout.populated[y as usize * layout.width + x as usize] {
         return false;
     }
     true
@@ -1250,62 +1268,94 @@ fn init_golems(game_state: &mut GameState) {
     }
 }
 
-/// C++ `InitObjects` (objects.cpp:3846-3860) for Cathedral L1, in exact draw
-/// order (the gameplay RNG has just been re-seeded by the caller, mirroring
-/// `SetRndSeedForDungeonLevel`): `DiscardRandomValues(1)`, then
-/// `InitRndLocBigObj(10, 15, OBJ_SARC)` (random sarcophagi), `AddL1Objs`
-/// (door + light micro scan, no RNG), then `InitRndBarrels()`.
-pub fn place_dungeon_objects(game_state: &mut GameState) {
+/// C++ `InitObjects` (objects.cpp:3811-3905) for Cathedral L1, in exact
+/// draw order (the gameplay RNG has just been re-seeded by the caller,
+/// mirroring `SetRndSeedForDungeonLevel`): `DiscardRandomValues(1)`, then
+/// `InitRndLocBigObj(10, 15, OBJ_SARC)` (random sarcophagi, each consuming
+/// its `AddSarcophagus` draws), `AddL1Objs` (door + light micro scan, no
+/// RNG), `InitRndBarrels()`, the three random-chest passes, then
+/// `AddObjTraps()`.
+pub fn place_dungeon_objects(
+    game_state: &mut GameState,
+    level_types: &crate::game::monster::LevelMonsterTypes,
+) {
     use crate::game::objdat::ObjectId;
     use crate::game::types::Point;
 
-    let Some(layout) = &game_state.dungeon_layout else {
-        return;
-    };
     // Object placement must see the same object list C++ accumulates.
     game_state.objects.clear();
 
     // DiscardRandomValues(1): one raw LCG advance.
     crate::engine::random::gameplay_advance_rnd_seed();
 
-    // InitRndLocBigObj(10, 15, OBJ_SARC): numobjs = GenerateRnd(5) + 10.
+    // ---- InitRndLocBigObj(10, 15, OBJ_SARC) ----
+    // numobjs = GenerateRnd(5) + 10.
     let numobjs = crate::engine::random::gameplay_rnd(0, 4) + 10;
     for _ in 0..numobjs {
-        loop {
+        let (xp, yp) = loop {
             let xp = crate::engine::random::gameplay_rnd(16, 95);
             let yp = crate::engine::random::gameplay_rnd(16, 95);
+            let layout = game_state.dungeon_layout.as_ref().expect("dungeon layout");
             // IsAreaOk({ xp-1, yp-2 }, { 3, 4 })
             if object_area_ok(xp - 1, yp - 2, 3, 4, layout, game_state) {
-                game_state
-                    .objects
-                    .push(crate::game::objects::Object::new(ObjectId::Sarc, Point::new(xp, yp)));
-                break;
+                break (xp, yp);
             }
+        };
+        let mut obj = crate::game::objects::Object::new(ObjectId::Sarc, Point::new(xp, yp));
+        // C++ AddObject -> AddSarcophagus (objects.cpp:1197-1206): the body
+        // RNG draws are part of the placement stream.
+        obj.ovar1 = crate::engine::random::gameplay_generate_rnd(10);
+        obj.rnd_seed = crate::engine::random::gameplay_advance_rnd_seed() as u32;
+        if obj.ovar1 >= 8 {
+            obj.ovar2 = pre_spawn_skeleton(game_state, level_types)
+                .map(|idx| idx as i32)
+                .unwrap_or(-1);
+        }
+        game_state.objects.push(obj);
+    }
+
+    // ---- AddL1Objs: door + light objects from the dPiece scan. ----
+    // Doors consume no RNG (SetupObject: not animated; AddDoor: none), but
+    // each L1Light is animated (objdat animDelay=1, animLen=26), so its
+    // SetupObject consumes GenerateRnd(1) + GenerateRnd(25) (objects.cpp:697).
+    let level = game_state.current_dungeon_level;
+    {
+        let layout = game_state.dungeon_layout.as_ref().expect("dungeon layout");
+        for (x, y, otype) in crate::game::dungeon_level::scan_level_doors(level, layout) {
+            if otype == ObjectId::L1Light {
+                crate::engine::random::gameplay_generate_rnd(1);
+                crate::engine::random::gameplay_generate_rnd(25);
+            }
+            game_state.objects.push(crate::game::objects::Object::new(otype, Point::new(x, y)));
         }
     }
 
-    // AddL1Objs: door + light objects from the dPiece scan (no RNG).
-    let level = game_state.current_dungeon_level;
-    game_state.objects.extend(
-        crate::game::dungeon_level::scan_level_doors(level, layout)
-            .into_iter()
-            .map(|(x, y, otype)| crate::game::objects::Object::new(otype, Point::new(x, y))),
-    );
-    // InitRndBarrels: numobjs = GenerateRnd(5) + 3 barrel groups.
+    // ---- InitRndBarrels() ----
+    // numobjs = GenerateRnd(5) + 3 barrel groups.
     let numobjs = crate::engine::random::gameplay_rnd(0, 4) + 3;
     for _ in 0..numobjs {
-        let (mut xp, mut yp);
-        loop {
-            xp = crate::engine::random::gameplay_rnd(16, 95);
-            yp = crate::engine::random::gameplay_rnd(16, 95);
+        let (mut xp, mut yp) = loop {
+            let xp = crate::engine::random::gameplay_rnd(16, 95);
+            let yp = crate::engine::random::gameplay_rnd(16, 95);
+            let layout = game_state.dungeon_layout.as_ref().expect("dungeon layout");
             if rnd_loc_ok(xp, yp, layout, game_state) {
-                break;
+                break (xp, yp);
             }
+        };
+        // C++ InitRndBarrels: FlipCoin(4) picks the first barrel type, then
+        // AddObject -> AddBarrel consumes the body RNG draws.
+        let explosive = gameplay_flip_coin(4);
+        let mut obj = crate::game::objects::Object::new(
+            if explosive { ObjectId::BarrelEx } else { ObjectId::Barrel },
+            Point::new(xp, yp),
+        );
+        add_barrel_body(&mut obj);
+        if obj.ovar2 >= 8 {
+            obj.ovar4 = pre_spawn_skeleton(game_state, level_types)
+                .map(|idx| idx as i32)
+                .unwrap_or(-1);
         }
-        let o = if gameplay_flip_coin(4) { ObjectId::BarrelEx } else { ObjectId::Barrel };
-        game_state
-            .objects
-            .push(crate::game::objects::Object::new(o, Point::new(xp, yp)));
+        game_state.objects.push(obj);
         // Regulates the chance to stop placing barrels in the current group.
         let mut p = 0;
         let mut c = 1;
@@ -1317,6 +1367,7 @@ pub fn place_dungeon_objects(game_state: &mut GameState) {
                 let dir = crate::engine::random::gameplay_rnd(0, 7) as usize;
                 xp += OBJECT_BX_ADD[dir];
                 yp += OBJECT_BY_ADD[dir];
+                let layout = game_state.dungeon_layout.as_ref().expect("dungeon layout");
                 found = rnd_loc_ok(xp, yp, layout, game_state);
                 t += 1;
                 if found {
@@ -1324,15 +1375,270 @@ pub fn place_dungeon_objects(game_state: &mut GameState) {
                 }
             }
             if found {
-                let o = if gameplay_flip_coin(5) { ObjectId::BarrelEx } else { ObjectId::Barrel };
-                game_state
-                    .objects
-                    .push(crate::game::objects::Object::new(o, Point::new(xp, yp)));
+                let explosive = gameplay_flip_coin(5);
+                let mut obj = crate::game::objects::Object::new(
+                    if explosive { ObjectId::BarrelEx } else { ObjectId::Barrel },
+                    Point::new(xp, yp),
+                );
+                add_barrel_body(&mut obj);
+                if obj.ovar2 >= 8 {
+                    obj.ovar4 = pre_spawn_skeleton(game_state, level_types)
+                        .map(|idx| idx as i32)
+                        .unwrap_or(-1);
+                }
+                game_state.objects.push(obj);
                 c += 1;
             }
             p = c / 2;
         }
     }
+
+    // ---- InitRndLocObj(5, 10, CHEST1), (3, 6, CHEST2), (1, 5, CHEST3) ----
+    // numobjs = GenerateRnd(max - min) + min; each chest is a 3x3 area and
+    // AddObject -> AddChest consumes the body RNG draws.
+    for (min, max, otype) in [
+        (5, 10, ObjectId::Chest1),
+        (3, 6, ObjectId::Chest2),
+        (1, 5, ObjectId::Chest3),
+    ] {
+        let numobjs = crate::engine::random::gameplay_rnd(min, max - 1);
+        for _ in 0..numobjs {
+            let (xp, yp) = loop {
+                let xp = crate::engine::random::gameplay_rnd(16, 95);
+                let yp = crate::engine::random::gameplay_rnd(16, 95);
+                let layout = game_state.dungeon_layout.as_ref().expect("dungeon layout");
+                if object_area_ok(xp - 1, yp - 1, 3, 3, layout, game_state) {
+                    break (xp, yp);
+                }
+            };
+            let mut obj = crate::game::objects::Object::new(otype, Point::new(xp, yp));
+            // C++ AddChest (objects.cpp:934-963).
+            if gameplay_flip_coin(2) {
+                obj.anim_frame += 3;
+            }
+            obj.rnd_seed = crate::engine::random::gameplay_advance_rnd_seed() as u32;
+            obj.ovar1 = match otype {
+                ObjectId::Chest2 => crate::engine::random::gameplay_generate_rnd(3),
+                ObjectId::Chest3 => crate::engine::random::gameplay_generate_rnd(4),
+                _ => crate::engine::random::gameplay_generate_rnd(2),
+            };
+            obj.ovar2 = crate::engine::random::gameplay_generate_rnd(8);
+            game_state.objects.push(obj);
+        }
+    }
+
+    // ---- AddObjTraps() (objects.cpp:548-584), L1 rndv = 10 ----
+    let rndv = if level >= 7 {
+        25
+    } else if level >= 5 {
+        20
+    } else if level >= 2 {
+        15
+    } else {
+        10
+    };
+    for j in 0..crate::levels::types::MAXDUNY as i32 {
+        for i in 0..crate::levels::types::MAXDUNX as i32 {
+            let trigger_idx = match game_state
+                .objects
+                .iter()
+                .position(|o| o.position.x == i && o.position.y == j)
+            {
+                Some(idx) => idx,
+                None => continue,
+            };
+            // GenerateRnd(100) >= rndv -> skip (one draw per anchor).
+            if crate::engine::random::gameplay_generate_rnd(100) >= rndv {
+                continue;
+            }
+            // C++ `AllObjects[otype].isTrap()`: doors, sarcophagi and chests
+            // carry the Trap flag (objdat.tsv); barrels/lights do not.
+            let trap_eligible = matches!(
+                game_state.objects[trigger_idx].otype,
+                ObjectId::L1LDoor
+                    | ObjectId::L1RDoor
+                    | ObjectId::L2LDoor
+                    | ObjectId::L2RDoor
+                    | ObjectId::L3LDoor
+                    | ObjectId::L3RDoor
+                    | ObjectId::L5LDoor
+                    | ObjectId::L5RDoor
+                    | ObjectId::Sarc
+                    | ObjectId::L5Sarc
+                    | ObjectId::Chest1
+                    | ObjectId::Chest2
+                    | ObjectId::Chest3
+                    | ObjectId::TChest1
+                    | ObjectId::TChest2
+                    | ObjectId::TChest3
+            );
+            if !trap_eligible {
+                continue;
+            }
+            let trap_oid;
+            let (tx, ty);
+            let layout = game_state.dungeon_layout.as_ref().expect("dungeon layout");
+            if gameplay_flip_coin(2) {
+                let mut xp = i - 1;
+                while is_tile_not_solid(layout, xp, j) {
+                    xp -= 1;
+                }
+                if !can_place_wall_trap(layout, game_state, xp, j) || i - xp <= 1 {
+                    continue;
+                }
+                trap_oid = ObjectId::TrapL;
+                tx = xp;
+                ty = j;
+            } else {
+                let mut yp = j - 1;
+                while is_tile_not_solid(layout, i, yp) {
+                    yp -= 1;
+                }
+                if !can_place_wall_trap(layout, game_state, i, yp) || j - yp <= 1 {
+                    continue;
+                }
+                trap_oid = ObjectId::TrapR;
+                tx = i;
+                ty = yp;
+            }
+            drop(layout);
+            let mut obj = crate::game::objects::Object::new(trap_oid, Point::new(tx, ty));
+            // C++ AddObject -> AddTrap (objects.cpp:1229-1243): missile roll.
+            let missile_type = crate::engine::random::gameplay_generate_rnd((level as i32) / 3 + 1);
+            obj.ovar3 = match missile_type {
+                1 => crate::game::objects::MISSILE_FIREBOLT,
+                2 => crate::game::objects::MISSILE_LIGHTNING_CONTROL,
+                _ => crate::game::objects::MISSILE_ARROW,
+            };
+            obj.ovar4 = 0;
+            // AddObjTraps: trap stores the trigger tile and arms it.
+            obj.ovar1 = i;
+            obj.ovar2 = j;
+            game_state.objects[trigger_idx].is_trap = true;
+            game_state.objects.push(obj);
+        }
+    }
+}
+
+/// C++ `AddBarrel` (objects.cpp:1282-1296): barrel body RNG draws. `_oVar1`
+/// is always 0, `_oRndSeed` = AdvanceRndSeed(), `_oVar2` is the loot class
+/// (skipped for explosive barrels), `_oVar3` = GenerateRnd(3). A pre-spawned
+/// skeleton is rolled when `_oVar2 >= 8` (handled by the caller).
+fn add_barrel_body(barrel: &mut crate::game::objects::Object) {
+    barrel.ovar1 = 0;
+    barrel.rnd_seed = crate::engine::random::gameplay_advance_rnd_seed() as u32;
+    barrel.ovar2 = if barrel.otype == crate::game::objdat::ObjectId::BarrelEx {
+        0
+    } else {
+        crate::engine::random::gameplay_generate_rnd(10)
+    };
+    barrel.ovar3 = crate::engine::random::gameplay_generate_rnd(3);
+}
+
+/// C++ `CanPlaceWallTrap` (objects.cpp:256-263): the trap tile must be free
+/// (no object anchor / sarc marker), outside theme rooms, and carry the
+/// `Trap` SOL property.
+fn can_place_wall_trap(
+    layout: &crate::game::game_state::DungeonLayout,
+    game_state: &GameState,
+    x: i32,
+    y: i32,
+) -> bool {
+    if x < 0 || y < 0 || x >= layout.width as i32 || y >= layout.height as i32 {
+        return false;
+    }
+    if object_blocks_tile(game_state, x, y) {
+        return false;
+    }
+    if layout.populated[y as usize * layout.width + x as usize] {
+        return false;
+    }
+    let pn = layout.d_piece[y as usize * layout.width + x as usize] as usize;
+    let props = layout.sol.get(pn).copied().unwrap_or_default();
+    props.contains(crate::engine::dungeon::TileProperties::TRAP)
+}
+
+/// C++ `IsTileNotSolid` (gendung.cpp): `!(SOLData[dPiece] & Solid)`.
+fn is_tile_not_solid(layout: &crate::game::game_state::DungeonLayout, x: i32, y: i32) -> bool {
+    if x < 0 || y < 0 || x >= layout.width as i32 || y >= layout.height as i32 {
+        return false;
+    }
+    let pn = layout.d_piece[y as usize * layout.width + x as usize] as usize;
+    let props = layout.sol.get(pn).copied().unwrap_or_default();
+    !props.contains(crate::engine::dungeon::TileProperties::SOLID)
+}
+
+/// C++ `IsObjectAtPosition` / `FindObjectAtPosition`: a tile is occupied by
+/// an object anchor, or by a sarcophagus's large-object north marker
+/// (AddSarcophagus stores `dObject[x][y-1] = -(id+1)`).
+fn object_blocks_tile(game_state: &GameState, x: i32, y: i32) -> bool {
+    if game_state
+        .objects
+        .iter()
+        .any(|o| o.position.x == x && o.position.y == y)
+    {
+        return true;
+    }
+    game_state.objects.iter().any(|o| {
+        o.otype == crate::game::objdat::ObjectId::Sarc
+            && o.position.x == x
+            && o.position.y == y + 1
+    })
+}
+
+/// C++ `PreSpawnSkeleton` (monster.cpp:4738-4745): pick a registered skeleton
+/// type (`GetRandomSkeletonTypeIndex` -> `GenerateRnd(typeCount)`), then run
+/// its `InitMonster` RNG draws and register the holding-cell monster. Returns
+/// the monster index (C++ `GetId()`), or `None` when no skeleton type is
+/// registered (`AddSkeleton` returns nullptr -> no draws at all).
+fn pre_spawn_skeleton(
+    game_state: &mut GameState,
+    level_types: &crate::game::monster::LevelMonsterTypes,
+) -> Option<usize> {
+    use crate::game::monstdat::MonsterId;
+    let skel: Vec<usize> = (0..level_types.count())
+        .filter(|&i| {
+            let entry = level_types.get(i).expect("in-range");
+            matches!(
+                entry.monster_type,
+                MonsterId::SkeletonAxeW
+                    | MonsterId::SkeletonAxeT
+                    | MonsterId::SkeletonAxeR
+                    | MonsterId::SkeletonAxeX
+                    | MonsterId::SkeletonBowW
+                    | MonsterId::SkeletonBowT
+                    | MonsterId::SkeletonBowR
+                    | MonsterId::SkeletonBowX
+                    | MonsterId::SkeletonSwordW
+                    | MonsterId::SkeletonSwordT
+                    | MonsterId::SkeletonSwordR
+                    | MonsterId::SkeletonSwordX
+            )
+        })
+        .collect();
+    if skel.is_empty() {
+        return None;
+    }
+    // C++ GetRandomSkeletonTypeIndex: GenerateRnd(typeCount).
+    let pick = crate::engine::random::gameplay_generate_rnd(skel.len() as i32) as usize;
+    let slot = skel[pick];
+    let entry = level_types.get(slot).expect("in-range");
+    // C++ AddMonster -> InitMonster draws (tick, frame, hp, rndItemSeed,
+    // aiSeed) on the gameplay RNG; `new_with_rng` performs them exactly.
+    let mut m = crate::game::monster::Monster::new_with_rng(
+        (game_state.monster_manager.active_count() + 1) as u32,
+        entry.monster_type,
+        0,
+        0,
+        game_state.current_dungeon_level,
+        &mut rand::rngs::StdRng::seed_from_u64(0),
+    );
+    m.level_type = slot as u8;
+    m.facing = crate::game::types::Direction::South;
+    m.enemy_position = crate::game::types::Point::new(0, 0);
+    m.ai_state = crate::game::monster::MonsterAIState::Idle;
+    m.mode = crate::game::monster::MonsterMode::Stand;
+    game_state.monster_manager.add_monster(m)
 }
 
 /// C++ `PlaceMonsters` (monster.cpp:3701-3756) single-player: place
@@ -1517,10 +1823,14 @@ pub fn prepare_dungeon_for_replay(game_state: &mut GameState, level: u8) -> bool
     // the draws are wiped by the re-seed below but the selection persists.
     crate::levels::themes::init_themes(game_state, &level_types);
     crate::engine::random::seed_gameplay_rng(seed);
+    // C++ HoldThemeRooms marks theme-room tiles Populated before InitObjects.
+    if let Some(layout) = game_state.dungeon_layout.as_mut() {
+        game_state.theme_manager.hold_theme_rooms(layout);
+    }
     // C++ InitGolems runs first in LoadGameLevelDungeon (diablo.cpp:3145).
     game_state.monster_manager.clear();
     init_golems(game_state);
-    place_dungeon_objects(game_state);
+    place_dungeon_objects(game_state, &level_types);
     game_state.init_doors_closed();
 
     // C++ InitLevels: light table + dLight = dPreLight + player light.
@@ -4563,6 +4873,85 @@ mod tests {
         assert!(descend_to_level(&mut gs2, 2).is_err());
     }
 
+    /// End-to-end L1 object-placement alignment: with the real Cathedral art
+    /// and the timedemo L1 seed (1545811660), `InitObjects` must reproduce the
+    /// C++ reference object list exactly (sarcs, doors/lights, barrels,
+    /// chests, and the wall trap) — including the AddSarcophagus/AddBarrel/
+    /// AddChest/SetupObject RNG draws and the HoldThemeRooms exclusion of
+    /// theme-room tiles. Skips gracefully when the local shareware MPQ is
+    /// absent.
+    #[test]
+    fn test_l1_object_placement_matches_reference() {
+        use crate::engine::dungeon::{DungeonLevelData, DungeonType};
+        use crate::engine::mpq::MpqArchive;
+        use crate::game::game_state::GameState;
+        use crate::game::player_exact::Player;
+
+        let seed = 1545811660u32;
+        let mpq_paths = [
+            format!("{}/spawn.mpq", env!("CARGO_MANIFEST_DIR")),
+            "spawn.mpq".to_string(),
+            "../spawn.mpq".to_string(),
+            "../../spawn.mpq".to_string(),
+        ];
+        let mut mpq = None;
+        for p in &mpq_paths {
+            if std::path::Path::new(p).exists() {
+                if let Ok(a) = MpqArchive::open(p) {
+                    mpq = Some(a);
+                    break;
+                }
+            }
+        }
+        let Some(mut mpq) = mpq else {
+            eprintln!("spawn.mpq unavailable; skipping L1 object-placement reference check");
+            return;
+        };
+        let art = DungeonLevelData::load_from_mpq(&mut mpq, DungeonType::Cathedral)
+            .expect("Cathedral art loads");
+
+        let player = Player::new();
+        let mut gs = GameState::new(player, true, seed as u64);
+        gs.dungeon_art[1] = Some(art.clone());
+        gs.dungeon_seeds[1] = seed;
+        let layout = crate::game::dungeon_level::generate_dungeon_layout(1, seed, &art)
+            .expect("L1 layout generates");
+        gs.dungeon_layout = Some(layout);
+        gs.current_dungeon_level = 1;
+        gs.player.position.x = 77;
+        gs.player.position.y = 46;
+
+        let level_types = crate::game::monster::get_level_m_types(1, true);
+        crate::levels::themes::init_themes(&mut gs, &level_types);
+        if let Some(l) = gs.dungeon_layout.as_mut() {
+            gs.theme_manager.hold_theme_rooms(l);
+        }
+        crate::engine::random::seed_gameplay_rng(seed);
+        gs.monster_manager.clear();
+        init_golems(&mut gs);
+        place_dungeon_objects(&mut gs, &level_types);
+
+        let got: Vec<(i32, i32, i32)> = gs
+            .objects
+            .iter()
+            .map(|o| (o.position.x, o.position.y, o.otype as i32))
+            .collect();
+        // C++ reference: `ObjectId` save values (L1Light=0, L1LDoor=1,
+        // L1RDoor=2, Chest1..3=5..7, Sarc=48, TrapL=53, Barrel=57,
+        // BarrelEx=58).
+        let expected: Vec<(i32, i32, i32)> = vec![
+            (48,71,48),(42,72,48),(81,62,48),(48,75,48),(83,62,48),(34,61,48),(25,56,48),(37,41,48),(86,84,48),(26,81,48),(61,48,48),
+            (42,33,1),(41,36,2),(56,46,0),(48,48,0),(54,50,0),(82,50,0),(76,58,0),(27,66,2),(46,72,0),(49,80,2),(54,80,0),(69,80,2),(30,81,1),(41,84,2),(25,86,2),
+            (23,55,58),(24,54,57),(23,54,57),(23,53,57),(38,31,57),(37,30,57),(36,31,57),(35,30,58),(34,29,57),(23,44,57),(23,42,57),(43,55,57),(44,56,58),(45,55,57),(46,55,57),
+            (84,81,5),(20,80,5),(37,68,5),(92,63,5),(76,76,5),(34,42,5),(18,78,5),(91,61,6),(44,78,6),(25,39,6),(77,60,7),(46,77,7),
+            (16,81,53),
+        ];
+        assert_eq!(got.len(), expected.len(), "object count: got={got:?}");
+        for (i, (e, g)) in expected.iter().zip(got.iter()).enumerate() {
+            assert_eq!(e, g, "object[{i}] mismatch");
+        }
+    }
+
     #[test]
     fn test_explored_resets_on_descend_and_accumulates_on_update() {
         use crate::engine::dungeon::{DungeonLevelData, DungeonType, MinData, PaletteData, SolData, TilData, TilEntry};
@@ -5421,6 +5810,7 @@ mod tests {
             pre_light: vec![15; 112 * 112],
             sol: Vec::new(),
             floor_tiles: Vec::new(),
+            populated: vec![false; 112 * 112],
         };
 
         // 地牢光照：环境全暗(15) + 玩家光晕（小半径，确保视口有明显暗区）。
@@ -5594,6 +5984,7 @@ mod tests {
                 pre_light: vec![15; w * h],
                 floor_tiles: Vec::new(),
                 sol: Vec::new(),
+                populated: vec![false; w * h],
             }
         }
         // L1 resolves the EntranceStairs TIL mega (index 12) from the art.
