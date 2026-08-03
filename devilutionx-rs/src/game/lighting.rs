@@ -1037,6 +1037,41 @@ impl LightManager {
         // (C++ DoUnVision clears the Visible|Lit flag bits).
     }
 
+    /// Clear the vision grid (C++ `InitLevels` clears dFlags; the timedemo
+    /// path re-marks the trigger neighbourhood before scatter placement).
+    pub fn clear_vision(&mut self) {
+        for row in &mut self.visible {
+            row.fill(false);
+        }
+    }
+
+    /// C++ `InitMonsters`' trigger DoVision (monster.cpp:3696-3704): mark the
+    /// tiles reachable from `position` with the real `TileAllowsLight` wall
+    /// blocking (`!SOLData[dPiece] & BlockLight`), so `CanPlaceMonster` can
+    /// reject the same visible tiles the C++ engine does.
+    pub fn mark_vision(
+        &mut self,
+        position: Point,
+        radius: u8,
+        layout: &crate::game::game_state::DungeonLayout,
+    ) {
+        let rays = Self::cast_vision_rays(
+            position,
+            radius,
+            |p| p.x >= 0 && p.x < 112 && p.y >= 0 && p.y < 112,
+            |p| {
+                // C++ TileAllowsLight (lighting.cpp:92-96): a tile allows the
+                // vision ray to continue when it does not block light.
+                let pn = layout.d_piece[p.y as usize * layout.width + p.x as usize] as usize;
+                let props = layout.sol.get(pn).copied().unwrap_or_default();
+                !props.contains(crate::engine::dungeon::TileProperties::BLOCK_LIGHT)
+            },
+        );
+        for tile in rays {
+            self.visible[tile.x as usize][tile.y as usize] = true;
+        }
+    }
+
     /// Apply vision to an area
     ///
     /// **C++ Reference**: `Source/lighting.cpp` - `DoVision()`

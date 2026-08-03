@@ -455,7 +455,30 @@ pub fn build_dungeon_layout(gen: &CathedralGenerator, level: &DungeonLevelData) 
 
     // Keep the level's SOL table with the layout so monster placement and
     // tile queries can use C++ `IsTileSolid` (SOLData[dPiece]) exactly.
-    layout.sol = level.sol.properties.clone();
+    let mut sol = level.sol.properties.clone();
+    // C++ `LoadLevelSOLData` (gendung.cpp:444-472) applies per-level SOL
+    // corrections after loading l1.sol; without them vision/light queries
+    // diverge (arched/wall tiles miss their BlockLight|BlockMissile bits).
+    {
+        use crate::engine::dungeon::TileProperties;
+        for idx in [9usize, 15, 16, 20, 21, 51, 56, 58, 61, 63, 65, 72, 208, 247, 253, 257, 323, 450] {
+            if let Some(p) = sol.get_mut(idx) {
+                *p |= TileProperties::BLOCK_LIGHT | TileProperties::BLOCK_MISSILE;
+            }
+        }
+        for idx in [27usize, 28] {
+            if let Some(p) = sol.get_mut(idx) {
+                *p |= TileProperties::BLOCK_MISSILE;
+            }
+        }
+        if let Some(p) = sol.get_mut(403) {
+            *p |= TileProperties::BLOCK_LIGHT;
+        }
+        if let Some(p) = sol.get_mut(24) {
+            *p |= TileProperties::BLOCK_LIGHT;
+        }
+    }
+    layout.sol = sol;
 
     layout
 }

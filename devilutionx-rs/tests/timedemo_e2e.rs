@@ -526,9 +526,12 @@ fn replay_prep_counts_match_cpp_algorithm() {
     eprintln!("[ReplayPrep] monsters={} objects={}", gs.monster_manager.active_count(), gs.objects.len());
     // Monster scatter/theme placement and the theme-room objects remain a
     // follow-up: the C++ spawn save has 118 initial monsters and 76 objects
-    // (54 InitObjects + 22 theme-room objects).
-    assert_eq!(gs.monster_manager.active_count(), 122, "4 golems + scatter + theme monsters (intermediate; C++ = 118)");
-    assert_eq!(gs.objects.len(), 104, "InitObjects + theme-room objects (intermediate; C++ = 76)");
+    // (54 InitObjects + 22 theme-room objects). The scatter roster is now
+    // byte-exact (95 monsters); the remaining gap is InitItems' RNG draws
+    // between InitMonsters and CreateThemeRooms, which shift the theme-room
+    // object/monster RNG stream.
+    assert_eq!(gs.monster_manager.active_count(), 114, "4 golems + 3 skeletons + 95 scatter + 12 theme monsters (intermediate; C++ = 118)");
+    assert_eq!(gs.objects.len(), 73, "54 InitObjects + 19 theme-room objects (intermediate; C++ = 76)");
 }
 
 /// Diagnostic: run the demo replay *from the saved state* (Tier 1

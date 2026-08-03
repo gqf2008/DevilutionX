@@ -1019,6 +1019,8 @@ fn can_place_monster(
     layout: &crate::game::game_state::DungeonLayout,
     occupied: &[(i32, i32)],
     spawn: (i32, i32),
+    visible: &[[bool; 112]; 112],
+    objects: &[crate::game::objects::Object],
 ) -> bool {
     if x < 0 || y < 0 || x >= layout.width as i32 || y >= layout.height as i32 {
         return false;
@@ -1027,6 +1029,10 @@ fn can_place_monster(
         return false;
     }
     if occupied.contains(&(x, y)) {
+        return false;
+    }
+    // C++ `CanPlaceMonster` -> `IsTileOccupied` -> `IsObjectAtPosition`.
+    if object_blocks_tile_slice(objects, x, y) {
         return false;
     }
     // C++ `CanPlaceMonster` -> `IsTileOccupied` -> `IsTileSolid`:
@@ -1044,6 +1050,12 @@ fn can_place_monster(
     // C++ `CanPlaceMonster` -> `TileContainsSetPiece`: theme-room tiles
     // (dFlags::Populated via HoldThemeRooms) are excluded.
     if layout.populated[y as usize * layout.width + x as usize] {
+        return false;
+    }
+    // C++ `CanPlaceMonster` -> `!IsTileVisible`: tiles marked visible by the
+    // InitMonsters trigger DoVision are excluded. The grid is indexed
+    // `[x][y]` (LightManager::visible, matching dFlags[x][y]).
+    if x >= 0 && x < 112 && y >= 0 && y < 112 && visible[x as usize][y as usize] {
         return false;
     }
     true
@@ -1064,6 +1076,8 @@ fn place_group_cpp(
     totalmonsters: usize,
     level: u8,
     spawn: (i32, i32),
+    visible: &[[bool; 112]; 112],
+    objects: &[crate::game::objects::Object],
 ) -> usize {
     use crate::game::monster::{Monster, MonsterAIState, MonsterMode};
     use crate::game::types::{Direction, Point};
@@ -1083,7 +1097,7 @@ fn place_group_cpp(
             let xp = crate::engine::random::gameplay_rnd(16, 95);
             let yp = crate::engine::random::gameplay_rnd(16, 95);
             let occupied: Vec<(i32, i32)> = monsters[base..].iter().map(|m| (m.x, m.y)).collect();
-            if can_place_monster(xp, yp, layout, &occupied, spawn) {
+            if can_place_monster(xp, yp, layout, &occupied, spawn, visible, objects) {
                 Some((xp, yp))
             } else {
                 None
@@ -1101,14 +1115,12 @@ fn place_group_cpp(
         }
         let mut j = 0usize;
         let mut try2 = 0usize;
+        // C++ PlaceGroup (monster.cpp:318-360) `for (try2...)`: the body runs
+        // at the *current* (xp, yp) — the first monster sits on the anchor —
+        // and the nudge draws (two GenerateRnd(8); the vanilla bug reuses
+        // deltaX for yp) happen in the for-update, which runs after *every*
+        // iteration including `continue`s.
         while j < num && try2 < 100 {
-            // Vanilla PlaceGroup nudges xp with one GenerateRnd(8) direction and
-            // yp with a *second* GenerateRnd(8) direction's deltaX (upstream
-            // bug kept for byte compatibility: monster.cpp:326-327).
-            let d1 = Direction::ALL[crate::engine::random::gameplay_rnd(0, 7) as usize];
-            let d2 = Direction::ALL[crate::engine::random::gameplay_rnd(0, 7) as usize];
-            xp += crate::game::monster::direction_dx(d1);
-            yp += crate::game::monster::direction_dx(d2);
             let region_ok = {
                 let w = layout.width as i32;
                 let a = layout
@@ -1122,29 +1134,36 @@ fn place_group_cpp(
                 a.is_some() && a == b
             };
             let occupied: Vec<(i32, i32)> = monsters[base..].iter().map(|m| (m.x, m.y)).collect();
-            if !can_place_monster(xp, yp, layout, &occupied, spawn) || !region_ok {
+            if can_place_monster(xp, yp, layout, &occupied, spawn, visible, objects) && region_ok {
+                // PlaceMonster: direction = GenerateRnd(8), then C++ InitMonster
+                // (the anim/HP/seed draws inside `new_with_rng`).
+                let rd = Direction::ALL[crate::engine::random::gameplay_rnd(0, 7) as usize];
+                let mut m = Monster::new_with_rng(
+                    (monsters.len() + 1) as u32,
+                    monster_type,
+                    xp,
+                    yp,
+                    level,
+                    &mut rand::rngs::StdRng::seed_from_u64(0),
+                );
+                m.facing = rd;
+                m.level_type = type_index as u8;
+                m.enemy_position = Point::new(spawn.0, spawn.1);
+                m.ai_state = MonsterAIState::Idle;
+                m.mode = MonsterMode::Stand;
+                monsters.push(m);
+                placed += 1;
+                j += 1;
+            } else {
                 try2 += 1;
-                continue;
             }
-            // PlaceMonster: direction = GenerateRnd(8), then C++ InitMonster
-            // (the anim/HP/seed draws inside `new_with_rng`).
-            let rd = Direction::ALL[crate::engine::random::gameplay_rnd(0, 7) as usize];
-            let mut m = Monster::new_with_rng(
-                (monsters.len() + 1) as u32,
-                monster_type,
-                xp,
-                yp,
-                level,
-                &mut rand::rngs::StdRng::seed_from_u64(0),
-            );
-            m.facing = rd;
-            m.level_type = type_index as u8;
-            m.enemy_position = Point::new(spawn.0, spawn.1);
-            m.ai_state = MonsterAIState::Idle;
-            m.mode = MonsterMode::Stand;
-            monsters.push(m);
-            placed += 1;
-            j += 1;
+            // for-update: vanilla PlaceGroup nudges xp with one GenerateRnd(8)
+            // direction and yp with a *second* GenerateRnd(8) direction's
+            // deltaX (upstream bug kept for byte compatibility).
+            let d1 = Direction::ALL[crate::engine::random::gameplay_rnd(0, 7) as usize];
+            let d2 = Direction::ALL[crate::engine::random::gameplay_rnd(0, 7) as usize];
+            xp += crate::game::monster::direction_dx(d1);
+            yp += crate::game::monster::direction_dx(d2);
         }
         if placed >= num {
             break;
@@ -1568,6 +1587,16 @@ fn is_tile_not_solid(layout: &crate::game::game_state::DungeonLayout, x: i32, y:
     !props.contains(crate::engine::dungeon::TileProperties::SOLID)
 }
 
+/// Slice-based variant of `object_blocks_tile` for the monster placement
+/// path (which borrows the object list separately from the game state).
+fn object_blocks_tile_slice(objects: &[crate::game::objects::Object], x: i32, y: i32) -> bool {
+    use crate::game::objdat::ObjectId;
+    if objects.iter().any(|o| o.position.x == x && o.position.y == y) {
+        return true;
+    }
+    objects.iter().any(|o| o.otype == ObjectId::Sarc && o.position.x == x && o.position.y == y + 1)
+}
+
 /// C++ `IsObjectAtPosition` / `FindObjectAtPosition`: a tile is occupied by
 /// an object anchor, or by a sarcophagus's large-object north marker
 /// (AddSarcophagus stores `dObject[x][y-1] = -(id+1)`).
@@ -1707,6 +1736,26 @@ fn place_dungeon_monsters(
     }
     let numplacemonsters = (na / 30).clamp(1, MAX_MONSTERS - 10);
 
+    // C++ InitMonsters (monster.cpp:3695-3703): mark a 4x4 block around every
+    // trigger visible (DoVision radius 15, MAP_EXP_NONE) so `CanPlaceMonster`
+    // excludes those tiles exactly like the C++ engine.
+    game_state.light_manager.clear_vision();
+    {
+        let layout = game_state.dungeon_layout.as_ref();
+        let nt = game_state.triggers.numtrigs;
+        for t in 0..nt {
+            let pos = game_state.triggers.trigs[t].position;
+            for s in -2..2i32 {
+                for tt in -2..2i32 {
+                    let p = crate::game::types::Point::new(pos.x + s, pos.y + tt);
+                    if let Some(l) = layout {
+                        game_state.light_manager.mark_vision(p, 15, l);
+                    }
+                }
+            }
+        }
+    }
+
     let mut monsters: Vec<crate::game::monster::Monster> = Vec::new();
     let mut used_types: std::collections::BTreeSet<&'static str> = Default::default();
     while monsters.len() < numplacemonsters {
@@ -1730,6 +1779,8 @@ fn place_dungeon_monsters(
             numplacemonsters,
             game_state.current_dungeon_level,
             (spawn_x, spawn_y),
+            &game_state.light_manager.visible,
+            &game_state.objects,
         );
         for m in &monsters[used..used + placed] {
             used_types.insert(m.monster_type.name());
@@ -1809,6 +1860,22 @@ pub fn prepare_dungeon_for_replay(game_state: &mut GameState, level: u8) -> bool
     game_state.in_dungeon = true;
     game_state.is_town = false;
     game_state.explored.fill(false);
+    game_state.triggers.init_no_triggers();
+    let d_piece: Vec<u16> = game_state
+        .dungeon_layout
+        .as_ref()
+        .map(|l| l.d_piece.clone())
+        .unwrap_or_default();
+    if !d_piece.is_empty() {
+        const N: usize = 112;
+        let mut grid = [[0u16; N]; N];
+        for y in 0..N {
+            for x in 0..N {
+                grid[x][y] = d_piece.get(y * N + x).copied().unwrap_or(0);
+            }
+        }
+        init_dungeon_triggers_grid(game_state, level, &grid);
+    }
 
     // C++ `LoadGameLevelStandardLevel` RNG flow (diablo.cpp:3310-3332):
     //   1. SetRndSeedForDungeonLevel()  -> GetLevelMTypes()  (scatter roster)
@@ -2099,6 +2166,20 @@ pub fn tick_move_target(
 /// Build the 2D dPiece grid the trigger scanners expect and run the C++
 /// `InitL*Triggers` scan for the current level, populating the stairs/warp
 /// triggers (C++ trigs.cpp:149+).
+fn init_dungeon_triggers_grid(
+    game_state: &mut GameState,
+    level: u8,
+    grid: &[[u16; 112]; 112],
+) {
+    match level {
+        1 => game_state.triggers.init_l1_triggers(grid),
+        2 => game_state.triggers.init_l2_triggers(grid, None),
+        3 => game_state.triggers.init_l3_triggers(grid),
+        4 => game_state.triggers.init_l4_triggers(grid, false),
+        _ => game_state.triggers.init_no_triggers(),
+    }
+}
+
 fn init_dungeon_triggers(
     game_state: &mut GameState,
     level: u8,
@@ -2111,13 +2192,7 @@ fn init_dungeon_triggers(
             grid[x][y] = layout.d_piece.get(y * N + x).copied().unwrap_or(0);
         }
     }
-    match level {
-        1 => game_state.triggers.init_l1_triggers(&grid),
-        2 => game_state.triggers.init_l2_triggers(&grid, None),
-        3 => game_state.triggers.init_l3_triggers(&grid),
-        4 => game_state.triggers.init_l4_triggers(&grid, false),
-        _ => game_state.triggers.init_no_triggers(),
-    }
+    init_dungeon_triggers_grid(game_state, level, &grid);
 }
 
 fn check_stairs_transition(game_state: &mut GameState) {
@@ -4792,6 +4867,7 @@ mod tests {
 
         crate::engine::random::seed_gameplay_rng(0xCAFE);
         let mut monsters = Vec::new();
+        let visible = [[false; 112]; 112];
         let placed = place_group_cpp(
             &mut monsters,
             type_index,
@@ -4803,6 +4879,8 @@ mod tests {
             // Spawn sits outside the 16..96 draw range so the first anchor
             // draw always succeeds.
             (0, 0),
+            &visible,
+            &[],
         );
         assert_eq!(placed, 3, "open floor places the whole group");
         assert_eq!(monsters.len(), 3);
@@ -4814,17 +4892,29 @@ mod tests {
         }
 
         // Replay the vanilla draw order on an independent generator: the
-        // first placed monster sits at the anchor (GenerateRnd(80)+16 x2)
-        // nudged by the two GenerateRnd(8) directions (xp += dx(d1),
-        // yp += dx(d2) — the vanilla yp-deltaX bug).
+        // C++ PlaceGroup body runs at the *current* (xp, yp) — so the first
+        // monster sits on the anchor (GenerateRnd(80)+16 x2) — and the two
+        // GenerateRnd(8) nudge draws (xp += dx(d1), yp += dx(d2) — the
+        // vanilla yp-deltaX bug) happen in the for-update for the *next*
+        // monster.
         crate::engine::random::seed_gameplay_rng(0xCAFE);
         let mut gen = DiabloGenerator::new(0xCAFE);
         let ax = gen.generate_rnd(80) + 16;
         let ay = gen.generate_rnd(80) + 16;
+        assert_eq!(monsters[0].x, ax, "first monster sits on the anchor");
+        assert_eq!(monsters[0].y, ay, "first monster sits on the anchor");
+        // Monster 0's PlaceMonster/InitMonster draws (ZombieN stand: rate=4,
+        // frames=11, hp 4..7) precede the first for-update nudge.
+        gen.generate_rnd(8);
+        gen.generate_rnd(4 - 1);
+        gen.generate_rnd(11 - 1);
+        gen.generate_rnd(7 - 4 + 1);
+        gen.advance_rnd_seed();
+        gen.advance_rnd_seed();
         let d1 = crate::game::types::Direction::ALL[gen.generate_rnd(8) as usize];
         let d2 = crate::game::types::Direction::ALL[gen.generate_rnd(8) as usize];
-        assert_eq!(monsters[0].x, ax + crate::game::monster::direction_dx(d1), "x = anchor + nudge");
-        assert_eq!(monsters[0].y, ay + crate::game::monster::direction_dx(d2), "y = anchor + nudge(deltaX)");
+        assert_eq!(monsters[1].x, ax + crate::game::monster::direction_dx(d1), "x = anchor + nudge");
+        assert_eq!(monsters[1].y, ay + crate::game::monster::direction_dx(d2), "y = anchor + nudge(deltaX)");
     }
 
 

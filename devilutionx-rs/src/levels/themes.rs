@@ -302,30 +302,39 @@ fn check_theme_obj3(
     region: i8,
     frequency: u32,
 ) -> bool {
-    let Some(layout) = &game_state.dungeon_layout else { return false };
-    if x < 0 || y < 0 || x >= layout.width as i32 || y >= layout.height as i32 {
-        return false;
-    }
-    if !is_tile_not_solid(game_state, x, y) {
-        return false;
-    }
-    if trans_val(game_state, x, y) != region {
-        return false;
-    }
-    if is_object_at(game_state, x, y) {
-        return false;
-    }
-    if frequency > 0 && crate::engine::random::gameplay_flip_coin(frequency as i32) {
-        return false;
+    // C++ CheckThemeObj3 (themes.cpp:177-199): a `Rectangle { origin, 1 }`
+    // is the radius-1 constructor -> the 3x3 area around `origin`; every
+    // tile must be in-bounds, non-solid, in-region, object-free, and pass
+    // the optional FlipCoin(frequency) draw (one draw per tile checked).
+    for dy in -1..=1i32 {
+        for dx in -1..=1i32 {
+            let (tx, ty) = (x + dx, y + dy);
+            if tx < 0 || ty < 0 || tx >= crate::levels::types::MAXDUNX as i32 || ty >= crate::levels::types::MAXDUNY as i32 {
+                return false;
+            }
+            if !is_tile_not_solid(game_state, tx, ty) {
+                return false;
+            }
+            if trans_val(game_state, tx, ty) != region {
+                return false;
+            }
+            if is_object_at(game_state, tx, ty) {
+                return false;
+            }
+            if frequency > 0 && crate::engine::random::gameplay_flip_coin(frequency as i32) {
+                return false;
+            }
+        }
     }
     true
 }
 
-/// C++ `CheckThemeObj5` (themes.cpp:98-113): a 2x2 object fits when all four
-/// tiles are non-solid and in the same region.
+/// C++ `CheckThemeObj5` (themes.cpp:98-113): a `Rectangle { origin, 2 }` is
+/// the radius-2 constructor -> the 5x5 area around `origin`; every tile must
+/// be non-solid and in the same region.
 fn check_theme_obj5(game_state: &crate::game::game_state::GameState, origin: (i32, i32), region: i8) -> bool {
-    for dy in 0..2i32 {
-        for dx in 0..2i32 {
+    for dy in -2..=2i32 {
+        for dx in -2..=2i32 {
             let (x, y) = (origin.0 + dx, origin.1 + dy);
             if !is_tile_not_solid(game_state, x, y) {
                 return false;
@@ -450,11 +459,21 @@ fn tfit_goat_shrine(game_state: &crate::game::game_state::GameState, level_types
     None
 }
 
-/// C++ `TFit_Obj3` (themes.cpp:158-172): scan for a 1x1 fit in the region.
+/// C++ `TFit_Obj3` (themes.cpp:158-172): scan for a fit in the region.
+/// Each candidate 3x3 area is tested with `objrnd[leveltype-1]` as the
+/// CheckThemeObj3 rejection frequency (L1=4, L2=4, L3=3, L4=5) — one
+/// FlipCoin draw per tile that passes the static checks.
 fn tfit_obj3(game_state: &crate::game::game_state::GameState, region: i8) -> Option<(i32, i32)> {
+    let level = game_state.current_dungeon_level;
+    let frequency = match level {
+        1 => 4u32,
+        2 => 4u32,
+        3 => 3u32,
+        _ => 5u32,
+    };
     for y in 1..(crate::levels::types::MAXDUNY as i32 - 1) {
         for x in 1..(crate::levels::types::MAXDUNX as i32 - 1) {
-            if check_theme_obj3(game_state, x, y, region, 0) {
+            if check_theme_obj3(game_state, x, y, region, frequency) {
                 return Some((x, y));
             }
         }
