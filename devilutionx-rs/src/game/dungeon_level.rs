@@ -394,7 +394,9 @@ pub fn build_dungeon_layout(gen: &CathedralGenerator, level: &DungeonLevelData) 
             // C++ DRLG_LPass3: `tileId = dungeon[i][j] - 1` — the Cathedral
             // Tile enum discriminants *are* 1-based L1 TIL mega indices, so
             // the logical tile maps straight into pMegaTiles (no remapping).
-            let tile = gen.dungeon[i][j];
+            // The generator stores the grid transposed (dungeon[row][col] here,
+            // dungeon[col][row] in C++), so read the transposed index.
+            let tile = gen.dungeon[j][i];
             let tile_id = tile as u8 as usize;
             if let Some((m1, m2, m3, m4)) = tile_id.checked_sub(1).and_then(|idx| mega_for_til_index(level, idx)) {
                 let b = yy * MAXDUNX + xx;

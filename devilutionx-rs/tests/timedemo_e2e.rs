@@ -462,11 +462,10 @@ fn loads_reference_save_into_game_state() {
 
 /// Determinism lock for the replay dungeon setup (issue #13): for the
 /// Timedemo L1 seed the C++-exact pipeline must place exactly 4 holding-cell
-/// golems (InitGolems) + 95 scatter monsters (na/30 with na=2868) and 38
-/// InitObjects (sarcophagi + 11 doors + 6 lava lights + barrels). The
+/// golems (InitGolems) + 95 scatter monsters (na/30 with na=2868) + theme-room
+/// monsters = 111, and 82 objects (InitObjects + CreateThemeRooms). The
 /// reference fixture reports 88 monsters / 76 objects because the demo replay
-/// kills monsters and destroys objects, and theme-room objects are added by
-/// CreateThemeRooms (a follow-up port).
+/// kills monsters and destroys objects.
 #[test]
 fn replay_prep_counts_match_cpp_algorithm() {
     use rand::SeedableRng;
@@ -494,13 +493,12 @@ fn replay_prep_counts_match_cpp_algorithm() {
         devilutionx_rs::game::game_loop::prepare_dungeon_for_replay(&mut gs, 1),
         "L1 level generation succeeds"
     );
-    // C++-exact L1 generator: na = 2868 non-solid micros -> 95 scatter, plus
-    // 4 holding-cell golems (99 total; the reference fixture's 88 reflect 11
-    // monsters killed during the demo replay). Objects: InitObjects places the
-    // sarcophagi + 11 doors + 6 lights + barrels; the reference's 76 includes
-    // theme-room objects and post-replay destruction, tracked separately.
-    assert_eq!(gs.monster_manager.active_count(), 99, "4 golems + 95 scatter (na/30, na=2868)");
-    assert_eq!(gs.objects.len(), 38, "InitObjects sarcophagi + doors + lights + barrels");
+    // C++-exact L1 generator: na = 2868 -> 95 scatter + 4 golems + the theme
+    // room monsters (PlaceThemeMonsts/skeletons) = 111 initial monsters. The
+    // reference fixture's 88 reflect monsters killed during the demo replay.
+    // Objects: InitObjects + theme-room objects = 82 (reference 76 post-replay).
+    assert_eq!(gs.monster_manager.active_count(), 111, "4 golems + 95 scatter + theme monsters");
+    assert_eq!(gs.objects.len(), 82, "InitObjects + theme-room objects");
 }
 
 /// Diagnostic: run the demo replay *from the saved state* (Tier 1

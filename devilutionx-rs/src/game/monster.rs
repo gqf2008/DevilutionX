@@ -821,7 +821,9 @@ pub fn get_level_m_types(level: u8, is_spawn: bool) -> LevelMonsterTypes {
         if typelist.is_empty() {
             break;
         }
-        let pick = crate::engine::random::gameplay_rnd(0, typelist.len() as i32 - 1) as usize;
+        // Raw GenerateRnd(nt): unlike gameplay_rnd(0, nt-1), this always
+        // advances the LCG even for nt == 1 (C++ GenerateRnd(1) draws).
+        let pick = crate::engine::random::gameplay_generate_rnd(typelist.len() as i32) as usize;
         let t = typelist[pick];
         typelist.swap_remove(pick);
         let idx = table.add(t, PLACE_SCATTER);
