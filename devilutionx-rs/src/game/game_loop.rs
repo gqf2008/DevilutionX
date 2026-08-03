@@ -1689,6 +1689,10 @@ fn pre_spawn_skeleton(
     m.enemy_position = crate::game::types::Point::new(0, 0);
     m.ai_state = crate::game::monster::MonsterAIState::Idle;
     m.mode = crate::game::monster::MonsterMode::Stand;
+    // C++ AddMonster (monster.cpp:496): every monster starts with
+    // MFLAG_NO_ENEMY; placed monsters clear it on activation, holding-cell
+    // skeletons keep it (the reference save stores 0x0400 for them).
+    m.flags = m.flags | crate::game::monster::MonsterFlags::NO_ENEMY;
     game_state.monster_manager.add_monster(m)
 }
 

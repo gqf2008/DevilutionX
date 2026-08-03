@@ -2780,9 +2780,16 @@ fn find_free_inv_cell(inv_grid: &[i8; 40], width: usize, height: usize) -> Optio
         // (BE i32), dCorpse, dObject, dLight (re-saved bugfix), dPreLight,
         // AutomapView, missile-occupancy.
         // dMonster: per-tile monster index+1 (C++ Monsters[abs(dMonster)-1]).
+        // C++ only writes entries for monsters that occupied a tile via
+        // Monster::occupyTile (placement/activation); holding-cell golems
+        // ((1,0), init_golems) and PreSpawnSkeleton skeletons ((0,0)) never
+        // occupy, so the reference grid has no entries there.
         let mut dmonster = vec![0i32; 112 * 112];
         for (slot, m) in self.monster_manager.iter() {
-            if m.is_alive() && m.x >= 0 && m.x < 112 && m.y >= 0 && m.y < 112 {
+            if !m.is_alive() || (m.x == 0 && m.y == 0) || (m.x == 1 && m.y == 0) {
+                continue;
+            }
+            if m.x >= 0 && m.x < 112 && m.y >= 0 && m.y < 112 {
                 dmonster[m.y as usize * 112 + m.x as usize] = slot as i32 + 1;
             }
         }
@@ -2799,6 +2806,14 @@ fn find_free_inv_cell(inv_grid: &[i8; 40], width: usize, height: usize) -> Optio
                 .unwrap_or(i as i32);
             if o.position.x >= 0 && o.position.x < 112 && o.position.y >= 0 && o.position.y < 112 {
                 dobject[o.position.y as usize * 112 + o.position.x as usize] = (slot + 1) as i8;
+            }
+            // C++ AddSarcophagus (objects.cpp:1197-1200) additionally marks the
+            // tile above the sarcophagus with the negative slot value
+            // (dObject[x][y-1] = -(id+1)).
+            if matches!(o.otype, crate::game::objdat::ObjectId::Sarc | crate::game::objdat::ObjectId::L5Sarc)
+                && o.position.y - 1 >= 0
+            {
+                dobject[(o.position.y - 1) as usize * 112 + o.position.x as usize] = -((slot + 1) as i8);
             }
         }
         let mut dungeon_only = Vec::new();

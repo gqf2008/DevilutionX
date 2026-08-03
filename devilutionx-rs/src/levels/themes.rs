@@ -304,28 +304,12 @@ fn add_object(game_state: &mut crate::game::game_state::GameState, level_types: 
     let mut obj = crate::game::objects::Object::new(otype, crate::game::types::Point::new(x, y));
     crate::game::objects::setup_object(&mut obj, crate::game::types::Point::new(x, y), otype);
     // C++ AddObject -> SetupObject (objects.cpp:679-708): animated objects
-    // consume GenerateRnd(animDelay) + GenerateRnd(animLen-1).
-    match otype {
-        ObjectId::SkFire => {
-            // objdat: animDelay=2, animLen=11
-            obj.anim_delay = 2;
-            obj.anim_len = 11;
-            obj.anim_cnt = gameplay_generate_rnd(2);
-            obj.anim_frame = gameplay_generate_rnd(10) + 1;
-        }
-        ObjectId::Candle2 | ObjectId::BookCandle => {
-            // objdat: animDelay=2, animLen=4
-            obj.anim_delay = 2;
-            obj.anim_len = 4;
-            obj.anim_cnt = gameplay_generate_rnd(2);
-            obj.anim_frame = gameplay_generate_rnd(3) + 1;
-        }
-        _ => {
-            obj.anim_delay = 1000;
-            obj.anim_cnt = 0;
-            obj.anim_len = 0;
-            obj.anim_frame = 0;
-        }
+    // consume GenerateRnd(animDelay) + GenerateRnd(animLen-1) for the counter
+    // and starting frame; `setup_object` already filled the objdat delay/len
+    // and the non-animated frame (animDelay), so only draw the animated ones.
+    if obj.anim_flag {
+        obj.anim_cnt = gameplay_generate_rnd(obj.anim_delay);
+        obj.anim_frame = gameplay_generate_rnd(obj.anim_len - 1) + 1;
     }
     // C++ AddObject body draws per object type.
     match otype {
@@ -353,6 +337,26 @@ fn add_object(game_state: &mut crate::game::game_state::GameState, level_types: 
             }
         }
         _ => {}
+    }
+    // C++ AddObject ends with AddObjectLight (objects.cpp:4131): light-casting
+    // objects store _oVar1 = -1.
+    if matches!(
+        otype,
+        ObjectId::L1Light
+            | ObjectId::SkFire
+            | ObjectId::Candle1
+            | ObjectId::Candle2
+            | ObjectId::BookCandle
+            | ObjectId::BCross
+            | ObjectId::TBCross
+            | ObjectId::TorchL
+            | ObjectId::TorchR
+            | ObjectId::TorchL2
+            | ObjectId::TorchR2
+            | ObjectId::StoryCandle
+            | ObjectId::L5Candle
+    ) {
+        obj.ovar1 = -1;
     }
     game_state.objects.push(obj);
 }
@@ -389,6 +393,9 @@ fn spawn_holding_skeleton(
     m.level_type = type_index as u8;
     m.ai_state = crate::game::monster::MonsterAIState::Idle;
     m.mode = crate::game::monster::MonsterMode::Stand;
+    // C++ AddMonster (monster.cpp:496): holding-cell monsters keep
+    // MFLAG_NO_ENEMY (cleared only when the skeleton is activated).
+    m.flags = m.flags | crate::game::monster::MonsterFlags::NO_ENEMY;
     game_state.monster_manager.add_monster(m)
 }
 
