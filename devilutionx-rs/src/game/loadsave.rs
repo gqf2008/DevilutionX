@@ -2184,10 +2184,19 @@ pub fn write_dungeon_body(
     for o in objects {
         o.to_binary(helper);
     }
-    // Lights: count (BE i32) + ids (LE u8) + SaveLighting bodies.
+    // Lights: count (BE i32) + the full ActiveLights array (MAXLIGHTS=32,
+    // loadsave.cpp:2837) + one SaveLighting body per active light. Empty
+    // slots keep the sequential slot ids (C++ ActiveLights is slot-ordered).
+    const MAX_LIGHTS_FOR_SAVE: usize = 32;
     helper.write_be_i32(lights.len() as i32);
+    let mut light_slot = 0usize;
     for (id, _) in lights {
         helper.write_u8(*id);
+        light_slot += 1;
+    }
+    while light_slot < MAX_LIGHTS_FOR_SAVE {
+        helper.write_u8(light_slot as u8);
+        light_slot += 1;
     }
     for (_, l) in lights {
         l.to_binary(helper, false);
@@ -2831,8 +2840,9 @@ pub fn load_player_from_game(helper: &mut LoadHelper, player: &mut crate::game::
 ///   16 quests (44B each) + 4 portals (24B each) + kill counts (800B) +
 ///   dungeon body (active monsters/missiles/objects + dropped items) +
 ///   128 unique flags + dLight/dFlags/dPlayer grids (112×112 each) +
-///   dungeon-only grids (dMonster/dCorpse/dPreLight/AutomapView/missile
-///   grid) + premium items + trailing misc.
+///   dropped-item locations + dungeon-only grids (dMonster/dCorpse/dObject/
+///   dLight/dPreLight/AutomapView/missile grid) + premium items + trailing
+///   misc.
 ///
 /// The Rust engine does not yet map monster/missile/object/dropped-item
 /// state into the C++ packs, so callers pass those blobs in (`dungeon_body`,
@@ -2852,6 +2862,7 @@ pub fn write_game_data_v3(
     dlight: &[u8],
     dflags: &[u8],
     dplayer: &[u8],
+    dropped_locations: &[u8],
     dungeon_only_grids: &[u8],
     premium: &[u8],
     misc: &[u8],
@@ -2879,6 +2890,9 @@ pub fn write_game_data_v3(
     write_grid_u8(&mut h, dlight);
     write_grid_u8(&mut h, dflags);
     write_grid_u8(&mut h, dplayer);
+    // C++ SaveDroppedItemLocations (loadsave.cpp:2909-2914): one u8 per tile
+    // with the 1-based save position of the item there (0 = empty).
+    h.write_bytes(dropped_locations);
     h.write_bytes(dungeon_only_grids);
     h.write_bytes(premium);
     h.write_bytes(misc);

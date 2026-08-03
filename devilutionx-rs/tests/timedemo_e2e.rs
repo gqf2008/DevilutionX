@@ -775,15 +775,15 @@ fn write_game_data_v3_section_order_and_offsets() {
 
     let out = write_game_data_v3(
         &header, &seeds, &player, &quests, (0, 0, 0, 0), &portals, &kill,
-        &dungeon_body, &dropped, &flags, &grid, &grid, &grid, &dungeon_only,
-        &premium, &misc,
+        &dungeon_body, &dropped, &flags, &grid, &grid, &grid, &grid,
+        &dungeon_only, &premium, &misc,
     );
     let base = 43 + 17 * 8 + 1266 + 16 * 44 + 4 * 24 + 800;
     let expected = base
         + dungeon_body.len()
         + dropped.len()
         + 128
-        + 3 * (112 * 112)
+        + 4 * (112 * 112)
         + dungeon_only.len()
         + premium.len()
         + misc.len();

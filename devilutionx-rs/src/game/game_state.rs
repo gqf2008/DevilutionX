@@ -269,6 +269,15 @@ pub struct GameState {
     /// Objects in the level
     pub objects: Vec<Object>,
 
+    /// Loaded C++ `ActiveObjects`/`AvailableObjects` pool arrays (127+127
+    /// bytes) for round-tripping a save's object pool (loadsave.cpp:2829).
+    pub saved_object_ids: Option<Vec<u8>>,
+
+    /// Loaded C++ game-entry tail (premium items + AutomapActive + scale,
+    /// loadsave.cpp:2915-2921) for round-tripping saves whose premium items
+    /// the engine does not simulate.
+    pub saved_tail: Option<Vec<u8>>,
+
     /// Dungeon Map
     pub dungeon: DungeonMap,
 
@@ -592,6 +601,8 @@ impl GameState {
             ground_items: Vec::new(),
             item_manager: ItemManager::new(127), // Max 127 items
             objects: Vec::new(),
+            saved_object_ids: None,
+            saved_tail: None,
             dungeon,
             logic_step: GameLogicStep::None,
             game_tick: 0,
@@ -1093,6 +1104,19 @@ impl GameState {
                 self.quests.return_level = be_i32(last + 32);
                 self.quests.return_level_type =
                     unsafe { std::mem::transmute(be_i32(last + 36) as i8) };
+            }
+            // Object pool: ActiveObjects + AvailableObjects (127+127) after
+            // the monster bodies and missile arrays (loadsave.cpp:2829-2830).
+            let amc = header.active_monster_count as usize;
+            let obj_ids_off = 23459 + 200 * 4 + amc * 216 + 250;
+            if entry.len() >= obj_ids_off + 254 {
+                self.saved_object_ids = Some(entry[obj_ids_off..obj_ids_off + 254].to_vec());
+            }
+            // Classic (non-Hellfire) game tail: PremiumItemCount/Level (BE
+            // i32 each) + 6 SaveItems + AutomapActive + AutoMapScale.
+            const CLASSIC_TAIL_LEN: usize = 4 + 4 + 6 * 368 + 1 + 4;
+            if entry.len() >= CLASSIC_TAIL_LEN {
+                self.saved_tail = Some(entry[entry.len() - CLASSIC_TAIL_LEN..].to_vec());
             }
         }
         // Game state: spawn flag (C++ gbIsSpawn from the save magic) + level
@@ -2615,6 +2639,15 @@ fn find_free_inv_cell(inv_grid: &[i8; 40], width: usize, height: usize) -> Optio
         };
         let monster_level = params.first().map(|p| p.level).unwrap_or(1);
 
+        // Object pool ids: round-trip the loaded C++ ActiveObjects/
+        // AvailableObjects arrays; fresh levels fall back to sequential slots.
+        let (object_active_ids, object_available_ids) = match &self.saved_object_ids {
+            Some(bytes) if bytes.len() == 254 => (
+                bytes[..127].iter().map(|&v| v as i8).collect::<Vec<i8>>(),
+                bytes[127..].iter().map(|&v| v as i8).collect::<Vec<i8>>(),
+            ),
+            _ => ((0..self.objects.len() as i8).collect::<Vec<i8>>(), Vec::new()),
+        };
         let mut body = SaveHelper::new(32 * 1024);
         loadsave::write_dungeon_body(
             &mut body,
@@ -2625,8 +2658,8 @@ fn find_free_inv_cell(inv_grid: &[i8; 40], width: usize, height: usize) -> Optio
             0,
             0,
             &missiles,
-            &(0..self.objects.len() as i8).collect::<Vec<i8>>(),
-            &Vec::new(),
+            &object_active_ids,
+            &object_available_ids,
             &objects,
             &lights,
             &vision,
@@ -2675,9 +2708,17 @@ fn find_free_inv_cell(inv_grid: &[i8; 40], width: usize, height: usize) -> Optio
             .map(|&b| if b { 1 << 7 } else { 0 })
             .collect();
         let zero_grid = vec![0u8; 112 * 112];
-        // Dungeon-only grids: dMonster/dCorpse are zeros (no per-tile monster
-        // or corpse grid in the engine), dPreLight comes from the generated
-        // layout, AutomapView and the missile-occupancy grid are zeros.
+        // Dropped-item locations grid (C++ SaveDroppedItemLocations): one u8
+        // per tile, 1-based position in the dropped-item list (0 = empty).
+        let mut dropped_locations = vec![0u8; 112 * 112];
+        for (i, gi) in self.ground_items.iter().enumerate() {
+            if gi.x >= 0 && gi.x < 112 && gi.y >= 0 && gi.y < 112 {
+                dropped_locations[gi.y as usize * 112 + gi.x as usize] = (i + 1) as u8;
+            }
+        }
+        // Dungeon-only grids in C++ order (loadsave.cpp:2888-2907): dMonster
+        // (BE i32), dCorpse, dObject, dLight (re-saved bugfix), dPreLight,
+        // AutomapView, missile-occupancy.
         // dMonster: per-tile monster index+1 (C++ Monsters[abs(dMonster)-1]).
         let mut dmonster = vec![0i32; 112 * 112];
         for (slot, m) in self.monster_manager.iter() {
@@ -2685,17 +2726,30 @@ fn find_free_inv_cell(inv_grid: &[i8; 40], width: usize, height: usize) -> Optio
                 dmonster[m.y as usize * 112 + m.x as usize] = slot as i32 + 1;
             }
         }
+        // dObject: per-tile object index+1 (C++ Objects[abs(dObject)-1]).
+        let mut dobject = vec![0i8; 112 * 112];
+        for (i, o) in self.objects.iter().enumerate() {
+            if o.position.x >= 0 && o.position.x < 112 && o.position.y >= 0 && o.position.y < 112 {
+                dobject[o.position.y as usize * 112 + o.position.x as usize] = (i + 1) as i8;
+            }
+        }
         let mut dungeon_only = Vec::new();
         for &v in &dmonster {
             dungeon_only.extend_from_slice(&v.to_be_bytes()); // dMonster (BE i32)
         }
         dungeon_only.extend_from_slice(&self.dcorpse.iter().map(|&v| v as u8).collect::<Vec<u8>>()); // dCorpse
+        dungeon_only.extend_from_slice(&dobject.iter().map(|&v| v as u8).collect::<Vec<u8>>()); // dObject
+        dungeon_only.extend_from_slice(&dlight); // dLight (re-saved for vanilla)
         match &self.dungeon_layout {
             Some(layout) => dungeon_only.extend_from_slice(&layout.pre_light),
             None => dungeon_only.extend(std::iter::repeat(0u8).take(112 * 112)),
         }
         dungeon_only.extend(std::iter::repeat(0u8).take(40 * 40)); // AutomapView
         dungeon_only.extend(std::iter::repeat(0u8).take(112 * 112)); // missile occupancy
+        // Premium items + automap state (C++ tail): round-trip the loaded
+        // bytes (PremiumItemCount/Level + 6 SaveItems + AutomapActive +
+        // AutoMapScale); fresh games write the zeroed section.
+        let premium = self.saved_tail.clone().unwrap_or_default();
         let return_state = (
             self.quests.return_lvl_position.0,
             self.quests.return_lvl_position.1,
@@ -2705,7 +2759,7 @@ fn find_free_inv_cell(inv_grid: &[i8; 40], width: usize, height: usize) -> Optio
         loadsave::write_game_data_v3(
             &header, &seeds, &player_pack, &quests, return_state, &portals, &kill,
             &dungeon_body, &dropped_items, &self.unique_flags, &dlight, &dflags, &zero_grid,
-            &dungeon_only, &[], &[],
+            &dropped_locations, &dungeon_only, &premium, &[],
         )
     }
 
