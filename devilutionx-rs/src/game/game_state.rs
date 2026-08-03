@@ -1440,10 +1440,14 @@ impl GameState {
             self.player_walk_path.remove(0);
             self.player.position.x = nx;
             self.player.position.y = ny;
-            self.camera.tile_x = self.player.position.x;
-            self.camera.tile_y = self.player.position.y;
-            self.camera.sub_x = 0;
-            self.camera.sub_y = 0;
+            // C++ DoWalk (player.cpp:403-442) updates position.tile on a tile
+            // crossing but does NOT touch ViewPosition - it stays at the
+            // level-entry value (InitMultiView/FixPlayerLocation) until a level
+            // transition/teleport. The renderer has its own ScrollState camera,
+            // so gs.camera is used only for click mapping + the save's
+            // ViewPosition, and both must reflect the level-entry value, not the
+            // player tile. Do NOT snap gs.camera to the player here (issue #17:
+            // per-step camera snap was the eastward-drift root cause).
         }
         self.player.position
     }
@@ -1487,11 +1491,11 @@ impl GameState {
         self.logic_step = GameLogicStep::ProcessPlayers;
         self.process_player_internal(rng);
 
-        // Stair/level-transition check (C++ CheckTriggers runs in the game
-        // loop after movement). The headless replay needs this so the player
-        // descends when it reaches a stair (issue #17 multi-level replay).
-        // Cooldown-gated and Err-tolerant inside check_stairs_transition.
-        crate::game::game_loop::check_stairs_transition(self);
+        // NOTE: stair/level-transition detection is NOT called here for now.
+        // Wiring check_stairs_transition into gs.update mis-fires a return-to-town
+        // because the replay route (still diverging from C++) passes the L1
+        // up-stair at (76,44). Re-enable once the walk route matches C++ closely
+        // enough that the player only reaches a stair when C++ does (issue #17).
 
         // Process monsters (C++ line 1520)
         if !self.is_town {
@@ -2941,8 +2945,8 @@ fn find_free_inv_cell(inv_grid: &[i8; 40], width: usize, height: usize) -> Optio
                     _ => 1,
                 }
             },
-            view_position_x: self.player.position.x,
-            view_position_y: self.player.position.y,
+            view_position_x: self.camera.tile_x,
+            view_position_y: self.camera.tile_y,
             invflag: false,
             char_flag: false,
             active_monster_count: self.monster_manager.active_count() as i32,
