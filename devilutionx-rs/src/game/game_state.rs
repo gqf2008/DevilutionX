@@ -1493,9 +1493,21 @@ impl GameState {
             // Rust renderer redraws every frame, so accumulate the tiles the
             // player's vision rays reach (same wall-blocking algorithm as the
             // renderer) and keep their stale light when they leave view.
-            if let (Some(layout), Some(level)) = (&self.dungeon_layout, &self.dungeon_level_data) {
+            if let Some(layout) = &self.dungeon_layout {
+                // Use the loaded art SOL when present, else the layout's
+                // (headless replay has no dungeon_level_data) so vision
+                // reaches monsters and wakes them (C++ DoVision).
+                let fallback_sol;
+                let sol = match &self.dungeon_level_data {
+                    Some(level) => &level.sol,
+                    None => {
+                        fallback_sol = crate::engine::dungeon::SolData {
+                            properties: layout.sol.clone(),
+                        };
+                        &fallback_sol
+                    }
+                };
                 let origin = crate::game::types::Point::new(self.player.position.x, self.player.position.y);
-                let sol = &level.sol;
                 let visible = crate::game::lighting::LightManager::cast_vision_rays(
                     origin,
                     self.player._p_light_rad as u8,
